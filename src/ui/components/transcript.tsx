@@ -1,8 +1,21 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { theme, BANNER } from "../theme.ts";
 import { GLORP_VERSION, GLORP_CODENAME } from "../../shared/version.ts";
 import type { ChatTurn } from "../../shared/events.ts";
 import { MessageRow, StreamingRow } from "./message.tsx";
+
+interface Props {
+  turns: ChatTurn[];
+  streamingText: string;
+  width: number;
+  height: number;
+  workspace: string;
+  busy: boolean;
+  activeSubagents: string[];
+  compacting: boolean;
+}
+
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 export function Transcript({
   turns,
@@ -10,26 +23,53 @@ export function Transcript({
   width,
   height,
   workspace,
-}: {
-  turns: ChatTurn[];
-  streamingText: string;
-  width: number;
-  height: number;
-  workspace: string;
-}) {
-  const scrollboxRef = useRef<any>(null);
-  // Auto-scroll to bottom whenever turns or streaming text change.
+  busy,
+  activeSubagents,
+  compacting,
+}: Props) {
+  // Cast loosely because the OpenTUI scrollbox ref shape is renderable-
+  // specific and we only touch `scrollTo` / `scrollHeight`.
+  const scrollboxRef = useRef<{
+    scrollTo?: (p: number | { x: number; y: number }) => void;
+    scrollHeight?: number;
+    scrollTop?: number;
+  } | null>(null);
+
+  // OpenTUI's ScrollBox doesn't expose `scrollToBottom()` — we set
+  // `scrollTop = scrollHeight` (the renderable clamps if it overshoots)
+  // or fall back to `scrollTo({ y: scrollHeight })`. The effect fires on
+  // any change that could grow the content: new turns, new streaming
+  // chars, finished tool calls (turns are mutated in place), and even
+  // height changes (so a resize re-pins to bottom).
   useEffect(() => {
     const sb = scrollboxRef.current;
-    if (sb && typeof sb.scrollToBottom === "function") {
-      sb.scrollToBottom();
+    if (!sb) return;
+    const target = (sb.scrollHeight ?? 100_000) + 1000;
+    try {
+      if (typeof sb.scrollTo === "function") {
+        sb.scrollTo({ x: 0, y: target });
+      } else if (typeof sb.scrollTop === "number") {
+        sb.scrollTop = target;
+      }
+    } catch {
+      /* tolerant of API drift */
     }
-  }, [turns.length, streamingText, height]);
+  }, [turns, streamingText, busy, height, activeSubagents.length, compacting]);
 
+  // Animated spinner used by the "thinking" row. Lives at this level so
+  // it only ticks when the row is visible.
+  const [spinnerFrame, setSpinnerFrame] = useState(0);
+  useEffect(() => {
+    if (!busy && !compacting) return;
+    const t = setInterval(() => setSpinnerFrame((f) => (f + 1) % SPINNER_FRAMES.length), 90);
+    return () => clearInterval(t);
+  }, [busy, compacting]);
+
+  const showThinking = busy && !streamingText; // streaming row covers the busy state itself
   const empty = turns.length === 0;
   return (
     <scrollbox
-      ref={scrollboxRef}
+      ref={scrollboxRef as React.MutableRefObject<any>}
       width={width}
       height={height}
       focused={false}
@@ -59,8 +99,7 @@ export function Transcript({
               <span fg={theme.accent}>glorp</span> — your friendly extraterrestrial coding pal.
             </text>
             <text fg={theme.textMuted}>
-              type a request, or try{" "}
-              <span fg={theme.accent}>/help</span>,{" "}
+              type a request, or try <span fg={theme.accent}>/help</span>,{" "}
               <span fg={theme.accent}>/plan</span>, or{" "}
               <span fg={theme.accent}>@researcher</span> &lt;question&gt;.
             </text>
@@ -71,7 +110,43 @@ export function Transcript({
           <MessageRow key={t.id} turn={t} />
         ))}
         {streamingText && <StreamingRow text={streamingText} />}
+        {showThinking && (
+          <ThinkingRow
+            frame={SPINNER_FRAMES[spinnerFrame]!}
+            activeSubagents={activeSubagents}
+            compacting={compacting}
+          />
+        )}
       </box>
     </scrollbox>
+  );
+}
+
+function ThinkingRow({
+  frame,
+  activeSubagents,
+  compacting,
+}: {
+  frame: string;
+  activeSubagents: string[];
+  compacting: boolean;
+}) {
+  const label = compacting
+    ? "compacting context…"
+    : activeSubagents.length > 0
+      ? `${activeSubagents.map((n) => `@${n}`).join(", ")} working…`
+      : "glorp is thinking…";
+  return (
+    <box flexDirection="row" marginBottom={1}>
+      <box width={6} marginRight={1}>
+        <text fg={theme.warning}>
+          <strong>{frame}</strong>
+        </text>
+      </box>
+      <box flexDirection="column" flexGrow={1}>
+        <text fg={theme.warning}>{label}</text>
+        <text fg={theme.textDim}>press ctrl-c to interrupt · esc also aborts</text>
+      </box>
+    </box>
   );
 }

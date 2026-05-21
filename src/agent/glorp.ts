@@ -41,6 +41,14 @@ import { CredentialsStore } from "./credentials.ts";
 import * as path from "node:path";
 import * as os from "node:os";
 
+/** Extension catalogue the input bar uses to drive autocomplete + hints. */
+export interface ExtensionCatalogue {
+  /** `/name description` entries — hooks + user-invokable skills. */
+  slash: Array<{ name: string; description: string }>;
+  /** `@name description` entries — registered subagents. */
+  mentions: Array<{ name: string; description: string }>;
+}
+
 export interface GlorpHandle {
   agent: IGloveRunnable;
   fleet: GlorpFleet;
@@ -50,6 +58,8 @@ export interface GlorpHandle {
   sessionId: string;
   /** Human-readable label for the active model (e.g. "anthropic · sonnet"). */
   modelLabel: string;
+  /** Slash commands + @subagents the UI should hint when the user types `/` or `@`. */
+  extensions: ExtensionCatalogue;
   send(text: string): Promise<void>;
   abort(): void;
   shutdown(): Promise<void>;
@@ -87,6 +97,19 @@ export interface BuildGlorpOptions {
 }
 
 const CONTEXT_LIMIT = 180_000;
+
+/**
+ * Human-readable descriptions for the hooks we register. Used by the
+ * autocomplete menu so a user typing `/com` sees "force a context
+ * compaction now" next to the suggestion.
+ */
+const HOOK_DESCRIPTIONS: Record<string, string> = {
+  plan: "switch to plan-first mode for this turn",
+  diff: "list files changed since last user message",
+  compact: "force a context compaction now",
+  clear: "compact and reset the working slate",
+  transmissions: "ask about the homeworld-comms panel",
+};
 
 /**
  * Convert a raw `Tool<I>` (from glove-core's factory exports — `createTaskTool`,
@@ -522,12 +545,62 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   void refreshTasks();
   void refreshInbox();
 
+  // Build the extension catalogue the input bar's autocomplete uses.
+  // Glove stores `hooks` / `skills` / `subAgents` as private Maps on the
+  // built Glove instance; we read them defensively and fall back to the
+  // hardcoded names we know we registered above.
+  const builtAgent = agent as unknown as {
+    hooks?: Map<string, unknown>;
+    skills?: Map<string, { description?: string; exposeToAgent?: boolean }>;
+    subAgents?: Map<string, { description?: string }>;
+  };
+  const hookNames = builtAgent.hooks ? Array.from(builtAgent.hooks.keys()) : [
+    "compact",
+    "plan",
+    "diff",
+    "clear",
+    "transmissions",
+  ];
+  const skillEntries = builtAgent.skills
+    ? Array.from(builtAgent.skills.entries())
+    : [["concise", { description: "Trim verbosity for this exchange" }] as const];
+  const subAgentEntries = builtAgent.subAgents
+    ? Array.from(builtAgent.subAgents.entries())
+    : ([
+        ["planner", { description: "design an approach without writing code" }],
+        ["researcher", { description: "investigate the codebase or web" }],
+        ["reviewer", { description: "review a recent change for issues" }],
+      ] as const);
+
+  const slashHints: Array<{ name: string; description: string }> = [
+    ...hookNames.map((name) => ({
+      name: `/${name}`,
+      description: HOOK_DESCRIPTIONS[name] ?? "hook",
+    })),
+    ...skillEntries
+      .filter(([, s]) => (s as { exposeToAgent?: boolean })?.exposeToAgent !== false)
+      .map(([name, s]) => ({
+        name: `/${name}`,
+        description: (s as { description?: string })?.description ?? "skill",
+      })),
+    { name: "/help", description: "show commands" },
+    { name: "/quit", description: "exit glorp" },
+  ];
+  const mentionHints = subAgentEntries.map(([name, s]) => ({
+    name: `@${name}`,
+    description: (s as { description?: string })?.description ?? "subagent",
+  }));
+
   return {
     agent,
     fleet,
     store,
     credentials,
     sessionId: opts.sessionId,
+    extensions: {
+      slash: slashHints,
+      mentions: mentionHints,
+    },
     get modelLabel() {
       return modelLabel;
     },
