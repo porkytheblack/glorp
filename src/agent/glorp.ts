@@ -38,6 +38,9 @@ import type { TaskItem, InboxEntry, ToolEvent, ChatTurn } from "../shared/events
 import type { GlorpFleet } from "./station-bridge.ts";
 import { createFleet } from "./station-bridge.ts";
 import { CredentialsStore } from "./credentials.ts";
+import { discoverExtensions } from "./extensions-loader.ts";
+import type { LoadedSkill, LoadedSubagent } from "./extensions-loader.ts";
+import { MemoryStore as ShimMemoryStore } from "./memory-store-shim.ts";
 import * as path from "node:path";
 import * as os from "node:os";
 
@@ -110,6 +113,62 @@ const HOOK_DESCRIPTIONS: Record<string, string> = {
   clear: "compact and reset the working slate",
   transmissions: "ask about the homeworld-comms panel",
 };
+
+/**
+ * Build a DefineSubAgentArgs from a disk-loaded subagent file. The
+ * body becomes the system prompt; the front-matter `tools:` field
+ * narrows the tool set (default: read/grep/glob/ls/web_fetch — read-
+ * only, like the built-in planner). Inherits the parent's model and
+ * displayManager.
+ */
+function makeDiskSubAgent(sub: LoadedSubagent, workspace: string) {
+  // Tools the subagent can use. Read-only defaults for safety; the
+  // user opts into mutation by listing tools explicitly in front-matter.
+  const ALL_TOOLS = {
+    read: () => readTool(workspace),
+    write: () => writeTool(workspace),
+    edit: () => editTool(workspace),
+    bash: () => bashTool(workspace),
+    glob: () => globTool(workspace),
+    grep: () => grepTool(workspace),
+    ls: () => lsTool(workspace),
+    web_fetch: () => webFetchTool,
+  } as const;
+  const DEFAULT_TOOLS = ["read", "grep", "glob", "ls", "web_fetch"] as const;
+  const requested =
+    sub.toolAllowlist && sub.toolAllowlist.length > 0
+      ? sub.toolAllowlist
+      : (DEFAULT_TOOLS as readonly string[]);
+
+  return {
+    name: sub.name,
+    description: sub.description,
+    factory: async ({ parentStore, parentControls }: {
+      parentStore: import("glove-core/core").StoreAdapter;
+      parentControls: { glove: { model: ModelAdapter }; displayManager: import("glove-core/display-manager").DisplayManagerAdapter };
+    }) => {
+      const subStore =
+        (await parentStore.createSubAgentStore?.(sub.name, false)) ??
+        new ShimMemoryStore(`${sub.name}_${Date.now()}`);
+      const child = new Glove({
+        store: subStore,
+        model: parentControls.glove.model,
+        displayManager: parentControls.displayManager,
+        serverMode: true,
+        systemPrompt: sub.systemPrompt,
+        compaction_config: {
+          compaction_instructions: "Summarise progress on the assigned task; drop chatter.",
+          max_turns: 12,
+        },
+      });
+      for (const toolName of requested) {
+        const factory = (ALL_TOOLS as Record<string, undefined | (() => GloveFoldArgs<any>)>)[toolName];
+        if (factory) child.fold(factory());
+      }
+      return child.build();
+    },
+  };
+}
 
 /**
  * Convert a raw `Tool<I>` (from glove-core's factory exports — `createTaskTool`,
@@ -493,6 +552,38 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     exposeToAgent: true,
     handler: async () => "Be terse. Two-sentence answers. No idioms.",
   });
+
+  // Disk-loaded extensions (skills + user subagents). Discovery scans
+  // <workspace>/.claude, <workspace>/.agents, ~/.claude, ~/.agents in
+  // priority order; first-name-wins so workspace overrides home and
+  // .claude overrides .agents.
+  const diskExtensions = discoverExtensions(opts.workspace);
+  if (process.env.GLORP_DEBUG) {
+    console.error(
+      `[boot] disk extensions: ${diskExtensions.skills.length} skills, ` +
+        `${diskExtensions.subagents.length} subagents` +
+        (diskExtensions.shadowedSkills.length || diskExtensions.shadowedSubagents.length
+          ? ` (${diskExtensions.shadowedSkills.length + diskExtensions.shadowedSubagents.length} shadowed)`
+          : ""),
+    );
+  }
+
+  for (const skill of diskExtensions.skills) {
+    const refsHint = skill.referencePaths.length
+      ? `\n\n---\nReference files in this skill (use the \`read\` tool):\n${skill.referencePaths.map((p) => `  ${p}`).join("\n")}`
+      : "";
+    const payload = `${skill.body}${refsHint}`;
+    builder.defineSkill({
+      name: skill.name,
+      description: skill.description,
+      exposeToAgent: true,
+      handler: async () => payload,
+    });
+  }
+
+  for (const sub of diskExtensions.subagents) {
+    builder.defineSubAgent(makeDiskSubAgent(sub, opts.workspace));
+  }
 
   const agent = builder.build();
 

@@ -71,6 +71,57 @@ export ANTHROPIC_API_KEY=sk-ant-...     # or OPENAI_API_KEY / OPENROUTER_API_KEY
 - `esc` — abort a running request.
 - `ctrl-c` — abort if busy, quit on empty input.
 
+## Custom skills and subagents
+
+Drop Markdown files into any of these directories and glorp picks them up on boot:
+
+| Path | Purpose |
+|---|---|
+| `<workspace>/.claude/skills/<name>/SKILL.md` | per-project skill (highest priority) |
+| `<workspace>/.agents/skills/<name>/SKILL.md` | per-project skill, alternate folder |
+| `~/.claude/skills/<name>/SKILL.md` | user-global skill |
+| `~/.agents/skills/<name>/SKILL.md` | user-global skill, alternate folder |
+| `<workspace>/.claude/agents/<name>.md` | per-project subagent (Claude Code format) |
+| `<workspace>/.agents/agents/<name>.md` | per-project subagent, alternate folder |
+| `~/.claude/agents/<name>.md` | user-global subagent |
+| `~/.agents/agents/<name>.md` | user-global subagent, alternate folder |
+
+**Dedupe**: if the same name appears in multiple locations, the more-specific one wins (workspace > home, `.claude` > `.agents`). The shadowed entries are reported in `GLORP_DEBUG=1` logs.
+
+### Skill format
+
+A skill is a directory containing `SKILL.md` (optionally with sibling `.md` reference files the agent can `read` on demand). Optional YAML front-matter sets the description shown in the autocomplete; without front-matter, the first non-heading body line is used.
+
+```md
+---
+description: Expert Python coding patterns
+---
+
+# Python skill
+
+When this skill is invoked, prefer dataclasses over plain dicts, …
+```
+
+Loaded skills appear as both `/<name>` slash commands (for the user) and as `glove_invoke_skill({ name })` entries the agent can call. The skill's full body is injected when fired.
+
+### Subagent format
+
+A subagent is a single `.md` file. Front-matter declares metadata; the body is the system prompt the child agent receives.
+
+```md
+---
+name: code-reviewer
+description: Reviews code for bugs and style issues
+tools: Read, Grep, Glob, Bash
+model: opus     # informational; tool model is inherited from the parent
+---
+
+You are a code reviewer subagent. Your job is to find bugs and style issues.
+Return a numbered punch-list. End with "verdict: ship" or "verdict: needs work".
+```
+
+The `tools` field is a comma-separated allowlist (case-insensitive). If omitted, the subagent gets the read-only default set (`read`, `grep`, `glob`, `ls`, `web_fetch`). Loaded subagents appear in the `@subagent` autocomplete and are routed to via `glove_invoke_subagent({ name })`.
+
 ## Layout
 
 ```
