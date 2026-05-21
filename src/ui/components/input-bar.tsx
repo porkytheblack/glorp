@@ -176,6 +176,23 @@ export function InputBar({
     }
   };
 
+  // Override OpenTUI's default textarea bindings: Enter submits, Shift+Enter
+  // inserts a newline. Defaults map plain Enter to newline and only fire
+  // submit on Cmd/Meta+Enter, which doesn't match the chat UX every other
+  // app in the world uses. `keyBindings` is merged onto defaults — same
+  // name+modifier combination replaces, so listing the three Enter
+  // variants under both modifier states does the swap cleanly.
+  const submitOnEnterBindings = useMemo(
+    () => [
+      { name: "return", action: "submit" },
+      { name: "kpenter", action: "submit" },
+      { name: "linefeed", action: "submit" },
+      { name: "return", shift: true, action: "newline" },
+      { name: "kpenter", shift: true, action: "newline" },
+    ],
+    [],
+  );
+
   // Border + placeholder vocabulary changes when busy so the loading
   // state is obvious. The transcript also shows a "thinking" row.
   const borderColor = busy ? theme.warning : theme.borderActive;
@@ -216,6 +233,7 @@ export function InputBar({
             onSubmit={() => performSubmit(value)}
             focused
             wrapMode="word"
+            keyBindings={submitOnEnterBindings}
             placeholder={placeholder}
             textColor={theme.text}
             placeholderColor={busy ? theme.warning : theme.textDim}
@@ -242,6 +260,8 @@ interface GlorpTextareaProps {
   focused?: boolean;
   /** Wrap long lines. "word" wraps at word boundaries, "char" at any char. */
   wrapMode?: "none" | "char" | "word";
+  /** Custom key bindings merged onto OpenTUI's defaults. */
+  keyBindings?: Array<{ name: string; ctrl?: boolean; shift?: boolean; meta?: boolean; super?: boolean; action: string }>;
   placeholder?: string;
   textColor?: string;
   placeholderColor?: string;
