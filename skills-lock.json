@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "glove": {
+      "source": "porkytheblack/glove",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/glove/SKILL.md",
+      "computedHash": "bb2a9408eed72709e9ce657180b7e6a9bfb55c552e060ab3cfb5281035d4cf21"
+    },
+    "opentui": {
+      "source": "msmps/opentui-skill",
+      "sourceType": "github",
+      "skillPath": "skill/opentui/SKILL.md",
+      "computedHash": "2915038bb3297e759f740f9e6bfa885ed80a4a7fe945825f5874b48db9ce0fd2"
+    },
+    "station": {
+      "source": "porkytheblack/station",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/station/SKILL.md",
+      "computedHash": "f074159448ed70dbd617ca76f7b5af277a495fba10ea0eb66134d5297c5a1ed2"
+    }
+  }
+}
