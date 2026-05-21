@@ -2,34 +2,19 @@ import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { GloveFoldArgs } from "glove-core";
-import { resolveSafePath, relPath, globToRegex } from "./fs-shared.ts";
+import { resolveSafePath, relPath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
 
-const IGNORED_DIRS = new Set([
-  "node_modules",
-  ".git",
-  ".next",
-  ".turbo",
-  "dist",
-  "build",
-  ".cache",
-  ".venv",
-  "__pycache__",
-  "target",
-  ".idea",
-  ".vscode",
-]);
+// Hidden files that are still useful to surface in code searches.
+const HIDDEN_ALLOWLIST = new Set([".env", ".env.example", ".gitignore", ".dockerignore", ".npmrc"]);
 
-async function* walk(root: string, ignore: Set<string>): AsyncGenerator<string> {
+async function* walk(root: string, ignore: ReadonlySet<string>): AsyncGenerator<string> {
   const entries = await fs.promises.readdir(root, { withFileTypes: true });
   for (const e of entries) {
-    if (e.name.startsWith(".") && e.name !== ".env" && e.name !== ".gitignore") {
-      // Allow hidden files but skip hidden dirs.
-      if (e.isDirectory()) continue;
-    }
     if (e.isDirectory()) {
-      if (ignore.has(e.name)) continue;
+      if (e.name.startsWith(".") || ignore.has(e.name)) continue;
       yield* walk(path.join(root, e.name), ignore);
     } else if (e.isFile()) {
+      if (e.name.startsWith(".") && !HIDDEN_ALLOWLIST.has(e.name)) continue;
       yield path.join(root, e.name);
     }
   }
@@ -43,7 +28,7 @@ export function globTool(workspace: string): GloveFoldArgs<{
   return {
     name: "glob",
     description:
-      "Find files matching a glob pattern. Supports `*`, `**`, `?`, and `[abc]`. " +
+      "Find files matching a glob pattern. Supports `*`, `**`, `?`, `[abc]`, and `{a,b,c}` brace expansion. " +
       "Returns file paths relative to the workspace, sorted by recency (most recent first).",
     inputSchema: z.object({
       pattern: z.string().describe('Glob pattern, e.g. "**/*.ts" or "src/**/*.{ts,tsx}"'),

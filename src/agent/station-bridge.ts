@@ -160,39 +160,47 @@ export async function createFleet(opts: {
   signals.set("edit-fanout", editFanoutSignal as unknown as AnySignal);
   signals.set("shell-fanout", shellFanoutSignal as unknown as AnySignal);
 
-  let activeCount = 0;
+  // Concurrency limiter: a permit semaphore. Acquire blocks until a slot
+  // is available; release wakes the next waiter. try/finally guarantees
+  // permits are returned even if a handler throws synchronously or the
+  // input fails validation.
   const MAX_CONCURRENT = 6;
-  const queue: Array<() => void> = [];
+  let inFlight = 0;
+  const waiters: Array<() => void> = [];
+  const acquire = async (): Promise<void> => {
+    if (inFlight < MAX_CONCURRENT) {
+      inFlight++;
+      return;
+    }
+    await new Promise<void>((r) => waiters.push(r));
+    inFlight++;
+  };
+  const release = (): void => {
+    inFlight--;
+    const next = waiters.shift();
+    if (next) next();
+  };
 
   const runOne = async (name: string, input: unknown): Promise<string> => {
     const sig = signals.get(name);
     if (!sig) throw new Error(`Unknown signal: ${name}`);
     const runId = `run_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+    // Validate eagerly so caller sees errors. handler() runs in the
+    // background — its errors are logged but don't reject `runOne`.
     const parsed = sig.inputSchema.safeParse(input);
     if (!parsed.success) {
       throw new Error(`Invalid input for signal "${name}": ${parsed.error.message}`);
     }
-    const work = async () => {
+    void (async () => {
+      await acquire();
       try {
-        if (sig.handler) {
-          await sig.handler(parsed.data);
-        }
+        if (sig.handler) await sig.handler(parsed.data);
       } catch (err) {
         if (process.env.GLORP_DEBUG) console.error(`[fleet:${name}] handler threw:`, err);
       } finally {
-        activeCount--;
-        const next = queue.shift();
-        if (next) next();
+        release();
       }
-    };
-    if (activeCount < MAX_CONCURRENT) {
-      activeCount++;
-      void work();
-    } else {
-      await new Promise<void>((r) => queue.push(r));
-      activeCount++;
-      void work();
-    }
+    })();
     return runId;
   };
 
@@ -201,14 +209,29 @@ export async function createFleet(opts: {
       // No-op for the in-process executor.
     },
     async stop() {
-      // Best-effort: wait briefly for active jobs to finish so callers
-      // see resolved inbox state on shutdown.
-      const deadline = Date.now() + 1500;
-      while (activeCount > 0 && Date.now() < deadline) {
+      // Kill every active child first so long-running shell jobs don't
+      // outlive the agent; then wait briefly for the close handlers to
+      // record results into the inbox.
+      stopping = true;
+      for (const child of activeChildren) {
+        try {
+          child.kill("SIGTERM");
+        } catch {}
+      }
+      setTimeout(() => {
+        for (const child of activeChildren) {
+          try {
+            child.kill("SIGKILL");
+          } catch {}
+        }
+      }, 1000);
+      const deadline = Date.now() + 3000;
+      while (inFlight > 0 && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 50));
       }
     },
     async dispatch(kind, input) {
+      if (stopping) throw new Error("fleet is stopping");
       return runOne(kind, input);
     },
     setInboxResolver(fn) {
@@ -220,6 +243,10 @@ export async function createFleet(opts: {
   };
 }
 
+/** Children currently spawned by runShell, so `stop()` can kill them. */
+const activeChildren = new Set<ReturnType<typeof spawn>>();
+let stopping = false;
+
 async function runShell(
   cmd: string,
   cwd: string,
@@ -227,18 +254,34 @@ async function runShell(
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn("bash", ["-c", cmd], { cwd, env: process.env });
+    activeChildren.add(child);
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (b: Buffer) => (stdout += b.toString("utf-8")));
     child.stderr?.on("data", (b: Buffer) => (stderr += b.toString("utf-8")));
+    let sigkillTimer: NodeJS.Timeout | null = null;
     const timer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
       } catch {}
+      // Escalate to SIGKILL if SIGTERM is trapped by the child.
+      sigkillTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }, 1500);
     }, timeoutMs);
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
+      activeChildren.delete(child);
       resolve({ exitCode: code ?? -1, stdout, stderr });
+    });
+    child.on("error", () => {
+      clearTimeout(timer);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
+      activeChildren.delete(child);
+      resolve({ exitCode: -1, stdout, stderr: stderr + "\n[spawn failed]" });
     });
   });
 }

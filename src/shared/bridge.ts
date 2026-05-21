@@ -9,7 +9,9 @@ export class Bridge {
 
   subscribe(fn: BridgeListener): () => void {
     this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
   }
 
   emit(event: BridgeEvent): void {

@@ -118,8 +118,11 @@ async function runHeadless(args: Args): Promise<void> {
   await glorp.send(args.prompt!);
   process.stdout.write("\n");
   await glorp.shutdown();
-  // Use the final value if we have it; otherwise stdout already saw the stream.
-  if (final && !process.stdout.write) console.log(final);
+  // The streaming subscriber above wrote agent text + tool events to stdout
+  // in real time, so there's nothing else to print here. `final` is kept
+  // around for the headless contract — if a future caller wants the final
+  // text as a single string, expose it; for now stdout is the contract.
+  void final;
 }
 
 function describeInput(input: unknown): string {

@@ -91,6 +91,9 @@ export function Sidebar({ state, width }: { state: UiState; width: number }) {
             <text fg={theme.textMuted}>  {(i.response ?? i.request).slice(0, width - 5)}</text>
           </box>
         ))}
+        {state.inbox.length > 6 && (
+          <text fg={theme.textDim}>… +{state.inbox.length - 6} older</text>
+        )}
       </box>
 
       {/* Transmissions */}

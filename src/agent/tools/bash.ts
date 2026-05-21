@@ -2,14 +2,14 @@ import { z } from "zod";
 import { spawn } from "node:child_process";
 import type { GloveFoldArgs } from "glove-core";
 
-const MAX_OUTPUT_BYTES = 256 * 1024;
+const MAX_OUTPUT_BYTES_PER_STREAM = 256 * 1024;
 
 const DANGEROUS_PATTERNS = [
   /\brm\s+-rf\s+\/(\s|$)/,
   /:\(\)\{.*\}\s*;:/, // fork bomb
   /\bmkfs\b/,
   /\bdd\s+if=/,
-  /\b>\s*\/dev\/sd[a-z]/,
+  /\b>+\s*\/dev\/(sd[a-z]|nvme\d+n\d+|vd[a-z]|xvd[a-z])/,
 ];
 
 function dangerousReason(cmd: string): string | null {
@@ -53,6 +53,7 @@ export function bashTool(workspace: string): GloveFoldArgs<{
         stderr: string;
         timedOut: boolean;
       }>((resolve) => {
+        const start = Date.now();
         const child = spawn("bash", ["-c", input.command], {
           cwd: workspace,
           env: process.env,
@@ -60,50 +61,59 @@ export function bashTool(workspace: string): GloveFoldArgs<{
         });
         let stdout = "";
         let stderr = "";
-        let bytes = 0;
-        let truncated = false;
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
+        let stdoutTruncated = false;
+        let stderrTruncated = false;
         const onChunk = (which: "stdout" | "stderr") => (buf: Buffer) => {
+          const truncated = which === "stdout" ? stdoutTruncated : stderrTruncated;
           if (truncated) return;
-          const remaining = MAX_OUTPUT_BYTES - bytes;
+          const used = which === "stdout" ? stdoutBytes : stderrBytes;
+          const remaining = MAX_OUTPUT_BYTES_PER_STREAM - used;
           if (remaining <= 0) {
-            truncated = true;
+            if (which === "stdout") stdoutTruncated = true;
+            else stderrTruncated = true;
             return;
           }
           const slice = buf.length > remaining ? buf.slice(0, remaining) : buf;
-          bytes += slice.length;
-          if (which === "stdout") stdout += slice.toString("utf-8");
-          else stderr += slice.toString("utf-8");
-          if (buf.length > remaining) truncated = true;
+          if (which === "stdout") {
+            stdoutBytes += slice.length;
+            stdout += slice.toString("utf-8");
+            if (buf.length > remaining) stdoutTruncated = true;
+          } else {
+            stderrBytes += slice.length;
+            stderr += slice.toString("utf-8");
+            if (buf.length > remaining) stderrTruncated = true;
+          }
         };
         child.stdout.on("data", onChunk("stdout"));
         child.stderr.on("data", onChunk("stderr"));
-        const timer = setTimeout(() => {
+        let killed = false;
+        const sigkillTimer: { ref: NodeJS.Timeout | null } = { ref: null };
+        const escalate = () => {
+          if (killed) return;
+          killed = true;
           try {
             child.kill("SIGTERM");
           } catch {}
-          setTimeout(() => {
+          sigkillTimer.ref = setTimeout(() => {
             try {
               child.kill("SIGKILL");
             } catch {}
           }, 2000);
-        }, timeout);
-        const onAbort = () => {
-          try {
-            child.kill("SIGTERM");
-          } catch {}
         };
+        const timer = setTimeout(escalate, timeout);
+        const onAbort = () => escalate();
         signal?.addEventListener("abort", onAbort, { once: true });
         child.on("close", (code) => {
           clearTimeout(timer);
+          if (sigkillTimer.ref) clearTimeout(sigkillTimer.ref);
           signal?.removeEventListener("abort", onAbort);
-          const timedOut = Date.now() - start >= timeout - 50 && code !== 0;
-          if (truncated) {
-            stdout += "\n... [stdout truncated]";
-            stderr += "\n... [stderr truncated]";
-          }
+          const timedOut = killed && Date.now() - start >= timeout - 50;
+          if (stdoutTruncated) stdout += "\n... [stdout truncated at 256KB]";
+          if (stderrTruncated) stderr += "\n... [stderr truncated at 256KB]";
           resolve({ exitCode: code ?? -1, stdout, stderr, timedOut });
         });
-        const start = Date.now();
       });
       const combined = [
         result.stdout && `stdout:\n${result.stdout}`,

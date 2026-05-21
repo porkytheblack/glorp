@@ -1,13 +1,14 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import type { ToolEvent } from "../../shared/events.ts";
 import { theme } from "../theme.ts";
 
-const STATUS_GLYPHS: Record<ToolEvent["status"], string> = {
-  running: "⠋",
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+const STATIC_GLYPHS = {
   success: "✓",
   error: "✗",
   aborted: "⊘",
-};
+} as const;
 
 const STATUS_COLORS: Record<ToolEvent["status"], string> = {
   running: theme.warning,
@@ -15,6 +16,24 @@ const STATUS_COLORS: Record<ToolEvent["status"], string> = {
   error: theme.error,
   aborted: theme.textMuted,
 };
+
+function useSpinner(active: boolean): string {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 90);
+    return () => clearInterval(t);
+  }, [active]);
+  return SPINNER_FRAMES[frame]!;
+}
+
+function safeStringify(input: unknown): string {
+  try {
+    return JSON.stringify(input);
+  } catch {
+    return String(input);
+  }
+}
 
 /**
  * One-line summary of the tool input — never multi-line. Tool-specific so
@@ -61,7 +80,7 @@ function summarise(tool: ToolEvent): string {
     case "glove_invoke_skill":
       return `/${input.name as string}${input.args ? ` ${truncate(String(input.args), 50)}` : ""}`;
     default:
-      return `${tool.name} ${truncate(JSON.stringify(input), 70)}`;
+      return `${tool.name} ${truncate(safeStringify(input), 70)}`;
   }
 }
 
@@ -78,17 +97,26 @@ function preview(tool: ToolEvent, maxLines = 8): string[] {
 }
 
 export function ToolCallRow({ tool }: { tool: ToolEvent }) {
-  const showOutput = tool.status !== "running";
+  const isRunning = tool.status === "running";
+  const showOutput = !isRunning;
   const lines = preview(tool, 10);
+  const spinnerFrame = useSpinner(isRunning);
+  const glyph = isRunning
+    ? spinnerFrame
+    : STATIC_GLYPHS[tool.status as keyof typeof STATIC_GLYPHS] ?? "·";
   // Edit tools get a tiny diff display via renderData.
   const editData =
     tool.name === "edit" && tool.renderData
       ? (tool.renderData as { old?: string; new?: string })
       : null;
+  const oldLines = editData?.old?.split("\n") ?? [];
+  const newLines = editData?.new?.split("\n") ?? [];
+  const oldShown = oldLines.slice(0, 4);
+  const newShown = newLines.slice(0, 4);
   return (
     <box flexDirection="column" marginBottom={1}>
       <box flexDirection="row">
-        <text fg={STATUS_COLORS[tool.status]}>{STATUS_GLYPHS[tool.status]}</text>
+        <text fg={STATUS_COLORS[tool.status]}>{glyph}</text>
         <text> </text>
         <text fg={theme.toolName}>
           <strong>{summarise(tool)}</strong>
@@ -96,16 +124,22 @@ export function ToolCallRow({ tool }: { tool: ToolEvent }) {
       </box>
       {editData && (
         <box flexDirection="column" marginLeft={2} marginTop={1}>
-          {editData.old?.split("\n").slice(0, 4).map((l, i) => (
+          {oldShown.map((l, i) => (
             <text key={`o${i}`} bg={theme.diffDel} fg={theme.diffDelText}>
               - {truncate(l, 100)}
             </text>
           ))}
-          {editData.new?.split("\n").slice(0, 4).map((l, i) => (
+          {oldLines.length > oldShown.length && (
+            <text fg={theme.textDim}>  … +{oldLines.length - oldShown.length} more removed</text>
+          )}
+          {newShown.map((l, i) => (
             <text key={`n${i}`} bg={theme.diffAdd} fg={theme.diffAddText}>
               + {truncate(l, 100)}
             </text>
           ))}
+          {newLines.length > newShown.length && (
+            <text fg={theme.textDim}>  … +{newLines.length - newShown.length} more added</text>
+          )}
         </box>
       )}
       {showOutput && lines.length > 0 && !editData && (

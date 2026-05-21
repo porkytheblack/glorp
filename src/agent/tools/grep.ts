@@ -2,20 +2,7 @@ import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { GloveFoldArgs } from "glove-core";
-import { resolveSafePath, relPath, globToRegex } from "./fs-shared.ts";
-
-const IGNORED_DIRS = new Set([
-  "node_modules",
-  ".git",
-  ".next",
-  ".turbo",
-  "dist",
-  "build",
-  ".cache",
-  ".venv",
-  "__pycache__",
-  "target",
-]);
+import { resolveSafePath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
 
 async function* walk(root: string): AsyncGenerator<string> {
   const entries = await fs.promises.readdir(root, { withFileTypes: true });

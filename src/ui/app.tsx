@@ -41,7 +41,7 @@ export function App({
   const mainWidth = sidebarVisible ? width - sidebarWidth : width;
   const statusH = 1;
   const inputH = 5; // border 2 + content 3
-  const transcriptH = height - statusH - inputH;
+  const transcriptH = Math.max(1, height - statusH - inputH);
 
   return (
     <box flexDirection="column" width={width} height={height} backgroundColor={theme.bg}>

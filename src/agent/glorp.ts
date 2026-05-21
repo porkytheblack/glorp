@@ -2,13 +2,17 @@ import { Glove } from "glove-core/glove";
 import { Displaymanager } from "glove-core/display-manager";
 import type {
   IGloveRunnable,
+  GloveFoldArgs,
 } from "glove-core/glove";
 import type {
   ModelAdapter,
   SubscriberAdapter,
   ToolResultData,
+  Tool,
   Context,
 } from "glove-core/core";
+import { createTaskTool } from "glove-core/tools/task-tool";
+import { createInboxTool } from "glove-core/tools/inbox-tool";
 import { pickModel } from "./model-picker.ts";
 import { GlorpStore } from "./store.ts";
 import { GLORP_SYSTEM_PROMPT, COMPACTION_INSTRUCTIONS } from "./persona.ts";
@@ -51,6 +55,24 @@ export interface BuildGlorpOptions {
 
 const CONTEXT_LIMIT = 180_000;
 
+/**
+ * Convert a raw `Tool<I>` (from glove-core's factory exports — `createTaskTool`,
+ * `createInboxTool`, etc.) into a `GloveFoldArgs<I>` the builder accepts.
+ * The two shapes have the same fields with different names (`run` → `do`,
+ * `input_schema` → `inputSchema`).
+ */
+function toolToFoldArgs<I>(tool: Tool<I>): GloveFoldArgs<I> {
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.input_schema,
+    jsonSchema: tool.jsonSchema,
+    requiresPermission: tool.requiresPermission,
+    unAbortable: tool.unAbortable,
+    do: (input, _display, _glove, signal) => tool.run(input, undefined, signal),
+  };
+}
+
 export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> {
   const dataDir = opts.dataDir ?? path.join(os.homedir(), ".glorp");
   const store = new GlorpStore(opts.sessionId, dataDir);
@@ -77,6 +99,8 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   let abortController: AbortController | null = null;
   const activeTools = new Map<string, ToolEvent>();
   let streamingTextBuffer = "";
+  let unkIdCounter = 0;
+  const synthesizeId = () => `_unk_${++unkIdCounter}`;
 
   const subscriber: SubscriberAdapter = {
     async record(event_type, data) {
@@ -87,28 +111,66 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
           bridge.emit({ type: "text_delta", text });
           break;
         }
-        case "model_response_complete":
-        case "model_response": {
+        case "model_response_complete": {
+          // Final assistant text from streaming adapters. We prefer this over
+          // `model_response` (sync adapters) — emitting both would persist
+          // duplicate turns. Streaming adapters emit only `_complete`; sync
+          // adapters emit only `model_response`. Handling them separately
+          // keeps both paths clean.
           const d = data as { text: string };
-          // Persist the final agent text as a turn so it survives streaming clear.
           if (streamingTextBuffer || d.text) {
             const finalText = d.text || streamingTextBuffer;
-            const turn: ChatTurn = {
-              id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-              kind: "agent",
-              text: finalText,
-              createdAt: Date.now(),
-            };
-            bridge.emit({ type: "turn", turn });
+            // Clear the streaming row BEFORE appending the final turn so
+            // the UI doesn't briefly render both at once.
             bridge.emit({ type: "text_clear" });
             streamingTextBuffer = "";
+            bridge.emit({
+              type: "turn",
+              turn: {
+                id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+                kind: "agent",
+                text: finalText,
+                createdAt: Date.now(),
+              },
+            });
           }
-          // Tokens + stats refresh
+          void refreshStats();
+          break;
+        }
+        case "model_response": {
+          // Sync (non-streaming) adapter only — emit if streaming buffer is empty.
+          const d = data as { text: string };
+          if (!streamingTextBuffer && d.text) {
+            bridge.emit({
+              type: "turn",
+              turn: {
+                id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+                kind: "agent",
+                text: d.text,
+                createdAt: Date.now(),
+              },
+            });
+          }
           void refreshStats();
           break;
         }
         case "tool_use": {
           const d = data as { id: string; name: string; input: unknown };
+          // Collapse the streaming buffer first so a tool card never appears
+          // mid-stream alongside still-rendering text.
+          if (streamingTextBuffer) {
+            bridge.emit({ type: "text_clear" });
+            bridge.emit({
+              type: "turn",
+              turn: {
+                id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+                kind: "agent",
+                text: streamingTextBuffer,
+                createdAt: Date.now(),
+              },
+            });
+            streamingTextBuffer = "";
+          }
           const ev: ToolEvent = {
             id: d.id,
             name: d.name,
@@ -118,20 +180,6 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
           };
           activeTools.set(d.id, ev);
           bridge.emit({ type: "tool_started", tool: ev });
-          // Tool calls also collapse the streaming buffer.
-          if (streamingTextBuffer) {
-            bridge.emit({
-              type: "turn",
-              turn: {
-                id: `m_${Date.now().toString(36)}`,
-                kind: "agent",
-                text: streamingTextBuffer,
-                createdAt: Date.now(),
-              },
-            });
-            bridge.emit({ type: "text_clear" });
-            streamingTextBuffer = "";
-          }
           break;
         }
         case "tool_use_result": {
@@ -140,7 +188,16 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
             call_id?: string;
             result: ToolResultData;
           };
-          const id = d.call_id ?? `${d.tool_name}_${Date.now()}`;
+          // If call_id is missing, look up the most recent active tool by
+          // name rather than synthesising a fresh id (which would strand
+          // the matching `tool_use` event).
+          let id = d.call_id;
+          if (!id) {
+            for (const [k, v] of activeTools) {
+              if (v.name === d.tool_name) id = k;
+            }
+            if (!id) id = synthesizeId();
+          }
           const prior = activeTools.get(id);
           const ev: ToolEvent = {
             id,
@@ -280,8 +337,9 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     .fold(webFetchTool)
     .fold(transmissionTool(dataDir))
     .fold(fleetDispatchTool(fleet, ctxRef));
-  // glove_update_tasks and glove_post_to_inbox are auto-registered by
-  // Glove because GlorpStore implements the optional task + inbox APIs.
+  // glove_update_tasks / glove_post_to_inbox aren't auto-registered by
+  // Glove — they're factories the caller must fold. We do that below
+  // once the Context is built (they need it).
 
   // Subagents
   builder
@@ -364,10 +422,20 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   } as unknown as Context;
   ctxRef.current = inboxContext;
   fleet.setContext(inboxContext);
+  // Fold the task + inbox tools now that the Context exists. createTaskTool /
+  // createInboxTool return raw `Tool<I>` objects; convert to GloveFoldArgs
+  // (different field names: `input_schema` → `inputSchema`, `run` → `do`).
+  agent.fold(toolToFoldArgs(createTaskTool(inboxContext)));
+  agent.fold(toolToFoldArgs(createInboxTool(inboxContext)));
   fleet.setInboxResolver(async (itemId, response, status) => {
+    // Inbox status enum is "pending" | "resolved" | "consumed". Fleet
+    // failures are still "resolved" from the inbox's perspective — the
+    // failure text lives in the response payload, prefixed so the agent
+    // and UI can see it.
+    const payload = status === "error" ? `[fleet error] ${response}` : response;
     await store.updateInboxItem(itemId, {
-      status: status === "resolved" ? "resolved" : "resolved",
-      response,
+      status: "resolved",
+      response: payload,
       resolved_at: new Date().toISOString(),
     });
     void refreshInbox();

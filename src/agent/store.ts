@@ -76,30 +76,32 @@ export class GlorpStore implements StoreAdapter {
     this.dirty = true;
     if (this.writePromise) return;
     this.writePromise = (async () => {
-      // Coalesce a tick of writes.
-      await new Promise((r) => setTimeout(r, 50));
-      this.writePromise = null;
-      if (!this.dirty) return;
-      this.dirty = false;
       try {
-        const snap: Snapshot = {
-          messages: await this.inner.getMessages(),
-          tokensIn: 0,
-          tokensOut: 0,
-          turnCount: await this.inner.getTurnCount(),
-          tasks: (await this.inner.getTasks()) ?? [],
-          permissions: {},
-          inboxItems: (await this.inner.getInboxItems()) ?? [],
-        };
-        // MemoryStore exposes only the combined token count, not in/out.
-        // We snapshot the total and replay it as `tokens_in` on load — fine
-        // for our use (recovery, not analytics).
-        snap.tokensIn = await this.inner.getTokenCount();
-        const tmp = `${this.filePath}.tmp`;
-        await fs.promises.writeFile(tmp, JSON.stringify(snap), "utf-8");
-        await fs.promises.rename(tmp, this.filePath);
+        // Loop until we observe a clean dirty bit after a write; mutations
+        // that land during the flush trigger another pass automatically.
+        // Clearing `writePromise` only after rename + done prevents two
+        // concurrent mutations from both starting fresh flushes.
+        while (this.dirty) {
+          this.dirty = false;
+          const snap: Snapshot = {
+            messages: await this.inner.getMessages(),
+            tokensIn: await this.inner.getTokenCount(),
+            tokensOut: 0,
+            turnCount: await this.inner.getTurnCount(),
+            tasks: (await this.inner.getTasks()) ?? [],
+            permissions: {},
+            inboxItems: (await this.inner.getInboxItems()) ?? [],
+          };
+          const tmp = `${this.filePath}.tmp`;
+          await fs.promises.writeFile(tmp, JSON.stringify(snap), "utf-8");
+          await fs.promises.rename(tmp, this.filePath);
+          // Coalesce a short tail of writes before exiting the loop.
+          await new Promise((r) => setTimeout(r, 50));
+        }
       } catch (err) {
         console.error("[glorp-store] flush failed:", err);
+      } finally {
+        this.writePromise = null;
       }
     })();
   }

@@ -3,6 +3,32 @@ import { useKeyboard } from "@opentui/react";
 import { theme } from "../theme.ts";
 import { SlashMenu, SLASH_COMMANDS, SUBAGENT_MENTIONS } from "./slash-menu.tsx";
 
+/**
+ * Tiny typed wrapper around OpenTUI's `<input>` intrinsic. The intrinsic's
+ * type collides with React DOM's `HTMLInputElement` props because OpenTUI
+ * extends `React.JSX.IntrinsicElements` — `onSubmit` ends up intersected
+ * between OpenTUI's `(value: string) => void` and the DOM's
+ * `(event: SubmitEvent) => void`, which no single function shape can
+ * satisfy. We hide that here so the rest of the code can pass a clean
+ * `(value: string) => void` callback.
+ */
+interface GlorpInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: (value: string) => void;
+  placeholder?: string;
+  focused?: boolean;
+  textColor?: string;
+  placeholderColor?: string;
+  cursorColor?: string;
+  backgroundColor?: string;
+  focusedBackgroundColor?: string;
+}
+
+function GlorpInput(props: GlorpInputProps): React.ReactElement {
+  return React.createElement("input", props as unknown as React.InputHTMLAttributes<HTMLInputElement>);
+}
+
 interface Props {
   busy: boolean;
   onSubmit: (text: string) => void;
@@ -118,20 +144,22 @@ export function InputBar({ busy, onSubmit, onAbort, onQuit, width }: Props) {
           <strong>{busy ? "…" : "›"}</strong>
         </text>
         <text> </text>
-        {React.createElement("input" as any, {
-          value,
-          onChange: setValue,
-          onSubmit: handleSubmit,
-          focused: true,
-          placeholder: busy
-            ? "glorp is working… (ctrl-c to abort)"
-            : "ask, command, or /slash · @subagent · ctrl-c to quit",
-          textColor: theme.text,
-          placeholderColor: theme.textDim,
-          cursorColor: theme.accent,
-          backgroundColor: "transparent",
-          focusedBackgroundColor: "transparent",
-        })}
+        <GlorpInput
+          value={value}
+          onChange={setValue}
+          onSubmit={handleSubmit}
+          focused
+          placeholder={
+            busy
+              ? "glorp is working… (ctrl-c to abort)"
+              : "ask, command, or /slash · @subagent · ctrl-c to quit"
+          }
+          textColor={theme.text}
+          placeholderColor={theme.textDim}
+          cursorColor={theme.accent}
+          backgroundColor="transparent"
+          focusedBackgroundColor="transparent"
+        />
       </box>
       <box flexDirection="row" paddingX={1}>
         <text fg={theme.textDim}>

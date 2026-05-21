@@ -22,6 +22,8 @@ export interface UiState {
     severity: "low" | "medium" | "high";
     at: number;
   }>;
+  /** Most recent hook/skill invocation, for transient status display. */
+  lastExtension?: { kind: "hook" | "skill"; name: string; at: number };
   lastError?: string;
   mood: "idle" | "thinking" | "working" | "speaking" | "glitched" | "error";
 }
@@ -40,6 +42,7 @@ type Action =
   | { kind: "compaction"; phase: "start" | "end" }
   | { kind: "subagent"; name: string; phase: "start" | "end" }
   | { kind: "transmission"; payload: string; severity: "low" | "medium" | "high" }
+  | { kind: "extension"; ext: "hook" | "skill"; name: string }
   | { kind: "error"; message: string };
 
 const initial: UiState = {
@@ -140,6 +143,9 @@ function reduce(state: UiState, action: Action): UiState {
       next = { ...state, transmissions: [...state.transmissions, t].slice(-40) };
       break;
     }
+    case "extension":
+      next = { ...state, lastExtension: { kind: action.ext, name: action.name, at: Date.now() } };
+      break;
     case "error":
       next = { ...state, lastError: action.message };
       break;
@@ -153,7 +159,7 @@ export function useUiState(): UiState {
   dispatchRef.current = dispatch;
   useEffect(() => {
     const bridge = getBridge();
-    return bridge.subscribe((ev) => {
+    const unsubscribe = bridge.subscribe((ev) => {
       switch (ev.type) {
         case "turn":
           dispatchRef.current({ kind: "turn", turn: ev.turn });
@@ -198,11 +204,21 @@ export function useUiState(): UiState {
             severity: ev.severity,
           });
           break;
+        case "hook":
+          dispatchRef.current({ kind: "extension", ext: "hook", name: ev.name });
+          break;
+        case "skill":
+          dispatchRef.current({ kind: "extension", ext: "skill", name: ev.name });
+          break;
         case "error":
           dispatchRef.current({ kind: "error", message: ev.message });
           break;
       }
     });
+    // Wrap so the effect returns `() => void`, not `() => boolean`.
+    return () => {
+      unsubscribe();
+    };
   }, []);
   return state;
 }

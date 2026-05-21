@@ -16,7 +16,7 @@ export function plannerSubAgent(deps: SubAgentDeps): DefineSubAgentArgs {
     name: "planner",
     description:
       "Use for 'design me an approach' tasks. The planner thinks through the problem and returns a step-by-step plan WITHOUT writing code. Pass the full requirement + relevant constraints in the prompt.",
-    factory: async ({ parentStore, parentControls, prompt }) => {
+    factory: async ({ parentStore, parentControls }) => {
       const subStore =
         (await parentStore.createSubAgentStore?.("planner", false)) ??
         new MemoryStore(`planner_${Date.now()}`);
@@ -49,7 +49,7 @@ export function researcherSubAgent(deps: SubAgentDeps): DefineSubAgentArgs {
     name: "researcher",
     description:
       "Use for investigative tasks: 'find every place that calls X', 'how is config wired', 'what does this library expose'. Returns a tight summary with file:line citations. Prompt should be a single specific question.",
-    factory: async ({ parentStore, parentControls, prompt }) => {
+    factory: async ({ parentStore, parentControls }) => {
       const subStore =
         (await parentStore.createSubAgentStore?.("researcher", false)) ??
         new MemoryStore(`researcher_${Date.now()}`);
@@ -83,7 +83,7 @@ export function reviewerSubAgent(deps: SubAgentDeps): DefineSubAgentArgs {
     name: "reviewer",
     description:
       "Use AFTER a substantial change to get a second opinion before declaring victory. Pass: what was changed (files), what was the goal, and where to look. Returns: a punch-list of issues + 'looks good' / 'needs work'.",
-    factory: async ({ parentStore, parentControls, prompt }) => {
+    factory: async ({ parentStore, parentControls }) => {
       const subStore =
         (await parentStore.createSubAgentStore?.("reviewer", false)) ??
         new MemoryStore(`reviewer_${Date.now()}`);
