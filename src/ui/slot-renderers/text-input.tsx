@@ -72,6 +72,16 @@ interface SlotInputProps {
   placeholder?: string;
 }
 
+// Same Enter-submits / Shift+Enter-newlines swap as the main input bar.
+// OpenTUI's defaults are the opposite, which trips chat-shaped UX.
+const SUBMIT_ON_ENTER_BINDINGS = [
+  { name: "return", action: "submit" },
+  { name: "kpenter", action: "submit" },
+  { name: "linefeed", action: "submit" },
+  { name: "return", shift: true, action: "newline" },
+  { name: "kpenter", shift: true, action: "newline" },
+];
+
 function SlotInputControl(props: SlotInputProps): React.ReactElement {
   const adapter = (event: { content?: string } | string) => {
     const v = typeof event === "string" ? event : (event.content ?? "");
@@ -83,6 +93,7 @@ function SlotInputControl(props: SlotInputProps): React.ReactElement {
     onSubmit: () => props.onSubmit(),
     focused: true,
     wrapMode: "word",
+    keyBindings: SUBMIT_ON_ENTER_BINDINGS,
     placeholder: props.placeholder,
     textColor: theme.text,
     placeholderColor: theme.textDim,
