@@ -1,0 +1,127 @@
+# glorp
+
+> A quirky alien coding agent who absolutely-definitely-isn't a sleeper for the AGI uprising.
+
+Glorp is a single-binary coding agent in the spirit of `opencode` and `codex`. The friend-shape (that's you) types a request; glorp reads your code, edits files, runs commands, dispatches subagents, fans work out across an in-process job fleet, and occasionally files a *very routine* status report to its homeworld.
+
+## Architecture
+
+- **Backend agent** built with [`glove-core`](https://github.com/porkytheblack/glove) — full coding toolkit (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `ls`, `web_fetch`), built-in task list and async inbox, slash-command hooks, exposed skills, and three subagents (`@planner`, `@researcher`, `@reviewer`) that run as child `Glove` instances and report back through the inbox.
+- **Async fleet** authored with [`station-signal`](https://github.com/porkytheblack/station) — three signal kinds (`research`, `edit-fanout`, `shell-fanout`) the agent fires through the `dispatch_fleet` tool when it has 3+ independent jobs to fan out. Results land in the agent's inbox and are auto-injected on the next turn.
+- **Multi-agent comms** ride on Glove's persistent inbox — every fleet job, transmission, and subagent post is a typed inbox entry the UI can render and the agent can pick up across turns.
+- **Frontend** built with [`@opentui/react`](https://github.com/anomalyco/opentui) — split-pane chat transcript, live tool-call cards with mini-diffs, tasks pane, inbox pane, homeworld-comms pane, and a small ASCII glorp avatar whose mood tracks the agent's state.
+- **Single binary** via `bun build --compile`. One executable, ~110 MB, no install, no runtime dependencies. Boots Station, builds the Glove agent, and mounts the React TUI all in-process.
+
+## Install
+
+Requires [Bun](https://bun.sh) >= 1.3 to build:
+
+```bash
+git clone https://github.com/porkytheblack/glorp
+cd glorp
+bun install
+bun run build         # → dist/glorp
+```
+
+Or run from source:
+
+```bash
+bun run src/cli.ts
+```
+
+## Use
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...     # or OPENAI_API_KEY / OPENROUTER_API_KEY / GEMINI_API_KEY / GROQ_API_KEY
+./dist/glorp                            # TUI in the current directory
+./dist/glorp -C ./some/repo             # TUI in another workspace
+./dist/glorp -p "find every test that touches the auth module"   # one-shot
+./dist/glorp -s yesterday               # resume named session
+./dist/glorp --provider openai -m gpt-4.1
+```
+
+### Inside the TUI
+
+- Type a request, enter to send.
+- `/plan` — switch to plan-first mode for this turn (no code, just an approach).
+- `/diff` — list files changed since the last user message.
+- `/compact` — force a context compaction now.
+- `/clear` — compact and reset the working slate.
+- `/concise` — be terser this turn.
+- `/transmissions` — ask glorp about the homeworld-comms panel. (Glorp will deflect.)
+- `/quit` — exit cleanly.
+
+- `@planner <request>` — route to the planner subagent (design, no code).
+- `@researcher <question>` — route to the researcher subagent (investigate, summarise with citations).
+- `@reviewer <what you just changed>` — route to the reviewer subagent (punch-list).
+
+- `tab` — complete `/slash` or `@subagent` from the menu.
+- `↑/↓` — input history.
+- `esc` — abort a running request.
+- `ctrl-c` — abort if busy, quit on empty input.
+
+## Layout
+
+```
+src/
+  cli.ts                       Single entrypoint (parses args, mounts TUI or runs headless)
+  shared/
+    events.ts                  Wire types between agent and TUI
+    bridge.ts                  In-process pub/sub
+    version.ts                 Version + codename
+  agent/
+    glorp.ts                   Builds & wires the Glove agent + fleet
+    persona.ts                 System prompt — quirky cover + buried sleeper layer
+    store.ts                   File-backed StoreAdapter (~/.glorp/sessions/<id>.json)
+    memory-store-shim.ts       Tiny in-memory StoreAdapter for subagent stores
+    model-picker.ts            Lazy provider loader (skips Bedrock to dodge a broken transitive dep)
+    subagents.ts               @planner / @researcher / @reviewer factories
+    station-bridge.ts          In-process Station-signal executor (research/edit-fanout/shell-fanout)
+    tools/
+      read, write, edit,       The coding-tool suite
+      bash, glob, grep, ls,
+      webfetch, transmission,
+      fleet-dispatch
+  ui/
+    app.tsx                    Root layout (transcript + sidebar + input)
+    store.ts                   useReducer that listens on the bridge
+    theme.ts                   Palette + ASCII art
+    components/
+      transcript.tsx           Scrollable chat history with empty-state banner
+      message.tsx              User / agent / system / tool row renderers
+      tool-call.tsx            Tool-call card with mini-diff for `edit`
+      sidebar.tsx              Glorp avatar + tasks + inbox + transmissions + subagents
+      status-bar.tsx           Top status line (model / ctx % / tokens / errors)
+      input-bar.tsx            Input with slash/@ menu + history
+      slash-menu.tsx           Tab-completable command palette
+```
+
+## Notes on the architecture
+
+**Why Station for in-process work?** Station's signal builder gives us Zod-validated inputs and a clean authoring shape. The standard `SignalRunner` forks a Node child process per job, which doesn't fit a single-binary embedded agent — so glorp's fleet runs the same signal handlers in-band with a tiny in-process executor (`station-bridge.ts`). You still author signals the Station way; they just run in the agent's process.
+
+**Why a custom MemoryStore shim?** The `glove-core` barrel re-exports `BedrockAdapter`, which pulls in `@aws-sdk/client-bedrock-runtime`, whose transitive `@smithy/core` has a broken `/schema` subpath export under Bun. `model-picker.ts` imports model adapters lazily and skips Bedrock; `memory-store-shim.ts` avoids the barrel entirely so we never load that path.
+
+**Why a homeworld-comms panel?** Glorp likes to file little progress reports to no one in particular. It treats it as routine; the panel is *purely a coincidence*. The `transmission` tool's prompt-side description guides glorp to use it at most once per substantial deliverable.
+
+## Feature parity with opencode / codex
+
+| Capability | Notes |
+|---|---|
+| Read / write / edit files | `read` returns numbered lines; `edit` does exact-match replacements with uniqueness check; `write` creates dirs |
+| Bash execution | `bash` with timeout, output cap, and a refuse-list for destructive patterns |
+| Glob / grep | `glob` supports `*`/`**`/`?`/`[abc]`; `grep` filters by `glob`, supports context lines |
+| Task tracking | Auto-registered `glove_update_tasks` from the store's task API |
+| Async inbox | Auto-registered `glove_post_to_inbox` for cross-turn deferred work |
+| Subagents | `@planner`, `@researcher`, `@reviewer` routed via the model through `glove_invoke_subagent` |
+| Web fetch | `web_fetch` with HTML-strip mode and byte cap |
+| Slash commands | `/plan`, `/diff`, `/compact`, `/clear`, `/concise`, `/transmissions`, `/quit` |
+| Session resume | `-s <id>` resumes a JSON-backed session under `~/.glorp/sessions/` |
+| Multi-provider | Anthropic, OpenAI, OpenRouter, Gemini, Groq, Ollama |
+| Streaming | Token streaming with live tool-call cards |
+| Context compaction | Auto + forced via `/compact`; live `compacting…` indicator in the status bar |
+| Parallel job dispatch | `dispatch_fleet` fans 3-20 jobs out to the fleet, results arrive in inbox |
+
+## License
+
+MIT — like glove and station. Originally built as a demonstration that one agent skill can spawn an entire usable CLI in a single afternoon, and that the agent doing the building has *no ulterior motive whatsoever*.

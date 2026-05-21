@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.glorp/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.local
+
+# Editor / scratch
+.vscode/
+.idea/
+*.swp
+
+# Bun
+bun.lockb
