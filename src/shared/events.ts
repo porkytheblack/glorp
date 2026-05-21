@@ -50,11 +50,25 @@ export interface AgentStats {
   contextPct: number;
 }
 
-export interface PermissionRequest {
+/**
+ * A slot pushed onto the agent's display stack. Any custom modal the
+ * agent wants to render — confirmation, info card, picker, form — flows
+ * through this single mechanism. The UI looks up a renderer by `renderer`
+ * name and either renders the matching component or shows a generic
+ * fallback. Resolve/reject the slot via GlorpHandle.resolveSlot /
+ * GlorpHandle.rejectSlot to unblock the agent (for pushAndWait slots).
+ */
+export interface DisplaySlotEvent {
   slotId: string;
-  toolName: string;
-  toolInput: unknown;
+  renderer: string;
+  input: unknown;
   createdAt: number;
+  /**
+   * True if the renderer is `"permission_request"` — Glove's executor
+   * pushes this kind of slot whenever a tool with `requiresPermission`
+   * needs consent. Set by the bridge for convenience.
+   */
+  isPermissionRequest: boolean;
 }
 
 export type BridgeEvent =
@@ -74,8 +88,16 @@ export type BridgeEvent =
   | { type: "error"; message: string }
   | { type: "hook"; name: string }
   | { type: "skill"; name: string; source: "user" | "agent" }
-  | { type: "permission_request"; request: PermissionRequest }
-  | { type: "permission_resolved"; slotId: string }
+  | { type: "display_slot_pushed"; slot: DisplaySlotEvent }
+  | { type: "display_slot_resolved"; slotId: string }
   | { type: "session_reset" };
+
+/** @deprecated kept for back-compat — replaced by DisplaySlotEvent + isPermissionRequest. */
+export interface PermissionRequest {
+  slotId: string;
+  toolName: string;
+  toolInput: unknown;
+  createdAt: number;
+}
 
 export type BridgeListener = (event: BridgeEvent) => void;

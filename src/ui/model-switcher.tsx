@@ -3,8 +3,11 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import {
   CredentialsStore,
   modelAcceptsReasoning,
+  normaliseReasoning,
+  reasoningLabel,
+  reasoningOptionsFor,
 } from "../agent/credentials.ts";
-import type { ModelProfile, ReasoningEffort } from "../agent/credentials.ts";
+import type { ModelProfile } from "../agent/credentials.ts";
 import { theme } from "./theme.ts";
 import { Onboarding } from "./onboarding.tsx";
 
@@ -15,25 +18,20 @@ interface Props {
   onClose: () => void;
 }
 
-const REASONING_OPTIONS: Array<{ value: ReasoningEffort | undefined; label: string }> = [
-  { value: undefined, label: "off" },
-  { value: "minimal", label: "min" },
-  { value: "low", label: "low" },
-  { value: "medium", label: "med" },
-  { value: "high", label: "high" },
-];
-
 /**
  * Ctrl+M overlay. Shows saved profiles and:
  *   • enter — switch the active model
- *   • r     — cycle reasoning effort for the highlighted profile (in place)
+ *   • r     — cycle reasoning options for the highlighted profile (in place).
+ *             The cycle uses the provider-specific list — GPT-5/o-series get
+ *             effort levels, Anthropic gets budget tokens, OpenRouter gets
+ *             the reasoningObject (effort + cap), Qwen3 gets enable_thinking.
  *   • n     — open the onboarding flow inline to add a new profile
  *   • d     — delete the highlighted profile (not the active one)
  *   • esc   — close
  */
 export function ModelSwitcher({ credentials, activeProfileId, onPick, onClose }: Props) {
   const { width, height } = useTerminalDimensions();
-  const [tick, setTick] = useState(0); // forces a re-read after profile edits
+  const [tick, setTick] = useState(0);
   const [adding, setAdding] = useState(false);
   const [cursor, setCursor] = useState(0);
 
@@ -41,7 +39,7 @@ export function ModelSwitcher({ credentials, activeProfileId, onPick, onClose }:
   const clampedCursor = Math.min(cursor, Math.max(0, profiles.length - 1));
 
   useKeyboard((key) => {
-    if (adding) return; // onboarding owns the keyboard
+    if (adding) return;
     if (key.name === "escape") return onClose();
     if (profiles.length === 0) {
       if (key.name === "n" || key.name === "return") setAdding(true);
@@ -67,12 +65,14 @@ export function ModelSwitcher({ credentials, activeProfileId, onPick, onClose }:
     if (key.name === "r") {
       const p = profiles[clampedCursor];
       if (!p) return;
-      if (!modelAcceptsReasoning(p.providerId, p.model)) return;
-      const idx = REASONING_OPTIONS.findIndex((o) => o.value === p.reasoning);
-      const next = REASONING_OPTIONS[(idx + 1) % REASONING_OPTIONS.length]!;
+      const opts = reasoningOptionsFor(p.providerId, p.model);
+      if (opts.length === 0) return; // model doesn't accept reasoning
+      const current = normaliseReasoning(p.reasoning);
+      const idx = opts.findIndex(
+        (o) => JSON.stringify(o.value) === JSON.stringify(current),
+      );
+      const next = opts[(idx + 1) % opts.length]!;
       const updated: ModelProfile = { ...p, reasoning: next.value };
-      // Bump id so cycling reasoning saves to a stable id; if the new id
-      // collides with another profile, treat it as a swap-and-skip.
       const newId = CredentialsStore.makeProfileId(updated.providerId, updated.model, next.value);
       if (newId !== p.id) {
         credentials.removeProfile(p.id);
@@ -106,8 +106,8 @@ export function ModelSwitcher({ credentials, activeProfileId, onPick, onClose }:
     );
   }
 
-  const overlayW = Math.min(80, Math.max(54, width - 8));
-  const overlayH = Math.min(20, Math.max(12, profiles.length + 8));
+  const overlayW = Math.min(96, Math.max(60, width - 8));
+  const overlayH = Math.min(height - 4, Math.max(12, profiles.length + 8));
 
   return (
     <box
@@ -139,14 +139,14 @@ export function ModelSwitcher({ credentials, activeProfileId, onPick, onClose }:
               no profiles yet — press <span fg={theme.accent}>n</span> to add one.
             </text>
           )}
-          {profiles.map((p, i) => {
+          {profiles.slice(0, overlayH - 6).map((p, i) => {
             const active = p.id === activeProfileId;
             const highlighted = i === clampedCursor;
             const fg = highlighted ? theme.bg : active ? theme.accent : theme.text;
             const bg = highlighted ? theme.accent : "transparent";
             const reasoningCapable = modelAcceptsReasoning(p.providerId, p.model);
             const reasoningStr = reasoningCapable
-              ? ` [reasoning: ${p.reasoning ?? "off"}]`
+              ? ` [${reasoningLabel(normaliseReasoning(p.reasoning))}]`
               : "";
             const star = active ? "● " : "  ";
             return (

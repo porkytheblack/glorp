@@ -11,8 +11,8 @@ import { InputBar } from "./components/input-bar.tsx";
 import { ModelSwitcher } from "./model-switcher.tsx";
 import { SessionPicker } from "./session-picker.tsx";
 import { TransmissionsLog } from "./transmissions-log.tsx";
-import { PermissionPrompt } from "./permission-prompt.tsx";
 import { PermissionsList } from "./permissions-list.tsx";
+import { getSlotRenderer, UnknownSlot } from "./slot-renderers/index.tsx";
 import type { GlorpHandle } from "../agent/glorp.ts";
 
 const MIN_SIDEBAR = 26;
@@ -61,15 +61,21 @@ export function App({
   });
 
   // ---- Modal overlays --------------------------------------------------
-  // Permission prompts always win (the agent is blocked waiting on them).
-  const pendingPermission = state.permissionRequests[0];
-  if (pendingPermission) {
-    return (
-      <PermissionPrompt
-        request={pendingPermission}
-        onResolve={(allow) => glorp.resolvePermission(pendingPermission.slotId, allow)}
-      />
-    );
+  // Display-stack slots always win (the agent is blocked waiting on them).
+  // Renderer is looked up in the registry — built-ins handle
+  // permission_request / confirm / info / select_one / text_input; unknown
+  // renderer names fall back to a generic accept/reject prompt.
+  const pendingSlot = state.displaySlots[0];
+  if (pendingSlot) {
+    const Renderer = getSlotRenderer(pendingSlot.renderer) ?? UnknownSlot;
+    // React.createElement keeps the dynamic-component type clean — using
+    // <Renderer /> directly trips TS's "Promise<ReactNode> not assignable"
+    // check because ComponentType's signature is too lenient here.
+    return React.createElement(Renderer, {
+      slot: pendingSlot,
+      onResolve: (value: unknown) => glorp.resolveSlot(pendingSlot.slotId, value),
+      onReject: (reason?: string) => glorp.rejectSlot(pendingSlot.slotId, reason),
+    });
   }
 
   if (overlay === "model") {
@@ -143,6 +149,9 @@ export function App({
             width={mainWidth}
             height={transcriptH}
             workspace={workspace}
+            busy={state.busy}
+            activeSubagents={state.activeSubagents}
+            compacting={state.compacting}
           />
         </box>
         {sidebarVisible && <Sidebar state={state} width={sidebarWidth} />}
@@ -151,6 +160,8 @@ export function App({
         <InputBar
           busy={state.busy}
           width={width}
+          slashCommands={glorp.extensions.slash}
+          subagentMentions={glorp.extensions.mentions}
           onSubmit={(text) => {
             void glorp.send(text);
           }}
