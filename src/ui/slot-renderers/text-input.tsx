@@ -82,7 +82,7 @@ function SlotInputControl(props: SlotInputProps): React.ReactElement {
     onContentChange: adapter,
     onSubmit: () => props.onSubmit(),
     focused: true,
-    wrapText: true,
+    wrapMode: "word",
     placeholder: props.placeholder,
     textColor: theme.text,
     placeholderColor: theme.textDim,
