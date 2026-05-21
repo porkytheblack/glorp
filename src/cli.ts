@@ -6,7 +6,9 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import React from "react";
 import { App } from "./ui/app.tsx";
+import { Onboarding } from "./ui/onboarding.tsx";
 import { buildGlorp } from "./agent/glorp.ts";
+import { CredentialsStore } from "./agent/credentials.ts";
 import { GLORP_VERSION } from "./shared/version.ts";
 
 interface Args {
@@ -136,20 +138,34 @@ function describeInput(input: unknown): string {
 
 async function runTui(args: Args): Promise<void> {
   const dataDir = process.env.GLORP_DATA_DIR ?? path.join(os.homedir(), ".glorp");
-  ensureApiKey(args);
   fs.mkdirSync(dataDir, { recursive: true });
+  const credentials = new CredentialsStore(dataDir);
+
+  // Source-of-truth for "do we have a usable model right now":
+  //   1. explicit CLI flags
+  //   2. a saved profile in credentials
+  //   3. an env var pointing at a known provider
+  const needsOnboarding = !args.provider && !credentials.hasAny() && !envHasProvider();
+
+  const renderer = await createCliRenderer({
+    targetFps: 60,
+    exitOnCtrlC: false,
+  });
+
+  // If onboarding is needed, mount it first; only build the agent after
+  // the user picks a profile. This keeps the binary usable on first run
+  // without ever requiring an env var.
+  if (needsOnboarding) {
+    await runOnboardingFlow(renderer, credentials);
+  }
+
   const glorp = await buildGlorp({
     workspace: args.workspace,
     sessionId: args.sessionId,
     dataDir,
     provider: args.provider,
     model: args.model,
-  });
-  const modelLabel = args.model ?? args.provider ?? guessProviderLabel();
-
-  const renderer = await createCliRenderer({
-    targetFps: 60,
-    exitOnCtrlC: false,
+    credentials,
   });
 
   let stopped = false;
@@ -173,7 +189,6 @@ async function runTui(args: Args): Promise<void> {
     React.createElement(App, {
       glorp,
       workspace: args.workspace,
-      model: modelLabel,
       onQuit,
     }),
   );
@@ -182,41 +197,54 @@ async function runTui(args: Args): Promise<void> {
   process.on("SIGTERM", () => void onQuit());
 }
 
-function ensureApiKey(args: Args): void {
-  const provider =
-    args.provider ??
-    (process.env.ANTHROPIC_API_KEY
-      ? "anthropic"
-      : process.env.OPENAI_API_KEY
-        ? "openai"
-        : process.env.OPENROUTER_API_KEY
-          ? "openrouter"
-          : process.env.GEMINI_API_KEY
-            ? "gemini"
-            : null);
-  if (!provider) {
-    console.error(`
-glorp needs an LLM API key to do anything useful.
-
-set one of:
-  ANTHROPIC_API_KEY  (recommended — sonnet/opus)
-  OPENAI_API_KEY     (gpt-4.1)
-  OPENROUTER_API_KEY (any model via openrouter)
-  GEMINI_API_KEY     (gemini-2.5-flash)
-  GROQ_API_KEY       (llama-3.3-70b, fast)
-
-then re-run glorp.
-`);
-    process.exit(2);
-  }
+function envHasProvider(): boolean {
+  return Boolean(
+    process.env.ANTHROPIC_API_KEY ||
+      process.env.OPENAI_API_KEY ||
+      process.env.OPENROUTER_API_KEY ||
+      process.env.GEMINI_API_KEY ||
+      process.env.GROQ_API_KEY,
+  );
 }
 
-function guessProviderLabel(): string {
-  if (process.env.ANTHROPIC_API_KEY) return "anthropic";
-  if (process.env.OPENAI_API_KEY) return "openai";
-  if (process.env.OPENROUTER_API_KEY) return "openrouter";
-  if (process.env.GEMINI_API_KEY) return "gemini";
-  return "(no API key configured)";
+function ensureApiKey(args: Args): void {
+  if (args.provider) return;
+  if (envHasProvider()) return;
+  // For headless / --print mode we can't pop a TUI, so error out clearly.
+  console.error(`
+glorp needs a model configured. options:
+  • run \`glorp\` interactively to onboard (saves keys to ~/.glorp/credentials.json)
+  • set one of: ANTHROPIC_API_KEY · OPENAI_API_KEY · OPENROUTER_API_KEY · GEMINI_API_KEY · GROQ_API_KEY
+  • pass --provider <name> --model <id> on the command line
+`);
+  process.exit(2);
+}
+
+/**
+ * Mounts the onboarding screen and resolves when the user picks a profile
+ * (or rejects when they cancel out). The renderer is reused for the main
+ * app afterward — we just unmount the onboarding root.
+ */
+async function runOnboardingFlow(renderer: any, credentials: CredentialsStore): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const root = createRoot(renderer);
+    root.render(
+      React.createElement(Onboarding, {
+        credentials,
+        onComplete: () => {
+          root.unmount();
+          resolve();
+        },
+        onCancel: () => {
+          root.unmount();
+          renderer.destroy();
+          console.error("\nonboarding cancelled — no model configured.");
+          process.exit(2);
+          reject(new Error("cancelled"));
+        },
+      }),
+    );
+  });
 }
 
 async function main(): Promise<void> {

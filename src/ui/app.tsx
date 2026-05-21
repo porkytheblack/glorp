@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useTerminalDimensions, useKeyboard } from "@opentui/react";
 import { theme } from "./theme.ts";
 import { useUiState } from "./store.ts";
@@ -6,6 +6,7 @@ import { Transcript } from "./components/transcript.tsx";
 import { Sidebar } from "./components/sidebar.tsx";
 import { StatusBar } from "./components/status-bar.tsx";
 import { InputBar } from "./components/input-bar.tsx";
+import { ModelSwitcher } from "./model-switcher.tsx";
 import type { GlorpHandle } from "../agent/glorp.ts";
 
 const MIN_SIDEBAR = 26;
@@ -15,23 +16,49 @@ const NARROW_THRESHOLD = 90;
 export function App({
   glorp,
   workspace,
-  model,
   onQuit,
 }: {
   glorp: GlorpHandle;
   workspace: string;
-  model: string;
   onQuit: () => void;
 }) {
   const { width, height } = useTerminalDimensions();
   const state = useUiState();
+  const [modelLabel, setModelLabel] = useState(glorp.modelLabel);
+  const [showSwitcher, setShowSwitcher] = useState(false);
 
-  // Esc to abort current run.
+  // Subscribe to model-label changes (driven by swapProfile).
+  useEffect(() => glorp.onLabelChange(setModelLabel), [glorp]);
+
   useKeyboard((key) => {
-    if (key.name === "escape" && state.busy) {
+    // Ctrl+M opens the model switcher.
+    if (key.name === "m" && key.ctrl && !showSwitcher) {
+      setShowSwitcher(true);
+      return;
+    }
+    if (key.name === "escape" && state.busy && !showSwitcher) {
       glorp.abort();
     }
   });
+
+  if (showSwitcher) {
+    return (
+      <ModelSwitcher
+        credentials={glorp.credentials}
+        activeProfileId={glorp.credentials.getActiveProfile()?.id}
+        onPick={async (profileId) => {
+          setShowSwitcher(false);
+          try {
+            await glorp.swapProfile(profileId);
+          } catch (err) {
+            // Pickup will retry on next switch; silent failure here is fine
+            // because errors land on the bridge via the agent's normal path.
+          }
+        }}
+        onClose={() => setShowSwitcher(false)}
+      />
+    );
+  }
 
   const sidebarVisible = width >= NARROW_THRESHOLD;
   const sidebarWidth = Math.max(
@@ -45,7 +72,7 @@ export function App({
 
   return (
     <box flexDirection="column" width={width} height={height} backgroundColor={theme.bg}>
-      <StatusBar state={state} workspace={workspace} model={model} />
+      <StatusBar state={state} workspace={workspace} model={modelLabel} />
       <box flexDirection="row" flexGrow={1}>
         <box flexDirection="column" width={mainWidth} height={transcriptH}>
           <Transcript
