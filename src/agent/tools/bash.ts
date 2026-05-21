@@ -30,6 +30,7 @@ export function bashTool(workspace: string): GloveFoldArgs<{
       "Run a shell command in the workspace via bash -c. Returns combined stdout+stderr + exit code. " +
       "Use dedicated tools (read/write/edit/grep/glob) when one applies. " +
       "Always include `description` so the user sees what you're doing.",
+    requiresPermission: true,
     inputSchema: z.object({
       command: z.string().describe("Shell command to run"),
       description: z.string().describe("One-sentence active-voice summary of what this command does"),

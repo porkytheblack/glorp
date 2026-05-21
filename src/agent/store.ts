@@ -89,7 +89,7 @@ export class GlorpStore implements StoreAdapter {
             tokensOut: 0,
             turnCount: await this.inner.getTurnCount(),
             tasks: (await this.inner.getTasks()) ?? [],
-            permissions: {},
+            permissions: this.inner.getAllPermissions(),
             inboxItems: (await this.inner.getInboxItems()) ?? [],
           };
           const tmp = `${this.filePath}.tmp`;

@@ -26,6 +26,7 @@ export function fleetDispatchTool(
       "command across many targets), or 'shell-fanout' (run an arbitrary shell snippet). " +
       "Use this when 3+ jobs are independent and serial execution would be wasteful. " +
       "Set blocking=true to mark the inbox items as blocking — you should wait for them.",
+    requiresPermission: true,
     inputSchema: z.object({
       kind: z
         .enum(["research", "edit-fanout", "shell-fanout"])

@@ -33,6 +33,7 @@ import { getBridge } from "../shared/bridge.ts";
 import type { TaskItem, InboxEntry, ToolEvent, ChatTurn } from "../shared/events.ts";
 import type { GlorpFleet } from "./station-bridge.ts";
 import { createFleet } from "./station-bridge.ts";
+import { CredentialsStore } from "./credentials.ts";
 import * as path from "node:path";
 import * as os from "node:os";
 
@@ -40,17 +41,41 @@ export interface GlorpHandle {
   agent: IGloveRunnable;
   fleet: GlorpFleet;
   store: GlorpStore;
+  credentials: CredentialsStore;
+  /** Active session ID (drives the file path under sessions/). */
+  sessionId: string;
+  /** Human-readable label for the active model (e.g. "anthropic · sonnet"). */
+  modelLabel: string;
   send(text: string): Promise<void>;
   abort(): void;
   shutdown(): Promise<void>;
+  /**
+   * Hot-swap the active model to the given profile. Updates the agent's
+   * adapter, persists it as active in the credentials store, and pushes a
+   * fresh status event for the UI.
+   */
+  swapProfile(profileId: string): Promise<void>;
+  /** Resolve a pending permission request slot (true = allow, false = deny). */
+  resolvePermission(slotId: string, allow: boolean): void;
+  /**
+   * Force-clear a stored permission (so the next call re-prompts). Used by
+   * the permissions-list overlay to revoke previously granted/denied tools.
+   */
+  clearPermission(toolName: string): Promise<void>;
+  /** Subscribe to model-label changes (for the status bar). */
+  onLabelChange(fn: (label: string) => void): () => void;
 }
 
 export interface BuildGlorpOptions {
   workspace: string;
   sessionId: string;
   dataDir?: string;
+  /** CLI-supplied provider override — takes precedence over credentials. */
   provider?: string;
+  /** CLI-supplied model override. */
   model?: string;
+  /** Inject a pre-built credentials store (useful for tests). */
+  credentials?: CredentialsStore;
 }
 
 const CONTEXT_LIMIT = 180_000;
@@ -77,10 +102,45 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const dataDir = opts.dataDir ?? path.join(os.homedir(), ".glorp");
   const store = new GlorpStore(opts.sessionId, dataDir);
   if (process.env.GLORP_DEBUG) console.error("[boot] store ready");
-  const model: ModelAdapter = await pickModel(opts);
-  if (process.env.GLORP_DEBUG) console.error("[boot] model ready");
+  const credentials = opts.credentials ?? new CredentialsStore(dataDir);
+  const picked = await pickModel({
+    provider: opts.provider,
+    model: opts.model,
+    credentials,
+  });
+  let model: ModelAdapter = picked.adapter;
+  let modelLabel = picked.label;
+  if (process.env.GLORP_DEBUG) console.error("[boot] model ready:", modelLabel);
   const displayManager = new Displaymanager();
   const bridge = getBridge();
+  const labelListeners = new Set<(label: string) => void>();
+
+  // Bridge permission_request slots into bridge events so the React TUI
+  // can render an overlay and answer. Glove pushes a slot like
+  // `{ renderer: "permission_request", input: { toolName, toolInput } }`
+  // and blocks until `displayManager.resolve(slotId, value)` fires.
+  const seenSlots = new Set<string>();
+  displayManager.subscribe(async (stack) => {
+    for (const slot of stack) {
+      if (slot.renderer !== "permission_request") continue;
+      if (seenSlots.has(slot.id)) continue;
+      seenSlots.add(slot.id);
+      const input = slot.input as { toolName?: string; toolInput?: unknown };
+      bridge.emit({
+        type: "permission_request",
+        request: {
+          slotId: slot.id,
+          toolName: input.toolName ?? "(unknown)",
+          toolInput: input.toolInput,
+          createdAt: Date.now(),
+        },
+      });
+    }
+    // Drop ids of slots no longer in the stack so a re-pushed slot
+    // (after `resolve`) gets re-announced if Glove repeats the prompt.
+    const live = new Set(stack.map((s) => s.id));
+    for (const id of seenSlots) if (!live.has(id)) seenSlots.delete(id);
+  });
 
   // Build the fleet first so we can wire its inbox-resolver to the
   // running agent's context once we have it.
@@ -450,6 +510,44 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     agent,
     fleet,
     store,
+    credentials,
+    sessionId: opts.sessionId,
+    get modelLabel() {
+      return modelLabel;
+    },
+    onLabelChange(fn) {
+      labelListeners.add(fn);
+      return () => {
+        labelListeners.delete(fn);
+      };
+    },
+    resolvePermission(slotId: string, allow: boolean) {
+      try {
+        displayManager.resolve(slotId, allow);
+      } catch {
+        // The slot may have already been resolved (e.g. duplicate click);
+        // silently ignore — the bridge gets a permission_resolved either way.
+      }
+      bridge.emit({ type: "permission_resolved", slotId });
+    },
+    async clearPermission(toolName: string) {
+      await store.setPermission(toolName, "unset");
+    },
+    async swapProfile(profileId: string) {
+      const next = await pickModel({ profileId, credentials });
+      // Hot-swap is only safe when no request is in flight; abort any
+      // pending one first so the new model owns the next prompt.
+      abortController?.abort();
+      agent.setModel(next.adapter);
+      model = next.adapter;
+      modelLabel = next.label;
+      credentials.setActive(profileId);
+      for (const fn of labelListeners) {
+        try {
+          fn(modelLabel);
+        } catch {}
+      }
+    },
     async send(text: string) {
       abortController?.abort();
       abortController = new AbortController();

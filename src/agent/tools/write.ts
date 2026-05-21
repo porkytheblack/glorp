@@ -17,7 +17,7 @@ export function writeTool(workspace: string): GloveFoldArgs<{
       path: z.string().describe("File path (absolute or relative to workspace)"),
       content: z.string().describe("Full file content to write"),
     }),
-    requiresPermission: false,
+    requiresPermission: true,
     async do(input) {
       const abs = resolveSafePath(workspace, input.path);
       const existed = fs.existsSync(abs);

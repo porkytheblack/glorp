@@ -80,7 +80,13 @@ export class MemoryStore implements StoreAdapter {
   }
 
   async setPermission(toolName: string, status: PermissionStatus): Promise<void> {
-    this.permissions.set(toolName, status);
+    if (status === "unset") this.permissions.delete(toolName);
+    else this.permissions.set(toolName, status);
+  }
+
+  /** Non-StoreAdapter helper — used by GlorpStore to snapshot all permissions. */
+  getAllPermissions(): Record<string, PermissionStatus> {
+    return Object.fromEntries(this.permissions);
   }
 
   async getInboxItems(): Promise<InboxItem[]> {

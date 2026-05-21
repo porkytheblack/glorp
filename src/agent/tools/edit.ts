@@ -15,6 +15,7 @@ export function editTool(workspace: string): GloveFoldArgs<{
       "Replace an exact string in a file. `old_string` must match exactly (whitespace included) and must be unique unless `replace_all: true`. " +
       "Always `read` the file first so you know the exact content. " +
       "Returns a small diff summary.",
+    requiresPermission: true,
     inputSchema: z.object({
       path: z.string().describe("File path to edit"),
       old_string: z.string().describe("Exact text to replace"),
