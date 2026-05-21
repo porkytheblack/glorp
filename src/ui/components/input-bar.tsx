@@ -215,7 +215,7 @@ export function InputBar({
             onContentChange={setValue}
             onSubmit={() => performSubmit(value)}
             focused
-            wrapText
+            wrapMode="word"
             placeholder={placeholder}
             textColor={theme.text}
             placeholderColor={busy ? theme.warning : theme.textDim}
@@ -240,7 +240,8 @@ interface GlorpTextareaProps {
   onContentChange?: (value: string) => void;
   onSubmit?: () => void;
   focused?: boolean;
-  wrapText?: boolean;
+  /** Wrap long lines. "word" wraps at word boundaries, "char" at any char. */
+  wrapMode?: "none" | "char" | "word";
   placeholder?: string;
   textColor?: string;
   placeholderColor?: string;
