@@ -13,6 +13,8 @@ import { SessionPicker } from "./session-picker.tsx";
 import { TransmissionsLog } from "./transmissions-log.tsx";
 import { PermissionsList } from "./permissions-list.tsx";
 import { getSlotRenderer, UnknownSlot } from "./slot-renderers/index.tsx";
+import { EmptyHero } from "./empty-hero.tsx";
+import { GLORP_VERSION } from "../shared/version.ts";
 import type { GlorpHandle } from "../agent/glorp.ts";
 
 const MIN_SIDEBAR = 26;
@@ -127,7 +129,31 @@ export function App({
     );
   }
 
-  // ---- Main app --------------------------------------------------------
+  // ---- Empty-state landing --------------------------------------------
+  // Before any messages exist, show a centred logo + compact input.
+  // Status footer (workspace · version) sits at the very bottom. This
+  // matches the OpenCode-style landing the user wants — chrome stays
+  // out of the way until the conversation actually starts.
+  if (state.turns.length === 0 && !state.streamingText) {
+    return (
+      <EmptyHero
+        width={width}
+        height={height}
+        modelLabel={modelLabel}
+        workspace={workspace}
+        busy={state.busy}
+        slashCommands={glorp.extensions.slash}
+        subagentMentions={glorp.extensions.mentions}
+        onSubmit={(text) => {
+          void glorp.send(text);
+        }}
+        onAbort={() => glorp.abort()}
+        onQuit={onQuit}
+      />
+    );
+  }
+
+  // ---- Active chat ----------------------------------------------------
   const sidebarVisible = width >= NARROW_THRESHOLD;
   const sidebarWidth = Math.max(
     MIN_SIDEBAR,
@@ -136,7 +162,8 @@ export function App({
   const mainWidth = sidebarVisible ? width - sidebarWidth : width;
   const statusH = 1;
   const inputH = 5; // border 2 + content 3
-  const transcriptH = Math.max(1, height - statusH - inputH);
+  const footerH = 1;
+  const transcriptH = Math.max(1, height - statusH - inputH - footerH);
 
   return (
     <box flexDirection="column" width={width} height={height} backgroundColor={theme.bg}>
@@ -160,6 +187,7 @@ export function App({
         <InputBar
           busy={state.busy}
           width={width}
+          modelLabel={modelLabel}
           slashCommands={glorp.extensions.slash}
           subagentMentions={glorp.extensions.mentions}
           onSubmit={(text) => {
@@ -169,6 +197,18 @@ export function App({
           onQuit={onQuit}
         />
       </box>
+      {/* OpenCode-style footer: workspace path (left) + version (right). */}
+      <box flexDirection="row" justifyContent="space-between" width={width} paddingX={1}>
+        <text fg={theme.textDim}>{truncatePath(workspace, Math.floor(width / 2) - 4)}</text>
+        <text fg={theme.textDim}>v{GLORP_VERSION}</text>
+      </box>
     </box>
   );
+}
+
+function truncatePath(p: string, max = 38): string {
+  if (p.length <= max) return p;
+  const parts = p.split("/");
+  if (parts.length <= 2) return "…" + p.slice(-(max - 1));
+  return ".../" + parts.slice(-2).join("/");
 }
