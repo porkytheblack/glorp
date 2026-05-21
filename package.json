@@ -11,6 +11,7 @@
     "start": "bun run src/cli.ts",
     "dev": "bun run --watch src/cli.ts",
     "build": "bun build src/cli.ts --compile --minify --target=bun --outfile=dist/glorp",
+    "install-bin": "bash scripts/install.sh",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/",
     "ci": "bun run typecheck && bun run test"
