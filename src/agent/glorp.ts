@@ -27,6 +27,10 @@ import {
   webFetchTool,
   transmissionTool,
   fleetDispatchTool,
+  askConfirmTool,
+  showInfoTool,
+  askChoiceTool,
+  askTextTool,
 } from "./tools/index.ts";
 import { plannerSubAgent, researcherSubAgent, reviewerSubAgent } from "./subagents.ts";
 import { getBridge } from "../shared/bridge.ts";
@@ -55,7 +59,11 @@ export interface GlorpHandle {
    * fresh status event for the UI.
    */
   swapProfile(profileId: string): Promise<void>;
-  /** Resolve a pending permission request slot (true = allow, false = deny). */
+  /** Resolve any pending display-stack slot with the given value. */
+  resolveSlot(slotId: string, value: unknown): void;
+  /** Reject any pending display-stack slot with an optional reason. */
+  rejectSlot(slotId: string, reason?: string): void;
+  /** Convenience: resolve a permission-request slot (true = allow, false = deny). */
   resolvePermission(slotId: string, allow: boolean): void;
   /**
    * Force-clear a stored permission (so the next call re-prompts). Used by
@@ -115,28 +123,28 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const bridge = getBridge();
   const labelListeners = new Set<(label: string) => void>();
 
-  // Bridge permission_request slots into bridge events so the React TUI
-  // can render an overlay and answer. Glove pushes a slot like
-  // `{ renderer: "permission_request", input: { toolName, toolInput } }`
-  // and blocks until `displayManager.resolve(slotId, value)` fires.
+  // Bridge ALL display-stack pushes into bridge events so the React TUI
+  // can render any custom modal — not just permission prompts. Glove's
+  // executor pushes `permission_request` slots automatically; the agent
+  // (or any tool) can push other renderers via `pushAndWait` to collect
+  // input or show information.
   const seenSlots = new Set<string>();
   displayManager.subscribe(async (stack) => {
     for (const slot of stack) {
-      if (slot.renderer !== "permission_request") continue;
       if (seenSlots.has(slot.id)) continue;
       seenSlots.add(slot.id);
-      const input = slot.input as { toolName?: string; toolInput?: unknown };
       bridge.emit({
-        type: "permission_request",
-        request: {
+        type: "display_slot_pushed",
+        slot: {
           slotId: slot.id,
-          toolName: input.toolName ?? "(unknown)",
-          toolInput: input.toolInput,
+          renderer: slot.renderer,
+          input: slot.input,
           createdAt: Date.now(),
+          isPermissionRequest: slot.renderer === "permission_request",
         },
       });
     }
-    // Drop ids of slots no longer in the stack so a re-pushed slot
+    // Drop ids of slots no longer in the stack so a re-pushed slot id
     // (after `resolve`) gets re-announced if Glove repeats the prompt.
     const live = new Set(stack.map((s) => s.id));
     for (const id of seenSlots) if (!live.has(id)) seenSlots.delete(id);
@@ -396,7 +404,15 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     .fold(lsTool(opts.workspace))
     .fold(webFetchTool)
     .fold(transmissionTool(dataDir))
-    .fold(fleetDispatchTool(fleet, ctxRef));
+    .fold(fleetDispatchTool(fleet, ctxRef))
+    // Modal-style tools — the agent pushes a slot onto the displayManager
+    // and the React UI picks up the matching renderer from the slot
+    // registry. Block-on-user-input semantics for the first three; the
+    // info tool blocks until the user dismisses.
+    .fold(askConfirmTool)
+    .fold(showInfoTool)
+    .fold(askChoiceTool)
+    .fold(askTextTool);
   // glove_update_tasks / glove_post_to_inbox aren't auto-registered by
   // Glove — they're factories the caller must fold. We do that below
   // once the Context is built (they need it).
@@ -521,14 +537,26 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         labelListeners.delete(fn);
       };
     },
+    resolveSlot(slotId: string, value: unknown) {
+      try {
+        displayManager.resolve(slotId, value);
+      } catch {
+        // The slot may have already been resolved (e.g. duplicate click);
+        // silently ignore.
+      }
+      bridge.emit({ type: "display_slot_resolved", slotId });
+    },
+    rejectSlot(slotId: string, reason?: string) {
+      try {
+        displayManager.reject(slotId, reason);
+      } catch {}
+      bridge.emit({ type: "display_slot_resolved", slotId });
+    },
     resolvePermission(slotId: string, allow: boolean) {
       try {
         displayManager.resolve(slotId, allow);
-      } catch {
-        // The slot may have already been resolved (e.g. duplicate click);
-        // silently ignore — the bridge gets a permission_resolved either way.
-      }
-      bridge.emit({ type: "permission_resolved", slotId });
+      } catch {}
+      bridge.emit({ type: "display_slot_resolved", slotId });
     },
     async clearPermission(toolName: string) {
       await store.setPermission(toolName, "unset");

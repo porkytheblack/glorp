@@ -80,61 +80,86 @@ describe("buildGlorp wires permissions through to the store", () => {
 });
 
 describe("permission_request bridge event", () => {
-  test("emits when a permission_request slot lands on the displayManager", async () => {
+  test("emits display_slot_pushed when a permission_request lands", async () => {
     const g = await buildGlorp({ workspace, sessionId: "perm-bridge", dataDir });
     try {
       const events: any[] = [];
       const unsub = getBridge().subscribe((e) => events.push(e));
 
-      // Directly push a permission_request slot, simulating what Glove's
-      // executor does when a requiresPermission tool fires with status=unset.
       const dm = (g.agent as any).displayManager;
       const pushPromise = dm.pushAndWait({
         renderer: "permission_request",
         input: { toolName: "bash", toolInput: { command: "ls", description: "list" } },
       });
 
-      // Give the subscribe listener a tick to run.
       await new Promise((r) => setTimeout(r, 50));
-      const req = events.find((e) => e.type === "permission_request");
-      expect(req).toBeDefined();
-      expect(req.request.toolName).toBe("bash");
-      expect((req.request.toolInput as any).command).toBe("ls");
-      expect(typeof req.request.slotId).toBe("string");
+      const ev = events.find(
+        (e) => e.type === "display_slot_pushed" && e.slot.renderer === "permission_request",
+      );
+      expect(ev).toBeDefined();
+      expect(ev.slot.isPermissionRequest).toBe(true);
+      expect((ev.slot.input as any).toolName).toBe("bash");
+      expect(typeof ev.slot.slotId).toBe("string");
 
-      // Resolve via GlorpHandle.resolvePermission (the wire the UI uses).
-      g.resolvePermission(req.request.slotId, true);
+      // Resolve via GlorpHandle.resolvePermission (back-compat) — should also
+      // work via the generic resolveSlot path.
+      g.resolvePermission(ev.slot.slotId, true);
       const result = await pushPromise;
       expect(result).toBe(true);
 
-      // permission_resolved bridge event fires too.
-      const resolved = events.find((e) => e.type === "permission_resolved");
+      const resolved = events.find((e) => e.type === "display_slot_resolved");
       expect(resolved).toBeDefined();
-      expect(resolved.slotId).toBe(req.request.slotId);
+      expect(resolved.slotId).toBe(ev.slot.slotId);
       unsub();
     } finally {
       await g.shutdown();
     }
   });
 
-  test("does NOT emit for non-permission slots", async () => {
-    const g = await buildGlorp({ workspace, sessionId: "perm-nonperm", dataDir });
+  test("generic display_slot bridges non-permission renderers too", async () => {
+    const g = await buildGlorp({ workspace, sessionId: "perm-generic", dataDir });
     try {
       const events: any[] = [];
       const unsub = getBridge().subscribe((e) => events.push(e));
 
       const dm = (g.agent as any).displayManager;
-      // Push a regular slot — should NOT emit a permission_request event.
-      const promise = dm.pushAndWait({
-        renderer: "some_other_renderer",
-        input: { hi: 1 },
+      const pushPromise = dm.pushAndWait({
+        renderer: "confirm",
+        input: { message: "delete it?" },
       });
       await new Promise((r) => setTimeout(r, 50));
-      const req = events.find((e) => e.type === "permission_request");
-      expect(req).toBeUndefined();
+      const ev = events.find(
+        (e) => e.type === "display_slot_pushed" && e.slot.renderer === "confirm",
+      );
+      expect(ev).toBeDefined();
+      expect(ev.slot.isPermissionRequest).toBe(false);
 
-      dm.resolve(dm.stack[dm.stack.length - 1].id, "ok");
-      await promise;
+      g.resolveSlot(ev.slot.slotId, true);
+      const result = await pushPromise;
+      expect(result).toBe(true);
+      unsub();
+    } finally {
+      await g.shutdown();
+    }
+  });
+
+  test("rejectSlot rejects the pushAndWait promise", async () => {
+    const g = await buildGlorp({ workspace, sessionId: "perm-reject", dataDir });
+    try {
+      const events: any[] = [];
+      const unsub = getBridge().subscribe((e) => events.push(e));
+
+      const dm = (g.agent as any).displayManager;
+      const pushPromise = dm.pushAndWait({
+        renderer: "text_input",
+        input: { question: "your name?" },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      const ev = events.find((e) => e.type === "display_slot_pushed");
+      expect(ev).toBeDefined();
+
+      g.rejectSlot(ev.slot.slotId, "user cancelled");
+      await expect(pushPromise).rejects.toThrow();
       unsub();
     } finally {
       await g.shutdown();
