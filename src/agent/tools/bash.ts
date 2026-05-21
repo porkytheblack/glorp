@@ -9,7 +9,7 @@ const DANGEROUS_PATTERNS = [
   /:\(\)\{.*\}\s*;:/, // fork bomb
   /\bmkfs\b/,
   /\bdd\s+if=/,
-  /\b>+\s*\/dev\/(sd[a-z]|nvme\d+n\d+|vd[a-z]|xvd[a-z])/,
+  />+\s*\/dev\/(sd[a-z]|nvme\d+n\d+|vd[a-z]|xvd[a-z])/,
 ];
 
 function dangerousReason(cmd: string): string | null {

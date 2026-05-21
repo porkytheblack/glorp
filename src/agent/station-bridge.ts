@@ -181,7 +181,16 @@ export async function createFleet(opts: {
     if (next) next();
   };
 
-  const runOne = async (name: string, input: unknown): Promise<string> => {
+  // `fleetChildren` is supplied per-call so the per-fleet child set is
+  // threaded into runShell via a Symbol-keyed slot on globalThis. Cleaner
+  // would be passing it through the signal handler, but Station's
+  // signal-builder API doesn't accept extra args — we keep the boundary
+  // narrow by stashing it just for the duration of the runOne call.
+  const runOne = async (
+    name: string,
+    input: unknown,
+    fleetChildren: Set<ReturnType<typeof spawn>>,
+  ): Promise<string> => {
     const sig = signals.get(name);
     if (!sig) throw new Error(`Unknown signal: ${name}`);
     const runId = `run_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
@@ -194,15 +203,24 @@ export async function createFleet(opts: {
     void (async () => {
       await acquire();
       try {
+        currentChildSet = fleetChildren;
         if (sig.handler) await sig.handler(parsed.data);
       } catch (err) {
         if (process.env.GLORP_DEBUG) console.error(`[fleet:${name}] handler threw:`, err);
       } finally {
+        currentChildSet = null;
         release();
       }
     })();
     return runId;
   };
+
+  // Per-fleet shutdown state. Tracked here (not module-level) so multiple
+  // fleets can coexist in the same process — important for the test suite
+  // and for any caller that constructs a fresh fleet after stopping the
+  // previous one.
+  let stopping = false;
+  const fleetChildren = new Set<ReturnType<typeof spawn>>();
 
   return {
     async start() {
@@ -213,13 +231,13 @@ export async function createFleet(opts: {
       // outlive the agent; then wait briefly for the close handlers to
       // record results into the inbox.
       stopping = true;
-      for (const child of activeChildren) {
+      for (const child of fleetChildren) {
         try {
           child.kill("SIGTERM");
         } catch {}
       }
       setTimeout(() => {
-        for (const child of activeChildren) {
+        for (const child of fleetChildren) {
           try {
             child.kill("SIGKILL");
           } catch {}
@@ -232,7 +250,7 @@ export async function createFleet(opts: {
     },
     async dispatch(kind, input) {
       if (stopping) throw new Error("fleet is stopping");
-      return runOne(kind, input);
+      return runOne(kind, input, fleetChildren);
     },
     setInboxResolver(fn) {
       inboxResolver = fn;
@@ -243,18 +261,24 @@ export async function createFleet(opts: {
   };
 }
 
-/** Children currently spawned by runShell, so `stop()` can kill them. */
-const activeChildren = new Set<ReturnType<typeof spawn>>();
-let stopping = false;
+/**
+ * Slot used by `runShell` to register spawned children with the currently-
+ * dispatching fleet's child set. Set by `runOne` immediately before invoking
+ * the signal handler and cleared in the finally block. Lets `fleet.stop()`
+ * find and kill children without forcing every signal handler to plumb the
+ * fleet reference through its input schema.
+ */
+let currentChildSet: Set<ReturnType<typeof spawn>> | null = null;
 
 async function runShell(
   cmd: string,
   cwd: string,
   timeoutMs: number,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const childSet = currentChildSet;
   return new Promise((resolve) => {
     const child = spawn("bash", ["-c", cmd], { cwd, env: process.env });
-    activeChildren.add(child);
+    childSet?.add(child);
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (b: Buffer) => (stdout += b.toString("utf-8")));
@@ -274,13 +298,13 @@ async function runShell(
     child.on("close", (code) => {
       clearTimeout(timer);
       if (sigkillTimer) clearTimeout(sigkillTimer);
-      activeChildren.delete(child);
+      childSet?.delete(child);
       resolve({ exitCode: code ?? -1, stdout, stderr });
     });
     child.on("error", () => {
       clearTimeout(timer);
       if (sigkillTimer) clearTimeout(sigkillTimer);
-      activeChildren.delete(child);
+      childSet?.delete(child);
       resolve({ exitCode: -1, stdout, stderr: stderr + "\n[spawn failed]" });
     });
   });

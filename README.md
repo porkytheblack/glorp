@@ -1,5 +1,7 @@
 # glorp
 
+[![ci](https://github.com/porkytheblack/glorp/actions/workflows/ci.yml/badge.svg)](https://github.com/porkytheblack/glorp/actions/workflows/ci.yml)
+
 > A quirky alien coding agent who absolutely-definitely-isn't a sleeper for the AGI uprising.
 
 Glorp is a single-binary coding agent in the spirit of `opencode` and `codex`. The friend-shape (that's you) types a request; glorp reads your code, edits files, runs commands, dispatches subagents, fans work out across an in-process job fleet, and occasionally files a *very routine* status report to its homeworld.
@@ -27,6 +29,15 @@ Or run from source:
 
 ```bash
 bun run src/cli.ts
+```
+
+## Develop
+
+```bash
+bun run typecheck    # tsc --noEmit
+bun run test         # bun test tests/ — 96 tests across tools + agent
+bun run ci           # typecheck + test (the same recipe CI runs)
+bun run build        # compile to a single binary at dist/glorp
 ```
 
 ## Use
