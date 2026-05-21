@@ -13,6 +13,16 @@ interface Props {
   /** Dynamic catalogue from the agent; falls back to the hardcoded list. */
   slashCommands?: SlashCommand[];
   subagentMentions?: SlashCommand[];
+  /**
+   * Visual variant:
+   *   - "default" — pinned at the bottom of the chat layout with a
+   *     verbose hint line ("enter ↩ send · shift+↩ newline · …").
+   *   - "hero"    — centred on the empty-state landing. Rounded border,
+   *     coloured left accent, model + hints rendered INSIDE the box.
+   */
+  variant?: "default" | "hero";
+  /** Human-readable model label rendered in the hero variant footer. */
+  modelLabel?: string;
 }
 
 const MIN_LINES = 1;
@@ -43,6 +53,8 @@ export function InputBar({
   width,
   slashCommands = SLASH_COMMANDS,
   subagentMentions = SUBAGENT_MENTIONS,
+  variant = "default",
+  modelLabel,
 }: Props) {
   const [value, setValue] = useState("");
   const [menuIndex, setMenuIndex] = useState(0);
@@ -151,14 +163,69 @@ export function InputBar({
       }
       return;
     }
+
+    // Enter (no shift, no ctrl/meta): submit. Belt-and-braces with the
+    // textarea's onSubmit — whichever fires first wins, the other is
+    // deduped via `lastSubmitMsRef`. Some terminal/keymap combos drop
+    // the `keyBindings` override on the textarea, so this useKeyboard
+    // backstop guarantees Enter always submits.
+    if (
+      (key.name === "return" || key.name === "kpenter" || key.name === "linefeed") &&
+      !key.shift &&
+      !key.ctrl &&
+      !key.meta
+    ) {
+      // Read the latest content from the textarea's buffer in case the
+      // React `value` state hasn't propagated this frame yet.
+      const latest = (textareaRef.current as { plainText?: string } | null)?.plainText ?? value;
+      performSubmit(latest);
+      return;
+    }
+
+    // Shift+Enter: insert a newline at the cursor. Backstop for envs where
+    // the textarea's keymap override doesn't apply. The textarea also
+    // handles this via its keymap; we dedupe via newlineInflightRef so
+    // we don't insert two newlines.
+    if (
+      (key.name === "return" || key.name === "kpenter" || key.name === "linefeed") &&
+      key.shift &&
+      !key.ctrl &&
+      !key.meta
+    ) {
+      if (newlineInflightRef.current) return;
+      newlineInflightRef.current = true;
+      setTimeout(() => {
+        newlineInflightRef.current = false;
+      }, 0);
+      const ed = textareaRef.current?.editBuffer;
+      const eb = ed as { insertText?: (s: string) => void } | undefined;
+      if (eb && typeof eb.insertText === "function") {
+        eb.insertText("\n");
+      } else {
+        setValue((v) => v + "\n");
+        setInstanceKey((k) => k + 1);
+      }
+      return;
+    }
   });
 
+  // Inflight guards for the Enter/Shift+Enter belt-and-braces handlers
+  // (see useKeyboard above). Released on the next tick.
+  const submitInflightRef = useRef(false);
+  const newlineInflightRef = useRef(false);
+
   const performSubmit = (text: string) => {
+    // Dedupe across the two Enter paths (useKeyboard backstop + textarea
+    // .onSubmit). Whichever fires first wins; the other call returns
+    // immediately because the inflight flag is set. The flag is released
+    // on the next tick so subsequent submits work.
+    if (submitInflightRef.current) return;
+    submitInflightRef.current = true;
+    setTimeout(() => {
+      submitInflightRef.current = false;
+    }, 0);
     const t = text.trim();
     if (!t) return;
-    // Block new submissions while the agent is working — the user should
-    // either wait or hit ctrl-c first. Otherwise they get confused about
-    // whether their message landed.
     if (busy) return;
     // Clear the buffer FIRST so the user sees the input empty on next
     // render even if onSubmit is synchronous.
@@ -193,14 +260,76 @@ export function InputBar({
     [],
   );
 
-  // Border + placeholder vocabulary changes when busy so the loading
-  // state is obvious. The transcript also shows a "thinking" row.
   const borderColor = busy ? theme.warning : theme.borderActive;
-  const promptGlyph = busy ? "…" : "›";
   const placeholder = busy
     ? "agent is thinking · press ctrl-c to interrupt"
-    : "ask, command, or /slash · @subagent · shift+enter newline · ctrl-c to quit";
+    : "ask, command, or /slash · @subagent · shift+enter newline";
 
+  if (variant === "hero") {
+    // Hero variant: a single rounded box containing the textarea on top,
+    // a thin separator, and a model-info row at the bottom. Below the box
+    // we render a single tight hint line. Matches the OpenCode landing
+    // shape: input is the centrepiece, chrome stays out of the way.
+    const accent = busy ? theme.warning : theme.accentSoft;
+    return (
+      <box flexDirection="column" width={width}>
+        <SlashMenu
+          query={lastToken}
+          selectedIndex={menuIndex}
+          width={width}
+          slashCommands={slashCommands}
+          subagentMentions={subagentMentions}
+        />
+        <box
+          flexDirection="row"
+          border
+          borderStyle="rounded"
+          borderColor={accent}
+          padding={0}
+          width={width}
+          alignItems="stretch"
+        >
+          {/* Coloured left accent: a single-cell stripe of background colour. */}
+          <box width={1} backgroundColor={accent} />
+          <box flexDirection="column" flexGrow={1} paddingX={1} paddingY={0}>
+            <box height={visibleLines} flexDirection="row">
+              <GlorpTextarea
+                key={instanceKey}
+                innerRef={textareaRef}
+                initialValue={value}
+                onContentChange={setValue}
+                onSubmit={() => performSubmit(value)}
+                focused
+                wrapMode="word"
+                keyBindings={submitOnEnterBindings}
+                placeholder={placeholder}
+                textColor={theme.text}
+                placeholderColor={busy ? theme.warning : theme.textDim}
+                backgroundColor="transparent"
+                focusedBackgroundColor="transparent"
+              />
+            </box>
+            <box marginTop={1} flexDirection="row">
+              <text fg={theme.accentSoft}>
+                <strong>Build</strong>
+              </text>
+              <text fg={theme.textDim}> · </text>
+              <text fg={theme.textMuted}>{modelLabel ?? "no model"}</text>
+            </box>
+          </box>
+        </box>
+        <box flexDirection="row" justifyContent="flex-end" paddingX={1} marginTop={1}>
+          <text fg={theme.textDim}>
+            <span fg={theme.text}>tab</span> agents · <span fg={theme.text}>ctrl+m</span> models ·{" "}
+            <span fg={theme.text}>ctrl+p</span> commands
+          </text>
+        </box>
+      </box>
+    );
+  }
+
+  // Default variant — pinned at the bottom of the chat layout.
+  const promptGlyph = busy ? "…" : "›";
   return (
     <box flexDirection="column" width={width}>
       <SlashMenu
@@ -213,40 +342,44 @@ export function InputBar({
       <box
         flexDirection="row"
         border
+        borderStyle="rounded"
         borderColor={borderColor}
         padding={0}
-        paddingX={1}
-        height={boxHeight}
         width={width}
-        alignItems="flex-start"
+        alignItems="stretch"
       >
-        <text fg={busy ? theme.warning : theme.accent}>
-          <strong>{promptGlyph}</strong>
-        </text>
-        <text> </text>
-        <box flexGrow={1} height={visibleLines}>
-          <GlorpTextarea
-            key={instanceKey}
-            innerRef={textareaRef}
-            initialValue={value}
-            onContentChange={setValue}
-            onSubmit={() => performSubmit(value)}
-            focused
-            wrapMode="word"
-            keyBindings={submitOnEnterBindings}
-            placeholder={placeholder}
-            textColor={theme.text}
-            placeholderColor={busy ? theme.warning : theme.textDim}
-            backgroundColor="transparent"
-            focusedBackgroundColor="transparent"
-          />
+        <box width={1} backgroundColor={busy ? theme.warning : theme.accentSoft} />
+        <box flexDirection="row" flexGrow={1} paddingX={1} alignItems="flex-start" height={boxHeight - 2}>
+          <text fg={busy ? theme.warning : theme.accent}>
+            <strong>{promptGlyph}</strong>
+          </text>
+          <text> </text>
+          <box flexGrow={1} height={visibleLines}>
+            <GlorpTextarea
+              key={instanceKey}
+              innerRef={textareaRef}
+              initialValue={value}
+              onContentChange={setValue}
+              onSubmit={() => performSubmit(value)}
+              focused
+              wrapMode="word"
+              keyBindings={submitOnEnterBindings}
+              placeholder={placeholder}
+              textColor={theme.text}
+              placeholderColor={busy ? theme.warning : theme.textDim}
+              backgroundColor="transparent"
+              focusedBackgroundColor="transparent"
+            />
+          </box>
         </box>
       </box>
-      <box flexDirection="row" paddingX={1}>
+      <box flexDirection="row" justifyContent="space-between" paddingX={1}>
         <text fg={theme.textDim}>
-          {busy
-            ? "ctrl-c interrupts · submissions blocked until done"
-            : "enter ↩ send · shift+↩ newline · tab ⇥ complete · ↑↓ history · ctrl-c abort/quit"}
+          {busy ? "ctrl-c interrupts · submissions blocked until done" : modelLabel ?? ""}
+        </text>
+        <text fg={theme.textDim}>
+          <span fg={theme.text}>tab</span> agents · <span fg={theme.text}>ctrl+m</span> models ·{" "}
+          <span fg={theme.text}>ctrl+p</span> commands
         </text>
       </box>
     </box>
