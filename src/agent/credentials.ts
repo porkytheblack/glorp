@@ -112,6 +112,30 @@ export function findKnownProvider(id: string): KnownProviderMeta | undefined {
 
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
 
+/**
+ * Provider-specific "thinking" configuration. Different providers expose
+ * different controls — Glove's adapter contracts in
+ * `glove-core/models/openai-compat` reflect this directly:
+ *
+ *   - `effort`           — OpenAI GPT-5 / o-series, GLM, Kimi, MiniMax,
+ *                          DeepSeek V4, Groq DeepSeek-R1 distill
+ *   - `thinking`         — Anthropic-style budget tokens (1024-32768)
+ *   - `reasoningObject`  — OpenRouter unified shape (effort + max_tokens)
+ *   - `qwenThinking`     — Qwen3 dashscope (enable_thinking + budget)
+ *
+ * `kind: "off"` means "let the model decide" (no hint sent).
+ */
+export type ReasoningConfig =
+  | { kind: "off" }
+  | { kind: "effort"; effort: ReasoningEffort }
+  | { kind: "thinking"; budget_tokens: number }
+  | {
+      kind: "reasoningObject";
+      effort: Exclude<ReasoningEffort, "minimal">;
+      max_tokens?: number;
+    }
+  | { kind: "qwenThinking"; enabled: boolean; budget_tokens?: number };
+
 export interface ProviderConfig {
   /** "known" if id matches a KnownProvider; "custom" if user-defined. */
   type: "known" | "custom";
@@ -132,10 +156,146 @@ export interface ModelProfile {
   providerId: string;
   /** Model name as the provider expects (e.g. "gpt-5", "claude-sonnet-4-20250514"). */
   model: string;
-  /** Reasoning effort hint, for reasoning-capable models only. */
-  reasoning?: ReasoningEffort;
+  /**
+   * Thinking-mode config. Provider-specific shape; see ReasoningConfig.
+   * Legacy field: may also be a bare ReasoningEffort string from older
+   * credentials files — `normaliseReasoning` upgrades it on read.
+   */
+  reasoning?: ReasoningConfig | ReasoningEffort;
   /** Timestamp of last use — drives default sort order. */
   lastUsedAt?: string;
+}
+
+/** Upgrade old bare-effort strings on disk to the discriminated union. */
+export function normaliseReasoning(r: ModelProfile["reasoning"]): ReasoningConfig {
+  if (!r) return { kind: "off" };
+  if (typeof r === "string") return { kind: "effort", effort: r };
+  return r;
+}
+
+/** Human-readable label for a reasoning config (for the status bar / picker). */
+export function reasoningLabel(r: ReasoningConfig): string {
+  switch (r.kind) {
+    case "off":
+      return "off";
+    case "effort":
+      return r.effort;
+    case "thinking":
+      return `${r.budget_tokens} budget`;
+    case "reasoningObject":
+      return r.max_tokens ? `${r.effort} · ${r.max_tokens}` : r.effort;
+    case "qwenThinking":
+      return r.enabled
+        ? r.budget_tokens
+          ? `on · ${r.budget_tokens} budget`
+          : "on"
+        : "off";
+  }
+}
+
+/** Reasoning kinds that mean "thinking is enabled" (i.e. not "off"). */
+export type ActiveReasoningKind = "effort" | "thinking" | "reasoningObject" | "qwenThinking";
+
+/**
+ * Which kind of reasoning config is appropriate for a given provider+model.
+ * Returns null when the model doesn't accept any reasoning hint. The "off"
+ * kind is universal so it isn't surfaced here — every options list
+ * includes "off" as an entry regardless of model.
+ */
+export function reasoningKindFor(
+  providerId: string,
+  model: string,
+): ActiveReasoningKind | null {
+  if (!modelAcceptsReasoning(providerId, model)) return null;
+  if (providerId === "anthropic") return "thinking";
+  if (providerId === "openrouter") {
+    // OpenRouter's unified `reasoning` object — works across deepseek-r1,
+    // gpt-5 routed through openrouter, etc.
+    return "reasoningObject";
+  }
+  if (/^qwen3/.test(model) || /\/qwen3/.test(model)) return "qwenThinking";
+  // openai gpt-5/o-series, groq deepseek-r1, gemini fallback, custom — all
+  // use the effort enum.
+  return "effort";
+}
+
+/**
+ * Produce a list of options the UI can show in a picker for a model. The
+ * first option is always "off". For effort-kind models, the list reflects
+ * the provider's supported levels (minimal is GPT-5-only).
+ */
+export interface ReasoningOption {
+  label: string;
+  description?: string;
+  value: ReasoningConfig;
+}
+
+export function reasoningOptionsFor(
+  providerId: string,
+  model: string,
+): ReasoningOption[] {
+  const kind = reasoningKindFor(providerId, model);
+  const off: ReasoningOption = {
+    label: "off — let the model decide",
+    value: { kind: "off" },
+  };
+  if (kind === null) return [];
+  switch (kind) {
+    case "effort": {
+      const supportsMinimal = providerId === "openai" && /^gpt-5/.test(model);
+      const opts: ReasoningOption[] = [off];
+      if (supportsMinimal) {
+        opts.push({
+          label: "minimal",
+          description: "GPT-5 only — least thinking",
+          value: { kind: "effort", effort: "minimal" },
+        });
+      }
+      opts.push(
+        { label: "low", description: "fast, lighter reasoning", value: { kind: "effort", effort: "low" } },
+        { label: "medium", description: "balanced", value: { kind: "effort", effort: "medium" } },
+        {
+          label: "high (recommended for reasoning models)",
+          description: "deep reasoning",
+          value: { kind: "effort", effort: "high" },
+        },
+      );
+      return opts;
+    }
+    case "thinking": {
+      return [
+        off,
+        { label: "1k budget", description: "lightweight thinking", value: { kind: "thinking", budget_tokens: 1024 } },
+        { label: "4k budget", description: "moderate (recommended)", value: { kind: "thinking", budget_tokens: 4096 } },
+        { label: "16k budget", description: "deep thinking", value: { kind: "thinking", budget_tokens: 16384 } },
+        { label: "32k budget", description: "max — slow and expensive", value: { kind: "thinking", budget_tokens: 32768 } },
+      ];
+    }
+    case "reasoningObject": {
+      return [
+        off,
+        { label: "low", description: "fast OpenRouter route", value: { kind: "reasoningObject", effort: "low" } },
+        { label: "medium", value: { kind: "reasoningObject", effort: "medium" } },
+        { label: "high (recommended)", value: { kind: "reasoningObject", effort: "high" } },
+        { label: "high · 4k cap", value: { kind: "reasoningObject", effort: "high", max_tokens: 4000 } },
+        { label: "high · 16k cap", value: { kind: "reasoningObject", effort: "high", max_tokens: 16000 } },
+      ];
+    }
+    case "qwenThinking": {
+      return [
+        off,
+        { label: "on (auto budget)", description: "dashscope enable_thinking", value: { kind: "qwenThinking", enabled: true } },
+        { label: "on · 1k budget", value: { kind: "qwenThinking", enabled: true, budget_tokens: 1024 } },
+        { label: "on · 4k budget", value: { kind: "qwenThinking", enabled: true, budget_tokens: 4096 } },
+      ];
+    }
+    default: {
+      // Exhaustiveness: every kind above must return; the assertion makes
+      // adding a new ReasoningConfig variant a compile error here.
+      const _exhaustive: never = kind;
+      return [_exhaustive];
+    }
+  }
 }
 
 export interface CredentialsFile {
@@ -265,9 +425,20 @@ export class CredentialsStore {
   }
 
   /** Build a stable profile id from provider + model + optional reasoning. */
-  static makeProfileId(providerId: string, model: string, reasoning?: ReasoningEffort): string {
-    const r = reasoning ? `-${reasoning}` : "";
-    return `${providerId}__${model}${r}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  static makeProfileId(
+    providerId: string,
+    model: string,
+    reasoning?: ReasoningConfig | ReasoningEffort,
+  ): string {
+    const norm = normaliseReasoning(reasoning);
+    let suffix = "";
+    if (norm.kind === "effort") suffix = `-${norm.effort}`;
+    else if (norm.kind === "thinking") suffix = `-think${norm.budget_tokens}`;
+    else if (norm.kind === "reasoningObject")
+      suffix = `-${norm.effort}${norm.max_tokens ? `-${norm.max_tokens}` : ""}`;
+    else if (norm.kind === "qwenThinking")
+      suffix = `-qwen${norm.enabled ? norm.budget_tokens ?? "on" : "off"}`;
+    return `${providerId}__${model}${suffix}`.replace(/[^a-zA-Z0-9_-]/g, "-");
   }
 }
 

@@ -3,9 +3,14 @@ import type {
   CredentialsStore,
   ModelProfile,
   ProviderConfig,
-  ReasoningEffort,
+  ReasoningConfig,
 } from "./credentials.ts";
-import { findKnownProvider, modelAcceptsReasoning } from "./credentials.ts";
+import {
+  findKnownProvider,
+  modelAcceptsReasoning,
+  normaliseReasoning,
+  reasoningLabel,
+} from "./credentials.ts";
 
 export interface PickModelOptions {
   /** Explicit provider id from CLI flags. Takes precedence over everything else. */
@@ -62,15 +67,16 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
     else profile = opts.credentials.getActiveProfile();
     if (profile) {
       const provider = opts.credentials.getProvider(profile.providerId);
+      const reasoning = normaliseReasoning(profile.reasoning);
       const adapter = await buildAdapter({
         providerId: profile.providerId,
         model: profile.model,
-        reasoning: profile.reasoning,
+        reasoning,
         provider,
       });
       return {
         adapter,
-        label: labelFor(profile.providerId, profile.model, profile.reasoning),
+        label: labelFor(profile.providerId, profile.model, reasoning),
         providerId: profile.providerId,
         model: profile.model,
         profile,
@@ -95,11 +101,16 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
   );
 }
 
-/** Build a ModelAdapter for the given provider config. Adapters are imported lazily to avoid loading Bedrock's broken transitive deps. */
+/**
+ * Build a ModelAdapter for the given provider config. Adapters are imported
+ * lazily to avoid loading Bedrock's broken transitive deps. The reasoning
+ * config (when present and supported) is translated into the right adapter
+ * options shape per provider.
+ */
 async function buildAdapter(args: {
   providerId: string;
   model?: string;
-  reasoning?: ReasoningEffort;
+  reasoning?: ReasoningConfig;
   /** Provider config from credentials store, when available. */
   provider?: ProviderConfig;
 }): Promise<ModelAdapter> {
@@ -128,10 +139,42 @@ async function buildAdapter(args: {
     model,
     stream: true,
   };
-  if (reasoning && modelAcceptsReasoning(providerId, model)) {
-    compatOpts.reasoning = { effort: reasoning };
+  if (reasoning && reasoning.kind !== "off" && modelAcceptsReasoning(providerId, model)) {
+    compatOpts.reasoning = translateReasoning(reasoning);
   }
   return new OpenAICompatAdapter(compatOpts);
+}
+
+/**
+ * Map our typed `ReasoningConfig` to the shape the OpenAI-compat adapter
+ * expects (per glove-core/models/openai-compat). The structured options
+ * pass straight through; we just rename `qwenThinking` into the adapter's
+ * `extraBody` form documented for Qwen3 dashscope.
+ */
+function translateReasoning(r: ReasoningConfig): Record<string, unknown> {
+  switch (r.kind) {
+    case "off":
+      return {};
+    case "effort":
+      return { effort: r.effort };
+    case "thinking":
+      // Adapter accepts Anthropic-style `thinking` even on OpenAI-compat
+      // endpoints that proxy Anthropic (e.g. some OpenRouter routes).
+      return { thinking: { type: "enabled", budget_tokens: r.budget_tokens } };
+    case "reasoningObject":
+      return {
+        reasoningObject: r.max_tokens
+          ? { effort: r.effort, max_tokens: r.max_tokens }
+          : { effort: r.effort },
+      };
+    case "qwenThinking":
+      return {
+        extraBody: {
+          enable_thinking: r.enabled,
+          ...(r.budget_tokens != null ? { thinking_budget: r.budget_tokens } : {}),
+        },
+      };
+  }
 }
 
 function defaultModelFor(providerId: string): string {
@@ -152,8 +195,6 @@ function defaultBaseURLFor(providerId: string): string {
     case "ollama":
       return process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
     default:
-      // Custom providers must supply their own baseURL via ProviderConfig;
-      // this only fires if we hit the fallback without one — caller's bug.
       return process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
   }
 }
@@ -167,18 +208,16 @@ function envDetectedProvider(): string | undefined {
   return undefined;
 }
 
-function labelFor(providerId: string, model: string, reasoning?: ReasoningEffort): string {
+function labelFor(providerId: string, model: string, reasoning?: ReasoningConfig): string {
   const known = findKnownProvider(providerId);
   const prefix = known?.id ?? providerId;
-  const r = reasoning ? ` · ${reasoning}` : "";
+  const r = reasoning && reasoning.kind !== "off" ? ` · ${reasoningLabel(reasoning)}` : "";
   return `${prefix} · ${shortModel(model)}${r}`;
 }
 
 function shortModel(model: string): string {
-  // Trim provider prefixes that openrouter uses, drop dated suffixes for readability.
   const slash = model.lastIndexOf("/");
   let s = slash >= 0 ? model.slice(slash + 1) : model;
-  // Drop trailing date suffix like "-20250514".
   s = s.replace(/-\d{8}$/, "");
   return s;
 }

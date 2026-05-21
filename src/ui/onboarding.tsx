@@ -5,11 +5,13 @@ import {
   KNOWN_PROVIDERS,
   findKnownProvider,
   modelAcceptsReasoning,
+  reasoningKindFor,
+  reasoningOptionsFor,
 } from "../agent/credentials.ts";
 import type {
   ModelProfile,
   ProviderConfig,
-  ReasoningEffort,
+  ReasoningConfig,
 } from "../agent/credentials.ts";
 import { theme, BANNER } from "./theme.ts";
 
@@ -141,7 +143,7 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
               if (modelAcceptsReasoning(step.providerId, model)) {
                 setStep({ kind: "pick-reasoning", providerId: step.providerId, model });
               } else {
-                finalize(credentials, step.providerId, model, undefined, onComplete);
+                finalize(credentials, step.providerId, model, { kind: "off" }, onComplete);
               }
             }}
             onBack={() => {
@@ -430,33 +432,40 @@ function PickModel(props: { providerId: string; onPick: (model: string) => void;
 function PickReasoning(props: {
   providerId: string;
   model: string;
-  onPick: (r: ReasoningEffort | undefined) => void;
+  onPick: (r: ReasoningConfig) => void;
   onBack: () => void;
 }) {
-  const opts = [
-    { name: "off — let the model decide", value: "__off__", description: "" },
-    { name: "minimal", value: "minimal", description: "GPT-5 only — least thinking" },
-    { name: "low", value: "low", description: "fast, lighter reasoning" },
-    { name: "medium", value: "medium", description: "balanced" },
-    { name: "high (recommended for reasoning models)", value: "high", description: "deep reasoning" },
-  ];
+  // Provider-specific options: GPT/o-series get effort levels, Anthropic
+  // gets budget_tokens, OpenRouter gets the reasoningObject, Qwen3 gets
+  // enable_thinking + budget. The select shows whichever set applies.
+  const reasoningOptions = useMemo(
+    () => reasoningOptionsFor(props.providerId, props.model),
+    [props.providerId, props.model],
+  );
+  const kind = reasoningKindFor(props.providerId, props.model);
+  const opts = reasoningOptions.map((o, i) => ({
+    name: o.label,
+    value: String(i),
+    description: o.description ?? "",
+  }));
   return (
     <box flexDirection="column">
       <text fg={theme.accent}>
-        <strong>4. Reasoning effort</strong>
+        <strong>4. Reasoning ({kind ?? "n/a"})</strong>
       </text>
       <text fg={theme.textMuted}>
-        {props.model} accepts a reasoning hint. You can change this later with Ctrl+M.
+        {props.model} on {props.providerId} accepts a thinking hint. You can change this later with Ctrl+M.
       </text>
       <box marginTop={1}>
         <select
           options={opts}
           focused
-          height={opts.length + 2}
+          height={Math.min(12, opts.length + 2)}
           onSelect={(_i: number, opt: any) => {
             if (!opt) return;
-            const r = opt.value === "__off__" ? undefined : (opt.value as ReasoningEffort);
-            props.onPick(r);
+            const idx = Number(opt.value);
+            const chosen = reasoningOptions[idx];
+            if (chosen) props.onPick(chosen.value);
           }}
         />
       </box>
@@ -464,26 +473,67 @@ function PickReasoning(props: {
   );
 }
 
+/**
+ * Save the picked profile and bulk-create one profile per other model the
+ * provider knows about. The picked model becomes active; the rest are
+ * available immediately in Ctrl+M without a second onboarding pass.
+ *
+ * Reasoning config is only applied to models that actually accept the same
+ * `reasoning.kind` — e.g. picking "high effort" for GPT-5 won't propagate
+ * to GPT-4.1 (which doesn't accept effort hints).
+ */
 function finalize(
   credentials: CredentialsStore,
   providerId: string,
   model: string,
-  reasoning: ReasoningEffort | undefined,
+  reasoning: ReasoningConfig,
   onComplete: (p: ModelProfile) => void,
 ): void {
-  const id = CredentialsStore.makeProfileId(providerId, model, reasoning);
-  const label = `${providerId} · ${model.split("/").at(-1) ?? model}${reasoning ? ` · ${reasoning}` : ""}`;
-  const profile: ModelProfile = {
-    id,
-    label,
-    providerId,
-    model,
-    reasoning,
-    lastUsedAt: new Date().toISOString(),
-  };
-  credentials.upsertProfile(profile);
-  credentials.setActive(id);
-  onComplete(profile);
+  const known = findKnownProvider(providerId);
+  const allModels = new Set<string>([model, ...(known?.defaultModels ?? [])]);
+  let activeProfile: ModelProfile | null = null;
+  const now = new Date().toISOString();
+
+  for (const m of allModels) {
+    // Only propagate the reasoning config when the kind matches what the
+    // model accepts. Otherwise default to off.
+    const isChosen = m === model;
+    const supports = reasoningKindFor(providerId, m);
+    const matchesKind =
+      reasoning.kind !== "off" && supports !== null && supports === reasoning.kind;
+    const r: ReasoningConfig = isChosen
+      ? reasoning
+      : matchesKind
+        ? reasoning
+        : { kind: "off" };
+    const id = CredentialsStore.makeProfileId(providerId, m, r);
+    const shortName = m.split("/").at(-1) ?? m;
+    const labelSuffix = r.kind === "off" ? "" : ` · ${reasoningLabelFor(r)}`;
+    const label = `${providerId} · ${shortName}${labelSuffix}`;
+    const profile: ModelProfile = {
+      id,
+      label,
+      providerId,
+      model: m,
+      reasoning: r,
+      lastUsedAt: isChosen ? now : undefined,
+    };
+    credentials.upsertProfile(profile);
+    if (isChosen) activeProfile = profile;
+  }
+  if (activeProfile) {
+    credentials.setActive(activeProfile.id);
+    onComplete(activeProfile);
+  }
+}
+
+function reasoningLabelFor(r: ReasoningConfig): string {
+  if (r.kind === "off") return "off";
+  if (r.kind === "effort") return r.effort;
+  if (r.kind === "thinking") return `${r.budget_tokens}b`;
+  if (r.kind === "reasoningObject") return r.effort;
+  if (r.kind === "qwenThinking") return r.enabled ? "on" : "off";
+  return "";
 }
 
 // ====================================================================
