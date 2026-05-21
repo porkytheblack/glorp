@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel older runs of the same branch/PR when a new commit comes in.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: typecheck + test + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        # ANTHROPIC_API_KEY is required by buildGlorp's API-key guard but
+        # the real LLM is never called in tests (the mock model handles
+        # everything). sk-test satisfies the env check.
+        env:
+          ANTHROPIC_API_KEY: sk-test
+        run: bun run test
+
+      - name: Build single binary (smoke)
+        run: bun run build
+
+      - name: Binary smoke
+        env:
+          ANTHROPIC_API_KEY: sk-test
+        run: |
+          ./dist/glorp --version
+          ./dist/glorp --help | head -1
