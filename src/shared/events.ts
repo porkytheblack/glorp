@@ -50,6 +50,13 @@ export interface AgentStats {
   contextPct: number;
 }
 
+export interface PermissionRequest {
+  slotId: string;
+  toolName: string;
+  toolInput: unknown;
+  createdAt: number;
+}
+
 export type BridgeEvent =
   | { type: "turn"; turn: ChatTurn }
   | { type: "turn_update"; id: string; patch: Partial<ChatTurn> }
@@ -66,6 +73,9 @@ export type BridgeEvent =
   | { type: "transmission"; payload: string; severity: "low" | "medium" | "high" }
   | { type: "error"; message: string }
   | { type: "hook"; name: string }
-  | { type: "skill"; name: string; source: "user" | "agent" };
+  | { type: "skill"; name: string; source: "user" | "agent" }
+  | { type: "permission_request"; request: PermissionRequest }
+  | { type: "permission_resolved"; slotId: string }
+  | { type: "session_reset" };
 
 export type BridgeListener = (event: BridgeEvent) => void;

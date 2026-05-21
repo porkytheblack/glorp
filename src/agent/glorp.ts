@@ -42,6 +42,8 @@ export interface GlorpHandle {
   fleet: GlorpFleet;
   store: GlorpStore;
   credentials: CredentialsStore;
+  /** Active session ID (drives the file path under sessions/). */
+  sessionId: string;
   /** Human-readable label for the active model (e.g. "anthropic · sonnet"). */
   modelLabel: string;
   send(text: string): Promise<void>;
@@ -53,6 +55,13 @@ export interface GlorpHandle {
    * fresh status event for the UI.
    */
   swapProfile(profileId: string): Promise<void>;
+  /** Resolve a pending permission request slot (true = allow, false = deny). */
+  resolvePermission(slotId: string, allow: boolean): void;
+  /**
+   * Force-clear a stored permission (so the next call re-prompts). Used by
+   * the permissions-list overlay to revoke previously granted/denied tools.
+   */
+  clearPermission(toolName: string): Promise<void>;
   /** Subscribe to model-label changes (for the status bar). */
   onLabelChange(fn: (label: string) => void): () => void;
 }
@@ -105,6 +114,33 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const displayManager = new Displaymanager();
   const bridge = getBridge();
   const labelListeners = new Set<(label: string) => void>();
+
+  // Bridge permission_request slots into bridge events so the React TUI
+  // can render an overlay and answer. Glove pushes a slot like
+  // `{ renderer: "permission_request", input: { toolName, toolInput } }`
+  // and blocks until `displayManager.resolve(slotId, value)` fires.
+  const seenSlots = new Set<string>();
+  displayManager.subscribe(async (stack) => {
+    for (const slot of stack) {
+      if (slot.renderer !== "permission_request") continue;
+      if (seenSlots.has(slot.id)) continue;
+      seenSlots.add(slot.id);
+      const input = slot.input as { toolName?: string; toolInput?: unknown };
+      bridge.emit({
+        type: "permission_request",
+        request: {
+          slotId: slot.id,
+          toolName: input.toolName ?? "(unknown)",
+          toolInput: input.toolInput,
+          createdAt: Date.now(),
+        },
+      });
+    }
+    // Drop ids of slots no longer in the stack so a re-pushed slot
+    // (after `resolve`) gets re-announced if Glove repeats the prompt.
+    const live = new Set(stack.map((s) => s.id));
+    for (const id of seenSlots) if (!live.has(id)) seenSlots.delete(id);
+  });
 
   // Build the fleet first so we can wire its inbox-resolver to the
   // running agent's context once we have it.
@@ -475,6 +511,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     fleet,
     store,
     credentials,
+    sessionId: opts.sessionId,
     get modelLabel() {
       return modelLabel;
     },
@@ -483,6 +520,18 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       return () => {
         labelListeners.delete(fn);
       };
+    },
+    resolvePermission(slotId: string, allow: boolean) {
+      try {
+        displayManager.resolve(slotId, allow);
+      } catch {
+        // The slot may have already been resolved (e.g. duplicate click);
+        // silently ignore — the bridge gets a permission_resolved either way.
+      }
+      bridge.emit({ type: "permission_resolved", slotId });
+    },
+    async clearPermission(toolName: string) {
+      await store.setPermission(toolName, "unset");
     },
     async swapProfile(profileId: string) {
       const next = await pickModel({ profileId, credentials });

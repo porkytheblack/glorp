@@ -6,6 +6,7 @@ import type {
   InboxEntry,
   AgentStats,
   ToolEvent,
+  PermissionRequest,
 } from "../shared/events.ts";
 
 export interface UiState {
@@ -24,6 +25,8 @@ export interface UiState {
   }>;
   /** Most recent hook/skill invocation, for transient status display. */
   lastExtension?: { kind: "hook" | "skill"; name: string; at: number };
+  /** Pending permission requests waiting for the user. FIFO. */
+  permissionRequests: PermissionRequest[];
   lastError?: string;
   mood: "idle" | "thinking" | "working" | "speaking" | "glitched" | "error";
 }
@@ -43,6 +46,9 @@ type Action =
   | { kind: "subagent"; name: string; phase: "start" | "end" }
   | { kind: "transmission"; payload: string; severity: "low" | "medium" | "high" }
   | { kind: "extension"; ext: "hook" | "skill"; name: string }
+  | { kind: "permission_request"; request: PermissionRequest }
+  | { kind: "permission_resolved"; slotId: string }
+  | { kind: "session_reset" }
   | { kind: "error"; message: string };
 
 const initial: UiState = {
@@ -55,6 +61,7 @@ const initial: UiState = {
   compacting: false,
   activeSubagents: [],
   transmissions: [],
+  permissionRequests: [],
   mood: "idle",
 };
 
@@ -146,6 +153,27 @@ function reduce(state: UiState, action: Action): UiState {
     case "extension":
       next = { ...state, lastExtension: { kind: action.ext, name: action.name, at: Date.now() } };
       break;
+    case "permission_request":
+      next = {
+        ...state,
+        permissionRequests: [...state.permissionRequests, action.request],
+      };
+      break;
+    case "permission_resolved":
+      next = {
+        ...state,
+        permissionRequests: state.permissionRequests.filter((r) => r.slotId !== action.slotId),
+      };
+      break;
+    case "session_reset":
+      // Used by the session-swap path; wipe accumulated state so the new
+      // agent's snapshot drives a fresh transcript.
+      next = {
+        ...initial,
+        // Preserve cross-session UI bits (transmissions are global, not per-session).
+        transmissions: state.transmissions,
+      };
+      break;
     case "error":
       next = { ...state, lastError: action.message };
       break;
@@ -209,6 +237,15 @@ export function useUiState(): UiState {
           break;
         case "skill":
           dispatchRef.current({ kind: "extension", ext: "skill", name: ev.name });
+          break;
+        case "permission_request":
+          dispatchRef.current({ kind: "permission_request", request: ev.request });
+          break;
+        case "permission_resolved":
+          dispatchRef.current({ kind: "permission_resolved", slotId: ev.slotId });
+          break;
+        case "session_reset":
+          dispatchRef.current({ kind: "session_reset" });
           break;
         case "error":
           dispatchRef.current({ kind: "error", message: ev.message });
