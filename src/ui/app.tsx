@@ -149,6 +149,9 @@ export function App({
             width={mainWidth}
             height={transcriptH}
             workspace={workspace}
+            busy={state.busy}
+            activeSubagents={state.activeSubagents}
+            compacting={state.compacting}
           />
         </box>
         {sidebarVisible && <Sidebar state={state} width={sidebarWidth} />}
@@ -157,6 +160,8 @@ export function App({
         <InputBar
           busy={state.busy}
           width={width}
+          slashCommands={glorp.extensions.slash}
+          subagentMentions={glorp.extensions.mentions}
           onSubmit={(text) => {
             void glorp.send(text);
           }}
