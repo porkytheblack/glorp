@@ -5,6 +5,7 @@ import type { Context, ModelAdapter } from "glove-core/core";
 import { Glove } from "glove-core/glove";
 import { Displaymanager } from "glove-core/display-manager";
 import { MemoryStore } from "./memory-store-shim.ts";
+import { dangerousReason, safeChildEnv } from "./tools/shell-safety.ts";
 
 /**
  * Resolves a posted-to-Glorp's-inbox item once the fleet job finishes.
@@ -276,8 +277,15 @@ async function runShell(
   timeoutMs: number,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const childSet = currentChildSet;
+  // Mirror bash.ts's denylist on the fleet path. Without this, an LLM that
+  // routes its destructive command through `dispatch_fleet` would bypass
+  // the same checks the `bash` tool applies.
+  const reason = dangerousReason(cmd);
+  if (reason) {
+    return { exitCode: -1, stdout: "", stderr: reason };
+  }
   return new Promise((resolve) => {
-    const child = spawn("bash", ["-c", cmd], { cwd, env: process.env });
+    const child = spawn("bash", ["-c", cmd], { cwd, env: safeChildEnv() });
     childSet?.add(child);
     let stdout = "";
     let stderr = "";

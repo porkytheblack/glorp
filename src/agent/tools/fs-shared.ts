@@ -21,20 +21,43 @@ export const IGNORED_DIRS: ReadonlySet<string> = new Set([
  * Resolve a user-supplied path against the workspace root and refuse
  * anything that escapes it. Returns an absolute path or throws.
  *
- * Note: does NOT canonicalize symlinks. A symlink inside the workspace
- * that points outside is accepted — fine for an in-process coding agent
- * (the user owns the workspace), but worth knowing if the threat model
- * ever changes.
+ * Containment is checked twice: once lexically (cheap; rejects `../`
+ * climbing), then again after canonicalising both ends through symlinks
+ * (catches a workspace-internal symlink pointing at e.g. /etc/shadow or
+ * ~/.ssh, which a freshly-cloned repo can easily plant).
  */
 export function resolveSafePath(workspace: string, p: string): string {
   const abs = path.isAbsolute(p) ? path.resolve(p) : path.resolve(workspace, p);
   const rel = path.relative(workspace, abs);
   if (rel.startsWith("..") || path.isAbsolute(rel)) {
     throw new Error(
-      `Path "${p}" is outside the workspace (${workspace}). Glorp refuses on principle.`,
+      `Path "${p}" is outside the workspace. Glorp refuses on principle.`,
+    );
+  }
+  const realWorkspace = safeRealpath(workspace);
+  const realAbs = safeRealpath(abs);
+  const realRel = path.relative(realWorkspace, realAbs);
+  if (realRel.startsWith("..") || path.isAbsolute(realRel)) {
+    throw new Error(
+      `Path "${p}" resolves outside the workspace via a symlink. Glorp refuses on principle.`,
     );
   }
   return abs;
+}
+
+/**
+ * realpath that tolerates the path not yet existing — for `write`, the
+ * target file is new, but its parent directory should exist (or at least
+ * the nearest existing ancestor must canonicalise inside the workspace).
+ */
+function safeRealpath(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    const parent = path.dirname(p);
+    if (parent === p) return p;
+    return path.join(safeRealpath(parent), path.basename(p));
+  }
 }
 
 export function relPath(workspace: string, p: string): string {
@@ -63,7 +86,12 @@ export async function isFile(p: string): Promise<boolean> {
  * Expand `{a,b,c}` brace groups into a flat list of patterns. Nested
  * braces are not supported (rare in practice; bash handles them via the
  * shell). Returns at least one pattern.
+ *
+ * Capped at MAX_BRACE_EXPANSION outputs so a pattern like
+ * `{a,b}{a,b}{a,b}…` from an untrusted caller can't blow up to 2^N
+ * regex compilations.
  */
+const MAX_BRACE_EXPANSION = 256;
 export function expandBraces(glob: string): string[] {
   const open = glob.indexOf("{");
   if (open === -1) return [glob];
@@ -85,7 +113,14 @@ export function expandBraces(glob: string): string[] {
   const tail = glob.slice(close + 1);
   const out: string[] = [];
   for (const part of body.split(",")) {
-    out.push(...expandBraces(head + part + tail));
+    for (const expanded of expandBraces(head + part + tail)) {
+      out.push(expanded);
+      if (out.length > MAX_BRACE_EXPANSION) {
+        throw new Error(
+          `glob brace expansion exceeded ${MAX_BRACE_EXPANSION} patterns — refusing`,
+        );
+      }
+    }
   }
   return out.length === 0 ? [glob] : out;
 }

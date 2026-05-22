@@ -68,6 +68,9 @@ export async function listSessions(dataDir: string): Promise<SessionInfo[]> {
 
 /** Delete a session's snapshot file. No-op if it doesn't exist. */
 export async function deleteSession(dataDir: string, sessionId: string): Promise<void> {
+  if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) {
+    throw new Error(`invalid session id: ${sessionId}`);
+  }
   const p = path.join(dataDir, "sessions", `${sessionId}.json`);
   try {
     await fs.promises.unlink(p);

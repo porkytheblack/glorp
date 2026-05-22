@@ -216,6 +216,59 @@ describe("Fleet (in-process)", () => {
     expect(elapsed).toBeLessThan(2500);
   }, 8_000);
 
+  test("shell-fanout refuses destructive patterns (no fleet-side bypass of bash safety)", async () => {
+    const fleet = await createFleet({
+      workspace,
+      model: fakeModel,
+      systemPromptForSubagents: "",
+    });
+    let captured: { resp: string; status: "resolved" | "error" } | null = null;
+    fleet.setInboxResolver(async (_id, resp, status) => {
+      captured = { resp, status };
+    });
+    await fleet.start();
+    await fleet.dispatch("shell-fanout", {
+      itemId: "danger",
+      tag: "danger",
+      payload: "rm -rf /",
+    });
+    const t0 = Date.now();
+    while (!captured && Date.now() - t0 < 2000) {
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    expect(captured).not.toBeNull();
+    expect(captured!.status).toBe("error");
+    expect(captured!.resp).toMatch(/destructive pattern/);
+    await fleet.stop();
+  }, 5_000);
+
+  test("shell-fanout does not leak API key env vars to child processes", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-leak-test";
+    const fleet = await createFleet({
+      workspace,
+      model: fakeModel,
+      systemPromptForSubagents: "",
+    });
+    let captured: string | null = null;
+    fleet.setInboxResolver(async (_id, resp) => {
+      captured = resp;
+    });
+    await fleet.start();
+    await fleet.dispatch("shell-fanout", {
+      itemId: "env-leak",
+      tag: "env",
+      payload: 'echo "key=${ANTHROPIC_API_KEY:-unset}"',
+    });
+    const t0 = Date.now();
+    while (!captured && Date.now() - t0 < 2000) {
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    expect(captured).not.toBeNull();
+    expect(captured!).toContain("key=unset");
+    expect(captured!).not.toContain("sk-leak-test");
+    await fleet.stop();
+  }, 5_000);
+
   test("invalid input throws synchronously and doesn't leak a slot", async () => {
     const fleet = await createFleet({
       workspace,

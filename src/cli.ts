@@ -39,7 +39,16 @@ function parseArgs(argv: string[]): Args {
     if (a === "-h" || a === "--help") args.showHelp = true;
     else if (a === "-v" || a === "--version") args.showVersion = true;
     else if (a === "-C" || a === "--cwd") args.workspace = path.resolve(argv[++i] ?? ".");
-    else if (a === "-s" || a === "--session") args.sessionId = argv[++i] ?? args.sessionId;
+    else if (a === "-s" || a === "--session") {
+      const next = argv[++i] ?? "";
+      // Session IDs become path segments under <dataDir>/sessions/; reject
+      // anything that could traverse out of that directory.
+      if (next && !/^[A-Za-z0-9._-]+$/.test(next)) {
+        process.stderr.write(`error: invalid session id "${next}" (allowed: A-Z a-z 0-9 . _ -)\n`);
+        process.exit(2);
+      }
+      args.sessionId = next || args.sessionId;
+    }
     else if (a === "--provider") args.provider = argv[++i];
     else if (a === "-m" || a === "--model") args.model = argv[++i];
     else if (a === "-p" || a === "--print") {

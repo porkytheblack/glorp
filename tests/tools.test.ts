@@ -74,6 +74,25 @@ describe("resolveSafePath", () => {
   test("workspace root itself resolves", () => {
     expect(resolveSafePath(workspace, ".")).toBe(path.resolve(workspace));
   });
+
+  test("refuses a workspace-internal symlink pointing outside", () => {
+    // Plant a symlink inside the workspace that points to /etc — the
+    // lexical check passes (the link itself is inside), but the realpath
+    // check should catch it.
+    const link = path.join(workspace, "escape");
+    try {
+      fs.symlinkSync("/etc", link);
+    } catch {
+      // Some sandboxes refuse symlinks; skip silently.
+      return;
+    }
+    expect(() => resolveSafePath(workspace, "escape/passwd")).toThrow(/symlink|outside/);
+  });
+
+  test("refuses brace expansion bombs", () => {
+    const giant = "{a,b}".repeat(20); // 2^20
+    expect(() => expandBraces(giant)).toThrow(/exceeded|refusing/);
+  });
 });
 
 // =====================================================================
@@ -454,6 +473,26 @@ describe("bashTool", () => {
     }
   });
 
+  test("API key env vars are not exposed to spawned shells", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-leak-bash-test";
+    process.env.SOME_TOKEN = "tok-leak";
+    process.env.PATH = process.env.PATH;
+    const tool = bashTool(workspace);
+    const r = await tool.do(
+      {
+        command: 'echo "ak=${ANTHROPIC_API_KEY:-unset} tok=${SOME_TOKEN:-unset}"',
+        description: "env probe",
+      },
+      display,
+      glove,
+    );
+    expect(r.status).toBe("success");
+    expect(r.data as string).toContain("ak=unset");
+    expect(r.data as string).toContain("tok=unset");
+    expect(r.data as string).not.toContain("sk-leak-bash-test");
+    expect(r.data as string).not.toContain("tok-leak");
+  });
+
   test("rm -rf /tmp/subdir (non-root) is NOT refused", async () => {
     const tool = bashTool(workspace);
     const subdir = path.join(workspace, "sub");
@@ -709,6 +748,9 @@ describe("webFetchTool", () => {
   let baseUrl: string;
 
   beforeAll(() => {
+    // The SSRF guard refuses private/loopback hosts by default; opt in
+    // for these tests, which run a Bun server on localhost.
+    process.env.GLORP_ALLOW_PRIVATE_FETCH = "1";
     server = Bun.serve({
       port: 0,
       fetch(req: Request) {
@@ -743,6 +785,7 @@ describe("webFetchTool", () => {
 
   afterAll(() => {
     server?.stop(true);
+    delete process.env.GLORP_ALLOW_PRIVATE_FETCH;
   });
 
   test("text-mode strips HTML", async () => {
@@ -790,6 +833,61 @@ describe("webFetchTool", () => {
     expect(r.status).toBe("error");
     expect(r.message).toMatch(/fetch failed/);
   }, 5000);
+});
+
+// =====================================================================
+// SSRF guard: validateUrl rejects private/loopback/metadata addresses
+// =====================================================================
+describe("webFetchTool SSRF guard", () => {
+  const savedAllow = process.env.GLORP_ALLOW_PRIVATE_FETCH;
+  beforeAll(() => {
+    delete process.env.GLORP_ALLOW_PRIVATE_FETCH;
+  });
+  afterAll(() => {
+    if (savedAllow !== undefined) process.env.GLORP_ALLOW_PRIVATE_FETCH = savedAllow;
+  });
+
+  test("refuses non-http schemes", async () => {
+    const r = await webFetchTool.do({ url: "file:///etc/passwd" }, display, glove);
+    expect(r.status).toBe("error");
+    expect(r.message).toMatch(/scheme|invalid/i);
+  });
+
+  test("refuses 127.0.0.1", async () => {
+    const r = await webFetchTool.do({ url: "http://127.0.0.1/" }, display, glove);
+    expect(r.status).toBe("error");
+    expect(r.message).toMatch(/private|loopback/i);
+  });
+
+  test("refuses 169.254.169.254 (cloud metadata)", async () => {
+    const r = await webFetchTool.do({ url: "http://169.254.169.254/latest/meta-data/" }, display, glove);
+    expect(r.status).toBe("error");
+    expect(r.message).toMatch(/private|link-local|169\.254/i);
+  });
+
+  test("refuses 10.x private address", async () => {
+    const r = await webFetchTool.do({ url: "http://10.0.0.1/admin" }, display, glove);
+    expect(r.status).toBe("error");
+    expect(r.message).toMatch(/private/i);
+  });
+
+  test("refuses IPv6 loopback ::1", async () => {
+    const r = await webFetchTool.do({ url: "http://[::1]/" }, display, glove);
+    expect(r.status).toBe("error");
+    expect(r.message).toMatch(/private|loopback/i);
+  });
+
+  test("refuses host that resolves to loopback (localhost)", async () => {
+    const r = await webFetchTool.do({ url: "http://localhost/" }, display, glove);
+    expect(r.status).toBe("error");
+    expect(r.message).toMatch(/private|loopback|did not resolve/i);
+  });
+
+  test("refuses uncommon port", async () => {
+    const r = await webFetchTool.do({ url: "http://example.com:22/" }, display, glove);
+    expect(r.status).toBe("error");
+    expect(r.message).toMatch(/port/i);
+  });
 });
 
 // =====================================================================

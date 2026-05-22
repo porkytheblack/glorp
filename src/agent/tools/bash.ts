@@ -1,23 +1,9 @@
 import { z } from "zod";
 import { spawn } from "node:child_process";
 import type { GloveFoldArgs } from "glove-core";
+import { dangerousReason, safeChildEnv } from "./shell-safety.ts";
 
 const MAX_OUTPUT_BYTES_PER_STREAM = 256 * 1024;
-
-const DANGEROUS_PATTERNS = [
-  /\brm\s+-rf\s+\/(\s|$)/,
-  /:\(\)\{.*\}\s*;:/, // fork bomb
-  /\bmkfs\b/,
-  /\bdd\s+if=/,
-  />+\s*\/dev\/(sd[a-z]|nvme\d+n\d+|vd[a-z]|xvd[a-z])/,
-];
-
-function dangerousReason(cmd: string): string | null {
-  for (const p of DANGEROUS_PATTERNS) {
-    if (p.test(cmd)) return `Command matches a destructive pattern (${p}). Refusing.`;
-  }
-  return null;
-}
 
 export function bashTool(workspace: string): GloveFoldArgs<{
   command: string;
@@ -57,7 +43,7 @@ export function bashTool(workspace: string): GloveFoldArgs<{
         const start = Date.now();
         const child = spawn("bash", ["-c", input.command], {
           cwd: workspace,
-          env: process.env,
+          env: safeChildEnv(),
           stdio: ["ignore", "pipe", "pipe"],
         });
         let stdout = "";
