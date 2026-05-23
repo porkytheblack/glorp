@@ -262,8 +262,8 @@ export function InputBar({
 
   const borderColor = busy ? theme.warning : theme.borderActive;
   const placeholder = busy
-    ? "agent is thinking · press ctrl-c to interrupt"
-    : "ask, command, or /slash · @subagent · shift+enter newline";
+    ? "Running · Ctrl-C to stop"
+    : "Message Glorp or type /";
 
   if (variant === "hero") {
     // Hero variant: a single rounded box containing the textarea on top,
@@ -375,7 +375,7 @@ export function InputBar({
       </box>
       <box flexDirection="row" justifyContent="space-between" paddingX={1}>
         <text fg={theme.textDim}>
-          {busy ? "ctrl-c interrupts · submissions blocked until done" : modelLabel ?? ""}
+          {busy ? "Running · Ctrl-C to stop" : modelLabel ?? ""}
         </text>
         <text fg={theme.textDim}>
           <span fg={theme.text}>tab</span> agents · <span fg={theme.text}>ctrl+m</span> models ·{" "}

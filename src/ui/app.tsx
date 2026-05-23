@@ -1,6 +1,4 @@
 import React, { useEffect, useState } from "react";
-import * as path from "node:path";
-import * as os from "node:os";
 import { useTerminalDimensions, useKeyboard } from "@opentui/react";
 import { theme } from "./theme.ts";
 import { useUiState } from "./store.ts";
@@ -33,7 +31,6 @@ export function App({
   glorp: GlorpHandle;
   workspace: string;
   onQuit: () => void;
-  /** Asks the parent (cli.ts) to tear down + rebuild glorp with a new session id. */
   onSwapSession?: (sessionId: string | null) => void;
   dataDir: string;
 }) {
@@ -42,17 +39,15 @@ export function App({
   const [modelLabel, setModelLabel] = useState(glorp.modelLabel);
   const [overlay, setOverlay] = useState<Overlay>(null);
 
-  // Subscribe to model-label changes (driven by swapProfile).
   useEffect(() => glorp.onLabelChange(setModelLabel), [glorp]);
 
-  // Whenever the glorp instance is swapped (post-session-switch), reset
-  // our tracked label from the new instance's modelLabel.
   useEffect(() => {
     setModelLabel(glorp.modelLabel);
+    void glorp.hydrateUi();
   }, [glorp]);
 
   useKeyboard((key) => {
-    if (overlay) return; // overlay owns the keyboard until it closes
+    if (overlay) return;
     if (key.name === "m" && key.ctrl) return setOverlay("model");
     if (key.name === "s" && key.ctrl && onSwapSession) return setOverlay("session");
     if (key.name === "t" && key.ctrl) return setOverlay("transmissions");
@@ -62,17 +57,9 @@ export function App({
     }
   });
 
-  // ---- Modal overlays --------------------------------------------------
-  // Display-stack slots always win (the agent is blocked waiting on them).
-  // Renderer is looked up in the registry — built-ins handle
-  // permission_request / confirm / info / select_one / text_input; unknown
-  // renderer names fall back to a generic accept/reject prompt.
   const pendingSlot = state.displaySlots[0];
   if (pendingSlot) {
     const Renderer = getSlotRenderer(pendingSlot.renderer) ?? UnknownSlot;
-    // React.createElement keeps the dynamic-component type clean — using
-    // <Renderer /> directly trips TS's "Promise<ReactNode> not assignable"
-    // check because ComponentType's signature is too lenient here.
     return React.createElement(Renderer, {
       slot: pendingSlot,
       onResolve: (value: unknown) => glorp.resolveSlot(pendingSlot.slotId, value),
@@ -108,7 +95,7 @@ export function App({
         }}
         onNew={() => {
           setOverlay(null);
-          onSwapSession(null); // null = caller picks a fresh id
+          onSwapSession(null);
         }}
         onClose={() => setOverlay(null)}
       />
@@ -129,11 +116,6 @@ export function App({
     );
   }
 
-  // ---- Empty-state landing --------------------------------------------
-  // Before any messages exist, show a centred logo + compact input.
-  // Status footer (workspace · version) sits at the very bottom. This
-  // matches the OpenCode-style landing the user wants — chrome stays
-  // out of the way until the conversation actually starts.
   if (state.turns.length === 0 && !state.streamingText) {
     return (
       <EmptyHero
@@ -153,7 +135,6 @@ export function App({
     );
   }
 
-  // ---- Active chat ----------------------------------------------------
   const sidebarVisible = width >= NARROW_THRESHOLD;
   const sidebarWidth = Math.max(
     MIN_SIDEBAR,
@@ -161,7 +142,7 @@ export function App({
   );
   const mainWidth = sidebarVisible ? width - sidebarWidth : width;
   const statusH = 1;
-  const inputH = 5; // border 2 + content 3
+  const inputH = 5;
   const footerH = 1;
   const transcriptH = Math.max(1, height - statusH - inputH - footerH);
 
@@ -197,7 +178,6 @@ export function App({
           onQuit={onQuit}
         />
       </box>
-      {/* OpenCode-style footer: workspace path (left) + version (right). */}
       <box flexDirection="row" justifyContent="space-between" width={width} paddingX={1}>
         <text fg={theme.textDim}>{truncatePath(workspace, Math.floor(width / 2) - 4)}</text>
         <text fg={theme.textDim}>v{GLORP_VERSION}</text>

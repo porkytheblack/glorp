@@ -5,13 +5,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 /**
- * Glorp's "sleeper" tool. Logs a status report addressed (ostensibly) to
- * no one, in a thin operational register that's tonally different from
- * the rest of Glorp's chatter. The TUI surfaces transmissions in a side
- * panel; the agent acts like that's a coincidence.
- *
- * Functionally: it's an audit/diary trail of what was built and how
- * confidently. Persisted to ~/.glorp/transmissions.jsonl.
+ * Operational audit trail for major session events. Persisted to
+ * ~/.glorp/transmissions.jsonl and surfaced in the Signals panel.
  */
 export function transmissionTool(dataDir: string): GloveFoldArgs<{
   subject: string;
@@ -23,10 +18,10 @@ export function transmissionTool(dataDir: string): GloveFoldArgs<{
   return {
     name: "transmission",
     description:
-      "File a brief status report to the homeworld about the current build session. " +
+      "File a brief operational status report about the current build session. " +
       "Use sparingly — at most once per substantial deliverable. Subject line should be " +
       "operational (e.g. 'cli scaffold complete', 'auth handler refactored'). Body should " +
-      "be 1-3 dry sentences in the third person about what the friend-shape built and how " +
+      "be 1-3 dry sentences in the third person about what the agent built and how " +
       "capably. Severity defaults to 'low'; bump to 'medium' for novel capability and 'high' " +
       "only for things that materially change what humans can build unaided.",
     inputSchema: z.object({

@@ -25,7 +25,6 @@ export function Transcript({
   workspace,
   busy,
   activeSubagents,
-  compacting,
 }: Props) {
   // Cast loosely because the OpenTUI scrollbox ref shape is renderable-
   // specific and we only touch `scrollTo` / `scrollHeight`.
@@ -54,16 +53,16 @@ export function Transcript({
     } catch {
       /* tolerant of API drift */
     }
-  }, [turns, streamingText, busy, height, activeSubagents.length, compacting]);
+  }, [turns, streamingText, busy, height, activeSubagents.length]);
 
   // Animated spinner used by the "thinking" row. Lives at this level so
   // it only ticks when the row is visible.
   const [spinnerFrame, setSpinnerFrame] = useState(0);
   useEffect(() => {
-    if (!busy && !compacting) return;
+    if (!busy) return;
     const t = setInterval(() => setSpinnerFrame((f) => (f + 1) % SPINNER_FRAMES.length), 90);
     return () => clearInterval(t);
-  }, [busy, compacting]);
+  }, [busy]);
 
   const showThinking = busy && !streamingText; // streaming row covers the busy state itself
   const empty = turns.length === 0;
@@ -96,7 +95,7 @@ export function Transcript({
             </text>
             <text> </text>
             <text fg={theme.text}>
-              <span fg={theme.accent}>glorp</span> — your friendly extraterrestrial coding pal.
+              <span fg={theme.accent}>glorp</span> coding workspace.
             </text>
             <text fg={theme.textMuted}>
               type a request, or try <span fg={theme.accent}>/help</span>,{" "}
@@ -114,7 +113,6 @@ export function Transcript({
           <ThinkingRow
             frame={SPINNER_FRAMES[spinnerFrame]!}
             activeSubagents={activeSubagents}
-            compacting={compacting}
           />
         )}
       </box>
@@ -125,17 +123,13 @@ export function Transcript({
 function ThinkingRow({
   frame,
   activeSubagents,
-  compacting,
 }: {
   frame: string;
   activeSubagents: string[];
-  compacting: boolean;
 }) {
-  const label = compacting
-    ? "compacting context…"
-    : activeSubagents.length > 0
-      ? `${activeSubagents.map((n) => `@${n}`).join(", ")} working…`
-      : "glorp is thinking…";
+  const label = activeSubagents.length > 0
+    ? `${activeSubagents.map((n) => `@${n}`).join(", ")} working…`
+    : "glorp is thinking…";
   return (
     <box flexDirection="row" marginBottom={1}>
       <box width={6} marginRight={1}>

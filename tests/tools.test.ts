@@ -1,11 +1,14 @@
 import { describe, test, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as path from "node:path";
 import * as os from "node:os";
 
 import { readTool } from "../src/agent/tools/read.ts";
 import { writeTool } from "../src/agent/tools/write.ts";
 import { editTool } from "../src/agent/tools/edit.ts";
+import { applyPatchTool } from "../src/agent/tools/apply-patch.ts";
+import { planTool } from "../src/agent/tools/plan.ts";
 import { bashTool } from "../src/agent/tools/bash.ts";
 import { globTool } from "../src/agent/tools/glob.ts";
 import { grepTool } from "../src/agent/tools/grep.ts";
@@ -13,6 +16,9 @@ import { lsTool } from "../src/agent/tools/ls.ts";
 import { webFetchTool } from "../src/agent/tools/webfetch.ts";
 import { transmissionTool } from "../src/agent/tools/transmission.ts";
 import { resolveSafePath, globToRegex, expandBraces } from "../src/agent/tools/fs-shared.ts";
+import { GlorpStore } from "../src/agent/store.ts";
+import { FileResourcesAdapter } from "../src/agent/resources/file-adapter.ts";
+import { createGlorpMemorySchema } from "../src/agent/resources/schema.ts";
 import { getBridge } from "../src/shared/bridge.ts";
 
 // Stubs for tool `do` extra args we never exercise in unit tests.
@@ -335,6 +341,85 @@ describe("editTool", () => {
     );
     expect(r.status).toBe("error");
     expect(r.message).toMatch(/Not a file/);
+  });
+});
+
+// =====================================================================
+// apply-patch.ts
+// =====================================================================
+describe("applyPatchTool", () => {
+  test("applies a unified diff patch", async () => {
+    fs.writeFileSync(path.join(workspace, "a.txt"), "old\n");
+    const patch = [
+      "diff --git a/a.txt b/a.txt",
+      "index 3367afd..3e75765 100644",
+      "--- a/a.txt",
+      "+++ b/a.txt",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+    const tool = applyPatchTool(workspace);
+    const r = await tool.do({ patch }, display, glove);
+    expect(r.status).toBe("success");
+    expect(fs.readFileSync(path.join(workspace, "a.txt"), "utf-8")).toBe("new\n");
+    expect(r.data as string).toContain("a.txt");
+  });
+
+  test("invalid patch leaves file unchanged", async () => {
+    fs.writeFileSync(path.join(workspace, "a.txt"), "old\n");
+    const tool = applyPatchTool(workspace);
+    const r = await tool.do({ patch: "not a diff" }, display, glove);
+    expect(r.status).toBe("error");
+    expect(fs.readFileSync(path.join(workspace, "a.txt"), "utf-8")).toBe("old\n");
+  });
+
+  test("refuses paths outside workspace", async () => {
+    const patch = [
+      "diff --git a/../escape.txt b/../escape.txt",
+      "index 3367afd..3e75765 100644",
+      "--- a/../escape.txt",
+      "+++ b/../escape.txt",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+    const tool = applyPatchTool(workspace);
+    await expect(tool.do({ patch }, display, glove)).rejects.toThrow(/outside the workspace/);
+  });
+});
+
+// =====================================================================
+// plan.ts
+// =====================================================================
+describe("planTool", () => {
+  test("stores a durable methodology plan separate from tasks", async () => {
+    const store = new GlorpStore("plan-tool", dataDir);
+    const resources = new FileResourcesAdapter({
+      dataDir,
+      sessionId: "plan-tool",
+      schema: createGlorpMemorySchema(),
+    });
+    const tool = planTool(store, resources);
+    const r = await tool.do(
+      {
+        title: "Database migration",
+        body: "Methodology: inspect migrations, plan rollback, apply schema, verify queries.",
+      },
+      display,
+      glove,
+    );
+    expect(r.status).toBe("success");
+    expect((await store.getPlan())?.title).toBe("Database migration");
+    const mirrored = await resources.read("/plans/current.md", { range: [1, -1] });
+    expect(mirrored.body).toEqual({
+      type: "markdown",
+      text: "# Database migration\n\nMethodology: inspect migrations, plan rollback, apply schema, verify queries.",
+    });
+    expect((await store.getTasks())).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 120));
   });
 });
 
@@ -708,9 +793,11 @@ describe("webFetchTool", () => {
   let server: any;
   let baseUrl: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    const port = await getFreePort();
     server = Bun.serve({
-      port: 0,
+      hostname: "127.0.0.1",
+      port,
       fetch(req: Request) {
         const url = new URL(req.url);
         if (url.pathname === "/html") {
@@ -738,7 +825,7 @@ describe("webFetchTool", () => {
         return new Response("ok");
       },
     });
-    baseUrl = `http://localhost:${server.port}`;
+    baseUrl = `http://127.0.0.1:${server.port}`;
   });
 
   afterAll(() => {
@@ -791,6 +878,18 @@ describe("webFetchTool", () => {
     expect(r.message).toMatch(/fetch failed/);
   }, 5000);
 });
+
+function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+  });
+}
 
 // =====================================================================
 // transmission.ts

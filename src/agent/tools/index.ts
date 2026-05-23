@@ -1,6 +1,8 @@
 export { readTool } from "./read.ts";
 export { writeTool } from "./write.ts";
 export { editTool } from "./edit.ts";
+export { applyPatchTool } from "./apply-patch.ts";
+export { planTool } from "./plan.ts";
 export { bashTool } from "./bash.ts";
 export { globTool } from "./glob.ts";
 export { grepTool } from "./grep.ts";

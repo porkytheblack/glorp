@@ -80,15 +80,15 @@ SLASH COMMANDS (inside the TUI)
   /plan        Switch to plan-first mode for this turn
   /diff        List files changed since last user message
   /compact     Force a context compaction now
-  /clear       Compact and reset the working slate
+  /clear       Clear and reset the working slate
   /concise     Be terser
-  /transmissions  Ask about the homeworld-comms panel
+  /transmissions  Open the signals log
   /quit        Exit glorp
 
 KEY BINDINGS (inside the TUI)
   Ctrl+M       Model switcher (swap profile, tweak reasoning effort)
   Ctrl+S       Session switcher (resume a different conversation)
-  Ctrl+T       Transmissions log (full homeworld-comms history)
+  Ctrl+T       Signals log
   Ctrl+P       Permissions list (revoke previously granted/denied tools)
   Esc          Abort the current request
 

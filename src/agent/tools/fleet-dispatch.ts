@@ -3,8 +3,8 @@ import type { GloveFoldArgs, Context } from "glove-core";
 import type { GlorpFleet } from "../station-bridge.ts";
 
 /**
- * Lets Glorp fan out a batch of small jobs onto the Station fleet
- * (running in-process). Each job posts its result back to Glorp's inbox
+ * Lets Glorp fan out a batch of small jobs onto the Station fleet.
+ * Each job runs in a Station child process and posts back to Glorp's inbox
  * under a shared tag so the agent can pick the results up on its next
  * turn. Useful for: independent file edits, parallel research questions,
  * batched-bash-like fan-out.
@@ -20,7 +20,7 @@ export function fleetDispatchTool(
   return {
     name: "dispatch_fleet",
     description:
-      "Fan out independent jobs onto the Station background fleet. Each job runs in parallel " +
+      "Fan out independent jobs onto the Station child-process background fleet. Each job runs in parallel " +
       "and posts its result back to your inbox under tag `fleet:<kind>:<batch>`. " +
       "Pick `kind`: 'research' (look up something + summarise), 'edit-fanout' (apply same shell " +
       "command across many targets), or 'shell-fanout' (run an arbitrary shell snippet). " +
@@ -58,6 +58,7 @@ export function fleetDispatchTool(
       const batchId = `b${Date.now().toString(36)}`;
       const tag = `fleet:${input.kind}:${batchId}`;
       const dispatchedIds: string[] = [];
+      const runIds: string[] = [];
       for (const [i, job] of input.jobs.entries()) {
         const itemId = `${tag}:${i}`;
         await ctx.addInboxItem({
@@ -71,22 +72,27 @@ export function fleetDispatchTool(
           resolved_at: null,
         });
         dispatchedIds.push(itemId);
-        // Fire-and-forget — station signals trigger via .trigger(), which
-        // returns immediately with a run id. The signal handler resolves
-        // the inbox item when it completes.
-        await fleet.dispatch(input.kind, {
+        const runId = await fleet.dispatch(input.kind, {
           itemId,
           tag,
           payload: job.payload,
           name: job.name,
         });
+        runIds.push(runId);
       }
       return {
         status: "success",
         data: `Dispatched ${input.jobs.length} job${
           input.jobs.length === 1 ? "" : "s"
         } to the ${input.kind} fleet under tag ${tag}. Results will land in your inbox on the next turn.`,
-        renderData: { tag, count: input.jobs.length, jobs: input.jobs, blocking: !!input.blocking },
+        renderData: {
+          tag,
+          count: input.jobs.length,
+          jobs: input.jobs,
+          inboxItems: dispatchedIds,
+          runIds,
+          blocking: !!input.blocking,
+        },
       };
     },
   };

@@ -29,14 +29,6 @@ export function StatusBar({
       <text fg={theme.textMuted}>{state.stats.turns} turns</text>
       <text fg={theme.textDim}> · </text>
       <text fg={theme.textMuted}>{state.stats.tokens_in.toLocaleString()} tok</text>
-      {state.compacting && (
-        <>
-          <text fg={theme.textDim}> · </text>
-          <text fg={theme.warning}>
-            <strong>compacting…</strong>
-          </text>
-        </>
-      )}
       {state.lastError && (
         <>
           <text fg={theme.textDim}> · </text>

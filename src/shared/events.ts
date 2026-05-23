@@ -32,6 +32,13 @@ export interface TaskItem {
   status: "pending" | "in_progress" | "completed";
 }
 
+export interface PlanDocument {
+  title: string;
+  body: string;
+  revision: number;
+  updatedAt: string;
+}
+
 export interface InboxEntry {
   id: string;
   tag: string;
@@ -41,6 +48,17 @@ export interface InboxEntry {
   blocking: boolean;
   createdAt: string;
   resolvedAt: string | null;
+}
+
+export interface FleetJobEvent {
+  runId: string;
+  itemId: string;
+  tag: string;
+  name?: string;
+  kind: "research" | "edit-fanout" | "shell-fanout";
+  status: "running" | "resolved" | "error" | "cancelled";
+  startedAt: number;
+  endedAt?: number;
 }
 
 export interface AgentStats {
@@ -72,6 +90,14 @@ export interface DisplaySlotEvent {
 }
 
 export type BridgeEvent =
+  | {
+    type: "session_hydrate";
+    turns: ChatTurn[];
+    plan: PlanDocument | null;
+    tasks: TaskItem[];
+    inbox: InboxEntry[];
+    stats: AgentStats;
+  }
   | { type: "turn"; turn: ChatTurn }
   | { type: "turn_update"; id: string; patch: Partial<ChatTurn> }
   | { type: "text_delta"; text: string }
@@ -79,8 +105,10 @@ export type BridgeEvent =
   | { type: "tool_started"; tool: ToolEvent }
   | { type: "tool_finished"; tool: ToolEvent }
   | { type: "busy"; busy: boolean }
+  | { type: "plan"; plan: PlanDocument | null }
   | { type: "tasks"; tasks: TaskItem[] }
   | { type: "inbox"; items: InboxEntry[] }
+  | { type: "fleet"; job: FleetJobEvent }
   | { type: "stats"; stats: AgentStats }
   | { type: "compaction"; phase: "start" | "end" }
   | { type: "subagent"; name: string; phase: "start" | "end"; status?: "success" | "error"; message?: string }

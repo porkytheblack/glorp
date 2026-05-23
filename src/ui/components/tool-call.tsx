@@ -42,6 +42,7 @@ function safeStringify(input: unknown): string {
 function summarise(tool: ToolEvent): string {
   const input = tool.input as Record<string, unknown> | undefined;
   if (!input) return tool.name;
+  if (tool.name.startsWith("glove_resources_")) return summariseResource(tool.name, input);
   switch (tool.name) {
     case "read": {
       const p = input.path as string;
@@ -53,6 +54,10 @@ function summarise(tool: ToolEvent): string {
       return `write ${input.path as string}`;
     case "edit":
       return `edit ${input.path as string}`;
+    case "apply_patch":
+      return `apply_patch (${truncate(input.patch as string, 50)})`;
+    case "glorp_update_plan":
+      return `plan · ${truncate(input.title as string, 60)}`;
     case "bash": {
       const desc = (input.description as string) || (input.command as string);
       return `bash · ${truncate(desc, 70)}`;
@@ -67,8 +72,8 @@ function summarise(tool: ToolEvent): string {
       return `ls ${(input.path as string) ?? "."}`;
     case "web_fetch":
       return `web_fetch ${truncate(input.url as string, 70)}`;
-    case "update_tasks":
-      return `update_tasks (${(input.tasks as unknown[] | undefined)?.length ?? 0})`;
+    case "glove_update_tasks":
+      return `update_tasks (${(input.todos as unknown[] | undefined)?.length ?? 0})`;
     case "glove_post_to_inbox":
       return `inbox ← ${truncate(input.request as string, 60)} [${input.tag}]`;
     case "dispatch_fleet":
@@ -82,6 +87,16 @@ function summarise(tool: ToolEvent): string {
     default:
       return `${tool.name} ${truncate(safeStringify(input), 70)}`;
   }
+}
+
+function summariseResource(name: string, input: Record<string, unknown>): string {
+  const op = name.replace("glove_resources_", "resources ");
+  const path = (input.path ?? input.fromPath ?? input.targetId ?? input.pattern ?? "") as string;
+  if (name === "glove_resources_write") return `resources write ${input.path as string}`;
+  if (name === "glove_resources_edit") return `resources edit ${input.path as string}`;
+  if (name === "glove_resources_move") return `resources move ${input.fromPath as string}`;
+  if (name === "glove_resources_grep") return `resources grep ${truncate(input.query as string, 50)}`;
+  return `${op}${path ? ` ${truncate(path, 70)}` : ""}`;
 }
 
 function truncate(s: string | undefined, n: number): string {
@@ -108,6 +123,10 @@ export function ToolCallRow({ tool }: { tool: ToolEvent }) {
   const editData =
     tool.name === "edit" && tool.renderData
       ? (tool.renderData as { old?: string; new?: string })
+      : null;
+  const patchData =
+    tool.name === "apply_patch" && tool.renderData
+      ? (tool.renderData as { patch?: string })
       : null;
   const oldLines = editData?.old?.split("\n") ?? [];
   const newLines = editData?.new?.split("\n") ?? [];
@@ -142,7 +161,25 @@ export function ToolCallRow({ tool }: { tool: ToolEvent }) {
           )}
         </box>
       )}
-      {showOutput && lines.length > 0 && !editData && (
+      {patchData?.patch && (
+        <box flexDirection="column" marginLeft={2} marginTop={1}>
+          {patchData.patch
+            .split("\n")
+            .filter((l) => l.startsWith("+") || l.startsWith("-"))
+            .filter((l) => !l.startsWith("+++") && !l.startsWith("---"))
+            .slice(0, 8)
+            .map((l, i) => (
+              <text
+                key={`p${i}`}
+                bg={l.startsWith("+") ? theme.diffAdd : theme.diffDel}
+                fg={l.startsWith("+") ? theme.diffAddText : theme.diffDelText}
+              >
+                {truncate(l, 100)}
+              </text>
+            ))}
+        </box>
+      )}
+      {showOutput && lines.length > 0 && !editData && !patchData && (
         <box flexDirection="column" marginLeft={2} marginTop={1}>
           {lines.map((l, i) => (
             <text key={i} fg={theme.toolOutput}>
