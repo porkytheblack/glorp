@@ -21,6 +21,12 @@ export function StatusBar({
       </text>
       <text fg={theme.textDim}> v{GLORP_VERSION} </text>
       <text fg={theme.textMuted}>· {model} </text>
+      {state.title && (
+        <>
+          <text fg={theme.textDim}>· </text>
+          <text fg={theme.text}>{truncateTitle(state.title)} </text>
+        </>
+      )}
       <text fg={theme.textDim}>· </text>
       <text fg={theme.textMuted}>{truncatePath(workspace)} </text>
       <text fg={theme.textDim}>· </text>
@@ -45,6 +51,11 @@ export function StatusBar({
       )}
     </box>
   );
+}
+
+function truncateTitle(title: string, max = 34): string {
+  const clean = title.replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : clean.slice(0, max - 1) + "…";
 }
 
 function truncatePath(p: string, max = 38): string {

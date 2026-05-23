@@ -50,6 +50,11 @@ export interface AgentStats {
   contextPct: number;
 }
 
+export interface SessionHydration {
+  turns: ChatTurn[];
+  title: string | null;
+}
+
 /**
  * A slot pushed onto the agent's display stack. Any custom modal the
  * agent wants to render — confirmation, info card, picker, form — flows
@@ -72,8 +77,10 @@ export interface DisplaySlotEvent {
 }
 
 export type BridgeEvent =
+  | { type: "hydrate"; state: SessionHydration }
   | { type: "turn"; turn: ChatTurn }
   | { type: "turn_update"; id: string; patch: Partial<ChatTurn> }
+  | { type: "title"; title: string | null }
   | { type: "text_delta"; text: string }
   | { type: "text_clear" }
   | { type: "tool_started"; tool: ToolEvent }

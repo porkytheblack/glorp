@@ -64,7 +64,7 @@ export class MemoryStore implements StoreAdapter {
   }
 
   async addTasks(tasks: Task[]): Promise<void> {
-    this.tasks.push(...tasks);
+    this.tasks = [...tasks];
   }
 
   async updateTask(

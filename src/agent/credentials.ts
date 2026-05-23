@@ -8,9 +8,25 @@ export type KnownProvider =
   | "openrouter"
   | "gemini"
   | "groq"
+  | "mimo"
   | "ollama";
 
 export type ProviderId = KnownProvider | string; // "custom-<name>" for user-defined.
+
+export const CUSTOM_PROVIDER_ADAPTERS = [
+  {
+    id: "openai-compat",
+    label: "OpenAI-compatible",
+    description: "Generic /v1/chat/completions endpoint",
+  },
+  {
+    id: "mimo",
+    label: "Xiaomi MiMo",
+    description: "MiMo reasoning_content adapter",
+  },
+] as const;
+
+export type CustomProviderAdapter = (typeof CUSTOM_PROVIDER_ADAPTERS)[number]["id"];
 
 export interface KnownProviderMeta {
   id: KnownProvider;
@@ -96,6 +112,15 @@ export const KNOWN_PROVIDERS: KnownProviderMeta[] = [
     reasoningCapableModelMatchers: [/deepseek-r1/, /qwen.*coder/],
   },
   {
+    id: "mimo",
+    label: "Xiaomi MiMo",
+    envVar: "MIMO_API_KEY",
+    description: "Xiaomi MiMo reasoning models",
+    defaultModels: ["mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni"],
+    needsApiKey: true,
+    reasoningCapableModelMatchers: [/^mimo/],
+  },
+  {
     id: "ollama",
     label: "Ollama (local)",
     envVar: "",
@@ -108,6 +133,11 @@ export const KNOWN_PROVIDERS: KnownProviderMeta[] = [
 
 export function findKnownProvider(id: string): KnownProviderMeta | undefined {
   return KNOWN_PROVIDERS.find((p) => p.id === id);
+}
+
+export function reasoningProviderId(providerId: string, provider?: ProviderConfig): string {
+  if (provider?.type === "custom" && provider.adapter === "mimo") return "mimo";
+  return providerId;
 }
 
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
@@ -141,6 +171,8 @@ export interface ProviderConfig {
   type: "known" | "custom";
   /** Display name for custom providers; matches KnownProvider.id for known ones. */
   id: string;
+  /** Adapter implementation used for custom endpoints. Defaults to OpenAI-compatible. */
+  adapter?: CustomProviderAdapter;
   /** Required for custom providers, optional for known (might use default URL). */
   baseURL?: string;
   /** API key. Optional for ollama and unauthenticated custom endpoints. */
@@ -208,6 +240,7 @@ export function reasoningKindFor(
 ): ActiveReasoningKind | null {
   if (!modelAcceptsReasoning(providerId, model)) return null;
   if (providerId === "anthropic") return "thinking";
+  if (providerId === "mimo") return "effort";
   if (providerId === "openrouter") {
     // OpenRouter's unified `reasoning` object — works across deepseek-r1,
     // gpt-5 routed through openrouter, etc.

@@ -3,6 +3,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { GloveFoldArgs } from "glove-core";
 import { resolveSafePath, relPath, isDir } from "./fs-shared.ts";
+import { firstItems } from "./summaries.ts";
+
+const MAX_ENTRIES = 500;
+
+interface LsSummaryArgs {
+  path: string;
+  count: number;
+  shown: number;
+  truncated: boolean;
+  entries: string[];
+}
 
 export function lsTool(workspace: string): GloveFoldArgs<{
   path?: string;
@@ -29,7 +40,7 @@ export function lsTool(workspace: string): GloveFoldArgs<{
         return a.name.localeCompare(b.name);
       });
       const rows = await Promise.all(
-        filtered.map(async (e) => {
+        filtered.slice(0, MAX_ENTRIES).map(async (e) => {
           const full = path.join(abs, e.name);
           if (e.isDirectory()) return `[dir]  ${e.name}/`;
           try {
@@ -40,13 +51,35 @@ export function lsTool(workspace: string): GloveFoldArgs<{
           }
         }),
       );
+      const truncated = filtered.length > MAX_ENTRIES;
       return {
         status: "success",
         data:
           `${relPath(workspace, abs)}:\n` +
-          (rows.length === 0 ? "(empty directory)" : rows.join("\n")),
-        renderData: { path: relPath(workspace, abs), count: rows.length },
+          (rows.length === 0
+            ? "(empty directory)"
+            : rows.join("\n") +
+              (truncated ? `\n... [${filtered.length - MAX_ENTRIES} entries omitted]` : "")),
+        generateSummaryArgs: {
+          path: relPath(workspace, abs),
+          count: filtered.length,
+          shown: rows.length,
+          truncated,
+          entries: rows.slice(0, 50),
+        } satisfies LsSummaryArgs,
+        renderData: { path: relPath(workspace, abs), count: filtered.length, truncated },
       };
+    },
+    generateToolSummary: async (args) => {
+      const a = args as LsSummaryArgs;
+      if (a.count === 0) return `ls ${a.path}: empty directory.`;
+      return [
+        `ls ${a.path}: ${a.count} entr${a.count === 1 ? "y" : "ies"}${
+          a.truncated ? ` (${a.shown} shown, capped)` : ""
+        }.`,
+        firstItems(a.entries, 20),
+        "Full prior directory listing omitted; re-run ls or glob if needed.",
+      ].join("\n");
     },
   };
 }

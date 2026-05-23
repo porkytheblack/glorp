@@ -8,4 +8,5 @@ export { lsTool } from "./ls.ts";
 export { webFetchTool } from "./webfetch.ts";
 export { transmissionTool } from "./transmission.ts";
 export { fleetDispatchTool } from "./fleet-dispatch.ts";
+export { inboxManageTool } from "./inbox-manage.ts";
 export { askConfirmTool, showInfoTool, askChoiceTool, askTextTool } from "./modals.ts";

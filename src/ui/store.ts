@@ -11,6 +11,7 @@ import type {
 
 export interface UiState {
   turns: ChatTurn[];
+  title: string | null;
   streamingText: string;
   busy: boolean;
   tasks: TaskItem[];
@@ -32,7 +33,9 @@ export interface UiState {
 }
 
 type Action =
+  | { kind: "hydrate"; turns: ChatTurn[]; title: string | null }
   | { kind: "turn"; turn: ChatTurn }
+  | { kind: "title"; title: string | null }
   | { kind: "turn_update"; id: string; patch: Partial<ChatTurn> }
   | { kind: "text_delta"; text: string }
   | { kind: "text_clear" }
@@ -53,6 +56,7 @@ type Action =
 
 const initial: UiState = {
   turns: [],
+  title: null,
   streamingText: "",
   busy: false,
   tasks: [],
@@ -82,8 +86,20 @@ function moodFrom(s: UiState): UiState["mood"] {
 function reduce(state: UiState, action: Action): UiState {
   let next = state;
   switch (action.kind) {
+    case "hydrate":
+      next = {
+        ...state,
+        turns: action.turns,
+        title: action.title,
+        streamingText: "",
+        displaySlots: [],
+      };
+      break;
     case "turn":
       next = { ...state, turns: [...state.turns, action.turn] };
+      break;
+    case "title":
+      next = { ...state, title: action.title };
       break;
     case "turn_update":
       next = {
@@ -94,6 +110,7 @@ function reduce(state: UiState, action: Action): UiState {
       };
       break;
     case "text_delta":
+      if (state.compacting) break;
       next = { ...state, streamingText: state.streamingText + action.text };
       break;
     case "text_clear":
@@ -132,7 +149,11 @@ function reduce(state: UiState, action: Action): UiState {
       next = { ...state, stats: action.stats };
       break;
     case "compaction":
-      next = { ...state, compacting: action.phase === "start" };
+      next = {
+        ...state,
+        compacting: action.phase === "start",
+        streamingText: action.phase === "start" ? "" : state.streamingText,
+      };
       break;
     case "subagent": {
       const active =
@@ -191,6 +212,12 @@ export function useUiState(): UiState {
       switch (ev.type) {
         case "turn":
           dispatchRef.current({ kind: "turn", turn: ev.turn });
+          break;
+        case "hydrate":
+          dispatchRef.current({ kind: "hydrate", turns: ev.state.turns, title: ev.state.title });
+          break;
+        case "title":
+          dispatchRef.current({ kind: "title", title: ev.title });
           break;
         case "turn_update":
           dispatchRef.current({ kind: "turn_update", id: ev.id, patch: ev.patch });

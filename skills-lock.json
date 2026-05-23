@@ -5,7 +5,7 @@
       "source": "porkytheblack/glove",
       "sourceType": "github",
       "skillPath": ".claude/skills/glove/SKILL.md",
-      "computedHash": "bb2a9408eed72709e9ce657180b7e6a9bfb55c552e060ab3cfb5281035d4cf21"
+      "computedHash": "958fa645c45166957a3a8317682f01d4be5e08f6a263c7989fabbcae0352d569"
     },
     "opentui": {
       "source": "msmps/opentui-skill",

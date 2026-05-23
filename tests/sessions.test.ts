@@ -39,6 +39,7 @@ describe("listSessions", () => {
       { sender: "user", text: "fix the login bug" },
       { sender: "agent", text: "looking into it" },
     ]);
+    await store.setTitle("Login bug fix");
     await store.addTasks([
       { id: "t1", content: "investigate", activeForm: "investigating", status: "in_progress" },
     ]);
@@ -60,6 +61,7 @@ describe("listSessions", () => {
     expect(sessions.length).toBe(1);
     const s = sessions[0]!;
     expect(s.id).toBe("s1");
+    expect(s.title).toBe("Login bug fix");
     expect(s.firstUserMessage).toBe("fix the login bug");
     expect(s.userMessageCount).toBe(1);
     expect(s.agentMessageCount).toBe(1);
@@ -104,6 +106,14 @@ describe("listSessions", () => {
     await new Promise((r) => setTimeout(r, 200));
     const sessions = await listSessions(dataDir);
     expect(sessions[0]?.firstUserMessage).toBeNull();
+  });
+
+  test("title is null when it has not been generated", async () => {
+    const store = new GlorpStore("untitled", dataDir);
+    await store.appendMessages([{ sender: "user", text: "hello" }]);
+    await store.flush();
+    const sessions = await listSessions(dataDir);
+    expect(sessions[0]?.title).toBeNull();
   });
 });
 

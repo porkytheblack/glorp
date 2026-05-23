@@ -61,7 +61,7 @@ User message → Agent Loop → Model decides tool calls → Execute tools → F
 - **Adapter** — Pluggable interfaces for Model, Store, DisplayManager, and Subscriber. Swap providers without changing app code.
 - **Context Compaction** — Auto-summarizes long conversations to stay within context window limits. The store preserves full message history (so frontends can display the entire chat), while `Context.getMessages()` splits at the last compaction summary so the model only sees post-compaction context. Summary messages are marked with `is_compaction: true`.
 - **Inbox** — Persistent async mailbox for cross-instance communication. An agent posts a request (text) that can't be resolved now; an external service resolves it later (text response). Resolved items are automatically injected into the agent's context on the next `ask()` call. Items can be blocking (agent should wait) or non-blocking. Built-in `glove_post_to_inbox` tool auto-registered when store supports inbox methods.
-- **Extensions (hooks, skills, subagents)** — `/hookname` runs a builder-defined handler with full agent controls (force compaction, swap model, short-circuit a turn). `/skillname` materialises a synthetic user message before the real one (marked `is_skill_injection: true`). `defineSubAgent({ name, factory })` registers a subagent the main agent can route to via the auto-registered `glove_invoke_subagent` tool — the user's `@name` text is NOT parsed by glove, it reaches the model verbatim and acts as a routing signal (mirrors Claude Code's subagent convention). `/` tokens are replaced with non-triggerable placeholders (`[invoked_extension__hook_<name>]` / `[invoked_extension__skill_<name>]`) so the model sees that an extension fired without the placeholder re-binding on a future parse; unbound `/` tokens stay untouched (so `/usr/local` survives). Skills can be exposed to the agent (`exposeToAgent: true`) so the agent pulls them in via the auto-registered `glove_invoke_skill` tool.
+- **Extensions (hooks, skills, subagents)** — `/hookname` runs a builder-defined handler with full agent controls (force compaction, swap model, short-circuit a turn). `/skillname` materialises a synthetic user message before the real one (marked `is_skill_injection: true`). `defineSubAgent({ name, factory })` registers a subagent the main agent can route to via the auto-registered `glove_invoke_subagent` tool — the user's `@name` text is NOT parsed by glove, it reaches the model verbatim and acts as a routing signal (mirrors Codex's subagent convention). `/` tokens are replaced with non-triggerable placeholders (`[invoked_extension__hook_<name>]` / `[invoked_extension__skill_<name>]`) so the model sees that an extension fired without the placeholder re-binding on a future parse; unbound `/` tokens stay untouched (so `/usr/local` survives). Skills can be exposed to the agent (`exposeToAgent: true`) so the agent pulls them in via the auto-registered `glove_invoke_skill` tool.
 - **MCP catalogue + adapter** — `glove-mcp` introduces two pieces: a static `McpCatalogueEntry[]` describing servers the app supports, and a per-conversation `McpAdapter` holding active ids and resolving access tokens. `mountMcp` reloads previously active servers and registers a `discovermcp` discovery subagent (via `glove.defineSubAgent(discoverySubAgent({...}))`) — the model invokes it through `glove_invoke_subagent({ name: "discovermcp", prompt: "..." })` to find and activate servers mid-conversation.
 
 ## Quick Start (Next.js)
@@ -80,7 +80,7 @@ import { createChatHandler } from "glove-next";
 
 export const POST = createChatHandler({
   provider: "anthropic",     // or "openai", "openrouter", "gemini", etc.
-  model: "claude-sonnet-4-20250514",
+  model: "Codex-sonnet-4-20250514",
 });
 ```
 
@@ -460,7 +460,7 @@ const storeActions: RemoteStoreActions = {
 |-------|---------|----------------|
 | `/hookname` | Mutate agent state, force compaction, swap model, short-circuit a turn | `defineHook(name, handler)` |
 | `/skillname` | Inject context as a synthetic user message marked `is_skill_injection: true` | `defineSkill({ name, handler, description?, exposeToAgent? })` |
-| `glove_invoke_subagent({ name, prompt })` (model-side tool) | Register a child Glove the main agent can route a self-contained task to. The user's `@name` text reaches the model verbatim — it's a routing signal, not a parsed directive. Mirrors Claude Code's subagent convention. | `defineSubAgent({ name, factory, description? })` |
+| `glove_invoke_subagent({ name, prompt })` (model-side tool) | Register a child Glove the main agent can route a self-contained task to. The user's `@name` text reaches the model verbatim — it's a routing signal, not a parsed directive. Mirrors Codex's subagent convention. | `defineSubAgent({ name, factory, description? })` |
 
 `/` tokens only bind when the name matches a registered hook or skill — `/usr/local/bin` survives untouched. Bound `/` tokens are **replaced**, not stripped, with a non-triggerable placeholder of the form `[invoked_extension__hook_<name>]` or `[invoked_extension__skill_<name>]`. The placeholder doesn't re-bind on a future parse, but it keeps the persisted user message structurally honest — the model can see that an extension fired. `@` tokens are never parsed by glove at all, so emails like `a@b.com` reach the model unchanged.
 
@@ -614,7 +614,7 @@ The tool returns `{ status: "success", data: { skill, content } }` on success an
 
 ### Subagents
 
-Modelled on Claude Code's subagent convention. Defining one auto-registers a `glove_invoke_subagent` tool (constant `SUBAGENT_DISPATCH_TOOL_NAME` exported from core) the main agent calls with `{ name, prompt }`. The user's `@name` text in the original message is **not** parsed by glove — it reaches the model verbatim and acts as a routing signal. The factory builds a fresh child `Glove` for each invocation and the dispatcher runs it.
+Modelled on Codex's subagent convention. Defining one auto-registers a `glove_invoke_subagent` tool (constant `SUBAGENT_DISPATCH_TOOL_NAME` exported from core) the main agent calls with `{ name, prompt }`. The user's `@name` text in the original message is **not** parsed by glove — it reaches the model verbatim and acts as a routing signal. The factory builds a fresh child `Glove` for each invocation and the dispatcher runs it.
 
 ```typescript
 interface SubAgentFactoryContext {
@@ -1520,61 +1520,13 @@ A tool's `do` function receives the running `IGloveRunnable` as a third argument
 ```typescript
 interface ToolResultData {
   status: "success" | "error";
-  data: unknown;                 // Sent to the AI model
-  message?: string;              // Error message (for status: "error")
-  renderData?: unknown;          // Client-only — NOT sent to model, used by renderResult
-  summary?: string;              // Populated by the Executor from tool.generateSummary; swapped in for data in older context when enableToolResultSummary is on
-  generateSummaryArgs?: unknown; // Opaque payload do() returns to drive the tool's generateSummary handler
+  data: unknown;          // Sent to the AI model
+  message?: string;       // Error message (for status: "error")
+  renderData?: unknown;   // Client-only — NOT sent to model, used by renderResult
 }
 ```
 
 **Important:** Model adapters explicitly strip `renderData` before sending to the AI. This makes it safe to store sensitive client-only data (e.g., email addresses, UI state) in `renderData`.
-
-### Tool result summaries (opt-in)
-
-Token-efficiency optimization for tools whose payloads bloat context (file reads, web fetches, large query results). Off by default; opt in with `enableToolResultSummary: true` on `GloveConfig`, and add `generateToolSummary` to each tool you want to compress.
-
-```typescript
-const agent = new Glove({
-  store,
-  model: createAdapter({ provider: "anthropic" }),
-  displayManager: new Displaymanager(),
-  systemPrompt: "...",
-  compaction_config: { compaction_instructions: "Summarize so far." },
-  enableToolResultSummary: true,            // turn on the pruner
-})
-  .fold({
-    name: "read_file",
-    description: "Read a slice of a file.",
-    inputSchema: z.object({ path: z.string(), from: z.number().optional(), to: z.number().optional() }),
-    async do(input) {
-      const slice = await readSlice(input);
-      return {
-        status: "success",
-        data: slice,
-        generateSummaryArgs: { path: input.path, from: input.from, to: input.to, lineCount: slice.split("\n").length },
-      };
-    },
-    async generateToolSummary(args) {
-      const { path, from, to, lineCount } = args as any;
-      const range = from != null || to != null ? ` lines ${from ?? 1}-${to ?? "EOF"}` : "";
-      return `Read ${path}${range} (${lineCount} lines).`;
-    },
-  })
-  .build();
-```
-
-How it works:
-
-1. **`do()` returns `generateSummaryArgs`** — whatever the summary handler needs (path + line range, URL, query, row count).
-2. **Executor calls `generateToolSummary(args)`** after `do()` resolves and stores the result on `ToolResultData.summary`. Both `data` and `summary` live on the result.
-3. **`PromptMachine.summarizeOlderToolResults`** runs before every model call (when `enableToolResultSummary: true`): finds the latest non-tool user message and, for every tool result at or before that index, swaps `data` → `summary`. Tool results from the current turn are untouched.
-
-The store always keeps both `data` and `summary`. Only the messages handed to the model adapter are rewritten — transcript renderers, history snapshots, and analytics still see the full record.
-
-Tools without `generateToolSummary`, or calls that omit `generateSummaryArgs`, leave `summary` unset and the pruner leaves them alone. Partially instrumented tool catalogues work fine.
-
-Composes with compaction: tool summaries delay the point at which the Observer needs to compact, and compaction still fires when the instrumented context grows past `CONTEXT_COMPACTION_LIMIT`.
 
 ## `<Render>` Component
 
@@ -1660,8 +1612,8 @@ type ToolEntry = Extract<TimelineEntry, { kind: "tool" }>;
 | Provider | Env Variable | Default Model | SDK Format |
 |----------|-------------|---------------|------------|
 | `openai` | `OPENAI_API_KEY` | `gpt-4.1` | openai |
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | anthropic |
-| `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4` | openai |
+| `anthropic` | `ANTHROPIC_API_KEY` | `Codex-sonnet-4-20250514` | anthropic |
+| `openrouter` | `OPENROUTER_API_KEY` | `anthropic/Codex-sonnet-4` | openai |
 | `gemini` | `GEMINI_API_KEY` | `gemini-2.5-flash` | openai |
 | `minimax` | `MINIMAX_API_KEY` | `MiniMax-M2.5` | openai |
 | `kimi` | `MOONSHOT_API_KEY` | `kimi-k2.5` | openai |
@@ -1669,7 +1621,7 @@ type ToolEntry = Extract<TimelineEntry, { kind: "tool" }>;
 | `mimo` | `MIMO_API_KEY` (+ optional `MIMO_BASE_URL`) | `mimo-v2.5` | mimo |
 | `ollama` | _(none)_ | _(user-specified)_ | openai |
 | `lmstudio` | _(none)_ | _(user-specified)_ | openai |
-| `bedrock` | `AWS_ACCESS_KEY_ID` | `anthropic.claude-3-5-sonnet-20241022-v2:0` | bedrock |
+| `bedrock` | `AWS_ACCESS_KEY_ID` | `anthropic.Codex-3-5-sonnet-20241022-v2:0` | bedrock |
 
 ### Reasoning Models
 
@@ -1958,17 +1910,13 @@ For example patterns from real implementations, see [examples.md](examples.md).
 37. **Bound `/` directives are replaced with placeholders, not stripped**: `/compact` becomes `[invoked_extension__hook_compact]` in the parsed text the model sees. The placeholder is non-triggerable (it doesn't match the directive regex), so a future re-parse of the same text doesn't re-fire the extension. Hook and skill handlers receive `parsedText` containing the placeholder, not the bare directive — keep that in mind when matching against it.
 38. **Skill-injected messages are `is_skill_injection: true`**: Synthetic user messages produced by `/skill` invocations have this flag set. Use it in transcript renderers to distinguish them from real user turns. They are persisted in the store like any other message and survive compaction (subject to `splitAtLastCompaction` like everything else).
 39. **`glove_invoke_skill` reads the live registry per call**: The auto-registered tool checks `this.skills` at run time, so skills defined after `build()` with `exposeToAgent: true` are immediately callable. The tool's description is also rebuilt in place when a new exposed skill is registered, so the listing the model sees stays current. The same applies to `glove_invoke_subagent` and the subagent registry.
-40. **`@mention` is a model-side routing signal, not a parsed directive**: Following Claude Code's subagent convention, glove never parses `@name` tokens. The full user message reaches the model and the model decides whether to call `glove_invoke_subagent` based on that tool's description. This means: invocation is not guaranteed (the model could ignore an `@mention`), but multiple `@mentions` in one message Just Work — the model can call the dispatch tool once per subagent.
-41. **Subagents do not see parent context**: A subagent runs in isolation — the only input it gets is the `prompt` string the agent supplied. If your subagent needs context, the parent agent must put it in the prompt (Claude Code-style). The factory builds a fresh child `Glove` with its own store; pass `parentControls.glove.model` and `parentControls.displayManager` if you want to inherit them.
+40. **`@mention` is a model-side routing signal, not a parsed directive**: Following Codex's subagent convention, glove never parses `@name` tokens. The full user message reaches the model and the model decides whether to call `glove_invoke_subagent` based on that tool's description. This means: invocation is not guaranteed (the model could ignore an `@mention`), but multiple `@mentions` in one message Just Work — the model can call the dispatch tool once per subagent.
+41. **Subagents do not see parent context**: A subagent runs in isolation — the only input it gets is the `prompt` string the agent supplied. If your subagent needs context, the parent agent must put it in the prompt (Codex-style). The factory builds a fresh child `Glove` with its own store; pass `parentControls.glove.model` and `parentControls.displayManager` if you want to inherit them.
 42. **`subagent_invoked` / `subagent_completed` are guaranteed symmetric**: The Executor — not the dispatcher — fires both bracket events around every `glove_invoke_subagent` tool call. Even when a parent abort short-circuits the dispatcher's promise chain, the executor's abort branch still fires `subagent_completed` with `status: "error"` and `message: "Subagent run aborted by the user."`. Subscribers can rely on 1:1 symmetry.
 43. **Hook `shortCircuit` still persists the user message**: Even when a hook short-circuits the turn, the user's (post-rewrite) message is appended to context first so transcripts stay consistent. The model just isn't called for that turn.
 44. **Token consumption events**: The Observer fires `token_consumption` (`{ consumption: { tokens_in, tokens_out } }`) on subscribers after each model turn. `StoreAdapter.addTokens` takes the same `TokenConsumptionCounter` shape; `getTokenCount()` still returns a single sum.
 45. **Reasoning capture is opt-in**: `OpenAICompatAdapter` ignores `reasoning_content` by default. Pass `reasoning: true` (or an object) on `createAdapter` / `new OpenAICompatAdapter` to capture the trace into `Message.reasoning_content`. The MiMo adapter is opinionated and captures unconditionally.
 46. **`reasoning_content` vs `reasoning` field**: The adapter reads either field from the response. DeepSeek / Qwen3 / GLM / Kimi / MiniMax / MiMo emit `reasoning_content`; OpenRouter emits `reasoning` (with `reasoning_content` as a documented alias). The captured string always lands on `Message.reasoning_content` — that's the canonical Glove field.
-47. **Tool result summaries are off by default**: `enableToolResultSummary` on `GloveConfig` defaults to `false`. Setting it to `true` alone does nothing — you also have to add `generateToolSummary` to each tool you want to shrink AND have `do()` return `generateSummaryArgs`. The Executor only populates `result.summary` when BOTH the handler and the args are present.
-48. **`summary` only replaces `data` in older context**: `PromptMachine.summarizeOlderToolResults` finds the latest non-tool user message and only rewrites tool results at or before that index. Current-turn tool results always reach the model with full `data`. The store keeps both `data` and `summary` untouched on every result — only the messages handed to the model adapter are rewritten.
-49. **`summarizeOlderToolResults` skips empty summaries**: The substitution only happens when `result.summary` is truthy. Partially-instrumented tool catalogues are safe — instrumented tools shrink in older context, uninstrumented tools keep their original `data`. There's no way to force a tool to be excluded from the rewrite other than not populating `summary` for it.
-50. **String error data is no longer double-JSON-stringified**: All model adapters (`anthropic`, `bedrock`, `mimo`, `openai-compat`, `openrouter`) now check `typeof data === "string"` before `JSON.stringify`-ing error result data. If your tool returns `{ status: "error", data: "some message" }`, the model sees `Error: ...\nsome message` rather than `Error: ...\n"some message"`. Bug fix — no consumer action needed, but a behavior change worth knowing if you parse error strings on the model side.
 47. **Echo is required on tool turns for DeepSeek V4 / MiMo**: When `reasoning` is enabled, the adapter echoes `Message.reasoning_content` back on assistant turns that produced `tool_calls` — DeepSeek V4 and MiMo reject the request otherwise. DeepSeek-R1 (the older model) rejects the field entirely; set `reasoning: { echo: false }` if you're specifically targeting R1.
 48. **`reasoning_effort` "minimal" is GPT-5-only**: The full effort enum is `"minimal" | "low" | "medium" | "high"`, but `"minimal"` only works on GPT-5 / o-series. The MiMo branch silently drops it. Other providers may reject it — check provider docs before using.
 49. **Adaptive reasoning models can suppress thinking on "low"**: On `mimo-v2.5-pro` and similar adaptive models, passing `effort: "low"` or `"medium"` can suppress reasoning rather than bound it. Pass `"high"` for consistently deep reasoning, or leave unset to let the model decide.

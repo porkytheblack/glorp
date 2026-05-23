@@ -88,6 +88,7 @@ export async function createFleet(opts: {
             compaction_instructions: "Keep research findings, drop chatter.",
             max_turns: 8,
           },
+          enableToolResultSummary: true,
         }).build();
         const result = await child.processRequest(input.payload);
         const text =

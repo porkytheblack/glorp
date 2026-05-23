@@ -44,6 +44,18 @@ describe("GlorpHandle.extensions catalogue", () => {
     }
   });
 
+  test("skill hint list includes exposed skills with $ prefix", async () => {
+    const g = await buildGlorp({ workspace, sessionId: "ext-1-skills", dataDir });
+    try {
+      const names = g.extensions.skills.map((s) => s.name);
+      expect(names).toContain("$concise");
+      const concise = g.extensions.skills.find((s) => s.name === "$concise");
+      expect(concise?.description).toMatch(/terse|trim|verbos/i);
+    } finally {
+      await g.shutdown();
+    }
+  });
+
   test("mention list includes all defined subagents", async () => {
     const g = await buildGlorp({ workspace, sessionId: "ext-2", dataDir });
     try {
@@ -59,7 +71,7 @@ describe("GlorpHandle.extensions catalogue", () => {
   test("every entry has a non-empty description", async () => {
     const g = await buildGlorp({ workspace, sessionId: "ext-3", dataDir });
     try {
-      for (const e of [...g.extensions.slash, ...g.extensions.mentions]) {
+      for (const e of [...g.extensions.slash, ...g.extensions.skills, ...g.extensions.mentions]) {
         expect(typeof e.description).toBe("string");
         expect(e.description.length).toBeGreaterThan(0);
       }
