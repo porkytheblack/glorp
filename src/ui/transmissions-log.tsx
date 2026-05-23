@@ -29,19 +29,7 @@ const SEVERITY_COLORS: Record<TransmissionEntry["severity"], string> = {
   high: theme.transmissionHigh,
 };
 
-/**
- * Ctrl+T overlay. Reads ~/.glorp/transmissions.jsonl (or whatever dataDir
- * is configured), parses each line as a TransmissionEntry, and renders a
- * scrollable, severity-filterable list. Most-recent-first.
- *
- *   ↑↓ scroll
- *   1   filter: low only
- *   2   filter: medium+
- *   3   filter: high only
- *   0   clear filter
- *   c   copy current entry to the clipboard (OSC 52)
- *   esc close
- */
+/** Ctrl+T overlay for the persisted, filterable signals log. */
 export function TransmissionsLog({ dataDir, onClose }: Props) {
   const { width, height } = useTerminalDimensions();
   const [entries, setEntries] = useState<TransmissionEntry[]>([]);
@@ -130,7 +118,7 @@ export function TransmissionsLog({ dataDir, onClose }: Props) {
       >
         <box flexDirection="row">
           <text fg={theme.transmission}>
-            <strong>homeworld comms — full log</strong>
+            <strong>signals log</strong>
           </text>
           <text fg={theme.textMuted}>
             {"  "}
@@ -144,7 +132,7 @@ export function TransmissionsLog({ dataDir, onClose }: Props) {
           {visible.length === 0 && (
             <text fg={theme.textMuted}>
               {entries.length === 0
-                ? "no transmissions yet — glorp files them as it works."
+                ? "no signals yet."
                 : "no entries match the current filter."}
             </text>
           )}

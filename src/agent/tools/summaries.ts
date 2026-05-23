@@ -1,3 +1,9 @@
+import type { GloveFoldArgs } from "glove-core";
+
+export type SummaryTool<I, A> = GloveFoldArgs<I> & {
+  generateToolSummary?: (args: A) => Promise<string> | string;
+};
+
 export function firstItems(items: string[], limit = 20): string {
   if (items.length === 0) return "";
   const shown = items.slice(0, limit).join("\n");

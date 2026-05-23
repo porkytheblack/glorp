@@ -1,6 +1,4 @@
 import React, { useCallback, useEffect, useState } from "react";
-import * as path from "node:path";
-import * as os from "node:os";
 import { useTerminalDimensions, useKeyboard } from "@opentui/react";
 import { theme } from "./theme.ts";
 import { useUiState } from "./store.ts";
@@ -39,7 +37,6 @@ export function App({
   glorp: GlorpHandle;
   workspace: string;
   onQuit: () => void;
-  /** Asks the parent (cli.ts) to tear down + rebuild glorp with a new session id. */
   onSwapSession?: (sessionId: string | null) => void;
   dataDir: string;
 }) {
@@ -49,18 +46,10 @@ export function App({
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [inputHeight, setInputHeight] = useState(4);
 
-  // Subscribe to model-label changes (driven by swapProfile).
   useEffect(() => glorp.onLabelChange(setModelLabel), [glorp]);
 
-  // Whenever the glorp instance is swapped (post-session-switch), reset
-  // our tracked label from the new instance's modelLabel.
   useEffect(() => {
     setModelLabel(glorp.modelLabel);
-  }, [glorp]);
-
-  // Replay persisted session state after `useUiState` has subscribed to
-  // the bridge. This is what makes resumed sessions show their transcript.
-  useEffect(() => {
     void glorp.hydrateUi();
   }, [glorp]);
 
@@ -83,11 +72,6 @@ export function App({
     }
   });
 
-  // ---- Modal overlays --------------------------------------------------
-  // Display-stack slots always win (the agent is blocked waiting on them).
-  // Renderer is looked up in the registry — built-ins handle
-  // permission_request / confirm / info / select_one / text_input; unknown
-  // renderer names fall back to a generic accept/reject prompt.
   const pendingSlot = state.displaySlots[0];
   if (pendingSlot) {
     const Renderer = getSlotRenderer(pendingSlot.renderer) ?? UnknownSlot;
@@ -122,7 +106,7 @@ export function App({
         }}
         onNew={() => {
           setOverlay(null);
-          onSwapSession(null); // null = caller picks a fresh id
+          onSwapSession(null);
         }}
         onClose={() => setOverlay(null)}
       />
@@ -143,11 +127,6 @@ export function App({
     );
   }
 
-  // ---- Empty-state landing --------------------------------------------
-  // Before any messages exist, show a centred logo + compact input.
-  // Status footer (workspace · version) sits at the very bottom. This
-  // matches the OpenCode-style landing the user wants — chrome stays
-  // out of the way until the conversation actually starts.
   if (state.turns.length === 0 && !state.streamingText) {
     return (
       <EmptyHero
@@ -168,7 +147,6 @@ export function App({
     );
   }
 
-  // ---- Active chat ----------------------------------------------------
   const sidebarVisible = width >= NARROW_THRESHOLD;
   const sidebarWidth = Math.max(
     MIN_SIDEBAR,
@@ -214,7 +192,6 @@ export function App({
           onHeightChange={handleInputHeightChange}
         />
       </box>
-      {/* OpenCode-style footer: workspace path (left) + version (right). */}
       <box flexDirection="row" justifyContent="space-between" width={width} paddingX={1}>
         <text fg={theme.textDim}>{truncatePath(workspace, Math.floor(width / 2) - 4)}</text>
         <text fg={theme.textDim}>v{GLORP_VERSION}</text>

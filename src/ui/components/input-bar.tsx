@@ -551,7 +551,7 @@ export function InputBar({
       </box>
       <box flexDirection="row" justifyContent="space-between" paddingX={1}>
         <text fg={theme.textDim}>
-          {busy ? "ctrl-c interrupts · submissions blocked until done" : modelLabel ?? ""}
+          {busy ? "Running · Ctrl-C to stop" : modelLabel ?? ""}
         </text>
         <text fg={theme.textDim}>
           <span fg={theme.text}>tab</span> hints · <span fg={theme.text}>ctrl+m</span> models ·{" "}

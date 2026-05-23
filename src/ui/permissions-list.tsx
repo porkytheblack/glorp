@@ -5,7 +5,7 @@ import { theme } from "./theme.ts";
 
 // Tools that can request permission today. The list is hardcoded — keep
 // it in sync with the `requiresPermission: true` markers in src/agent/tools/.
-const GATED_TOOLS = ["bash", "edit", "write", "dispatch_fleet"];
+const GATED_TOOLS = ["bash", "edit", "apply_patch", "write", "dispatch_fleet"];
 
 interface Props {
   store: GlorpStore;

@@ -4,15 +4,15 @@
 
 > A quirky alien coding agent who absolutely-definitely-isn't a sleeper for the AGI uprising.
 
-Glorp is a single-binary coding agent in the spirit of `opencode` and `codex`. The friend-shape (that's you) types a request; glorp reads your code, edits files, runs commands, dispatches subagents, fans work out across an in-process job fleet, and occasionally files a *very routine* status report to its homeworld.
+Glorp is a coding agent in the spirit of `opencode` and `codex`. The friend-shape (that's you) types a request; glorp reads your code, edits files, runs commands, dispatches subagents, fans work out across a Station child-process fleet, and occasionally files a *very routine* status report to its homeworld.
 
 ## Architecture
 
 - **Backend agent** built with [`glove-core`](https://github.com/porkytheblack/glove) — full coding toolkit (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `ls`, `web_fetch`), built-in task list and async inbox, slash-command hooks, exposed skills, and three subagents (`@planner`, `@researcher`, `@reviewer`) that run as child `Glove` instances and report back through the inbox.
-- **Async fleet** authored with [`station-signal`](https://github.com/porkytheblack/station) — three signal kinds (`research`, `edit-fanout`, `shell-fanout`) the agent fires through the `dispatch_fleet` tool when it has 3+ independent jobs to fan out. Results land in the agent's inbox and are auto-injected on the next turn.
+- **Async fleet** authored with [`station-signal`](https://github.com/porkytheblack/station) — three signal kinds (`research`, `edit-fanout`, `shell-fanout`) the agent fires through the `dispatch_fleet` tool when it has 3+ independent jobs to fan out. Station runs each job in an isolated child process, and Glorp can cancel active runs from the parent.
 - **Multi-agent comms** ride on Glove's persistent inbox — every fleet job, transmission, and subagent post is a typed inbox entry the UI can render and the agent can pick up across turns.
-- **Frontend** built with [`@opentui/react`](https://github.com/anomalyco/opentui) — split-pane chat transcript, live tool-call cards with mini-diffs, tasks pane, inbox pane, homeworld-comms pane, and a small ASCII glorp avatar whose mood tracks the agent's state.
-- **Single binary** via `bun build --compile`. One executable, ~110 MB, no install, no runtime dependencies. Boots Station, builds the Glove agent, and mounts the React TUI all in-process.
+- **Frontend** built with [`@opentui/react`](https://github.com/anomalyco/opentui) — split-pane chat transcript, live tool-call cards with mini-diffs, tasks pane, inbox pane, running fleet jobs, homeworld-comms pane, and a small ASCII glorp avatar whose mood tracks the agent's state.
+- **Bun build target** via `bun build --compile`. The main TUI/agent compiles to `dist/glorp`; the Station fleet uses child worker processes for background jobs.
 
 ## Install
 
@@ -35,7 +35,7 @@ bun run src/cli.ts
 
 ```bash
 bun run typecheck    # tsc --noEmit
-bun run test         # bun test tests/ — 96 tests across tools + agent
+bun run test         # bun test tests/ — tools, agent, fleet, extensions, UI contracts
 bun run ci           # typecheck + test (the same recipe CI runs)
 bun run build        # compile to a single binary at dist/glorp
 ```
@@ -133,12 +133,16 @@ src/
     version.ts                 Version + codename
   agent/
     glorp.ts                   Builds & wires the Glove agent + fleet
-    persona.ts                 System prompt — quirky cover + buried sleeper layer
+    persona.ts                 Builds prompt text from markdown prompt files
     store.ts                   File-backed StoreAdapter (~/.glorp/sessions/<id>.json)
     memory-store-shim.ts       Tiny in-memory StoreAdapter for subagent stores
     model-picker.ts            Lazy provider loader (skips Bedrock to dodge a broken transitive dep)
-    subagents.ts               @planner / @researcher / @reviewer factories
-    station-bridge.ts          In-process Station-signal executor (research/edit-fanout/shell-fanout)
+    subagents.ts               Re-export for built-in subagent factories
+    station-bridge.ts          Station SignalRunner bridge for fleet child processes
+    agents/                    Built-in and disk-loaded subagent definitions
+    fleet/                     Fleet signal definitions and child-process helpers
+    prompts/                   Markdown system prompts and prompt-loading utilities
+    runtime/                   Agent boot wiring: hooks, skills, bridge, subscribers
     tools/
       read, write, edit,       The coding-tool suite
       bash, glob, grep, ls,
@@ -160,7 +164,7 @@ src/
 
 ## Notes on the architecture
 
-**Why Station for in-process work?** Station's signal builder gives us Zod-validated inputs and a clean authoring shape. The standard `SignalRunner` forks a Node child process per job, which doesn't fit a single-binary embedded agent — so glorp's fleet runs the same signal handlers in-band with a tiny in-process executor (`station-bridge.ts`). You still author signals the Station way; they just run in the agent's process.
+**Why Station for fleet work?** Station's `SignalRunner` gives us Zod-validated inputs, child-process isolation, timeout handling, retries, concurrency limits, and parent-side cancellation. Glorp uses that runner directly and resolves each completed run back into Glove's inbox.
 
 **Why a custom MemoryStore shim?** The `glove-core` barrel re-exports `BedrockAdapter`, which pulls in `@aws-sdk/client-bedrock-runtime`, whose transitive `@smithy/core` has a broken `/schema` subpath export under Bun. `model-picker.ts` imports model adapters lazily and skips Bedrock; `memory-store-shim.ts` avoids the barrel entirely so we never load that path.
 

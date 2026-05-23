@@ -1,9 +1,9 @@
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { GloveFoldArgs } from "glove-core";
 import { resolveSafePath, relPath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
 import { firstItems } from "./summaries.ts";
+import type { SummaryTool } from "./summaries.ts";
 
 // Hidden files that are still useful to surface in code searches.
 const HIDDEN_ALLOWLIST = new Set([".env", ".env.example", ".gitignore", ".dockerignore", ".npmrc"]);
@@ -29,11 +29,11 @@ async function* walk(root: string, ignore: ReadonlySet<string>): AsyncGenerator<
   }
 }
 
-export function globTool(workspace: string): GloveFoldArgs<{
+export function globTool(workspace: string): SummaryTool<{
   pattern: string;
   path?: string;
   limit?: number;
-}> {
+}, GlobSummaryArgs> {
   return {
     name: "glob",
     description:

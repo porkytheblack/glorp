@@ -1,9 +1,9 @@
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { GloveFoldArgs } from "glove-core";
 import { resolveSafePath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
 import { firstItems } from "./summaries.ts";
+import type { SummaryTool } from "./summaries.ts";
 
 interface GrepSummaryArgs {
   pattern: string;
@@ -27,14 +27,14 @@ async function* walk(root: string): AsyncGenerator<string> {
   }
 }
 
-export function grepTool(workspace: string): GloveFoldArgs<{
+export function grepTool(workspace: string): SummaryTool<{
   pattern: string;
   path?: string;
   glob?: string;
   case_insensitive?: boolean;
   max_results?: number;
   context?: number;
-}> {
+}, GrepSummaryArgs> {
   return {
     name: "grep",
     description:

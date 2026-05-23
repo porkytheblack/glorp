@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as fs from "node:fs";
-import type { GloveFoldArgs } from "glove-core";
 import { resolveSafePath, relPath, isFile } from "./fs-shared.ts";
+import type { SummaryTool } from "./summaries.ts";
 
 const MAX_BYTES = 1024 * 1024; // 1 MB cap before we truncate.
 const DEFAULT_LINES = 500;
@@ -17,11 +17,11 @@ interface ReadSummaryArgs {
   limitedByLines: boolean;
 }
 
-export function readTool(workspace: string): GloveFoldArgs<{
+export function readTool(workspace: string): SummaryTool<{
   path: string;
   offset?: number;
   limit?: number;
-}> {
+}, ReadSummaryArgs> {
   return {
     name: "read",
     description:

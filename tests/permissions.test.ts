@@ -8,6 +8,7 @@ import { getBridge } from "../src/shared/bridge.ts";
 import { readTool } from "../src/agent/tools/read.ts";
 import { writeTool } from "../src/agent/tools/write.ts";
 import { editTool } from "../src/agent/tools/edit.ts";
+import { applyPatchTool } from "../src/agent/tools/apply-patch.ts";
 import { bashTool } from "../src/agent/tools/bash.ts";
 import { fleetDispatchTool } from "../src/agent/tools/fleet-dispatch.ts";
 import type { GlorpFleet } from "../src/agent/station-bridge.ts";
@@ -40,6 +41,9 @@ describe("requiresPermission flags on tools", () => {
   });
   test("edit requires permission", () => {
     expect(editTool(workspace).requiresPermission).toBe(true);
+  });
+  test("apply_patch requires permission", () => {
+    expect(applyPatchTool(workspace).requiresPermission).toBe(true);
   });
   test("dispatch_fleet requires permission", () => {
     const fakeFleet = {} as GlorpFleet;

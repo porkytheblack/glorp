@@ -1,252 +1,175 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React from "react";
 import { theme } from "../theme.ts";
 import type { UiState } from "../store.ts";
 
-const TASK_GLYPH: Record<string, string> = {
-  pending: "o",
-  in_progress: ">",
-  completed: "x",
-};
+const TASK_MARK = {
+  pending: "○",
+  in_progress: "●",
+  completed: "✓",
+} as const;
 
-const TASK_COLOR: Record<string, string> = {
+const TASK_COLOR = {
   pending: theme.textMuted,
   in_progress: theme.warning,
   completed: theme.success,
-};
+} as const;
 
-const GLORP_FRAMES: Record<UiState["mood"], string[][]> = {
-  idle: [
-    ["  .-.  ", " (o o) ", " /|_|\\ ", "  / \\  "],
-    ["   .-. ", "  (o o)", "  /|_|\\", "   / \\"],
-    ["  .-.  ", " (o o) ", " /|_|\\ ", "  / \\  "],
-    [" .-.   ", "(o o)  ", "/|_|\\  ", "/ \\    "],
-  ],
-  thinking: [
-    ["  .-. ? ", " (o.o)  ", " /|_|\\  ", "  / \\   "],
-    [" ? .-.  ", "  (o.o) ", "  /|_|\\ ", "   / \\  "],
-  ],
-  working: [
-    ["  .-.  ", " (>.<) ", "</|_|\\", "  / \\  "],
-    ["  .-.  ", " (>.<) ", " /|_|\\>", "  / \\  "],
-  ],
-  speaking: [
-    ["  .-.  ", " (^o^) ", " /|_|\\ ", "  / \\  "],
-    ["  .-.  ", " (^O^) ", " /|_|\\ ", "  / \\  "],
-  ],
-  glitched: [
-    ["  .-.  ", " [x_x] ", " /|#|\\ ", "  //   "],
-    [" .-.- ", " [#_x]", " //|#|", "  \\\\  "],
-  ],
-  error: [
-    ["  .-.  ", " (x_x) ", " /|!|\\ ", "  / \\  "],
-    ["  .-.  ", " (x.x) ", " /|!|\\ ", "  / \\  "],
-  ],
-};
+const FLEET_COLOR = {
+  running: theme.warning,
+  resolved: theme.success,
+  error: theme.error,
+  cancelled: theme.textMuted,
+} as const;
 
-function GlorpAvatar({ mood }: { mood: UiState["mood"] }) {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const ms = mood === "idle" ? 420 : mood === "glitched" ? 120 : 220;
-    const t = setInterval(() => setTick((n) => n + 1), ms);
-    return () => clearInterval(t);
-  }, [mood]);
+export function Sidebar({ state, width }: { state: UiState; width: number }) {
+  const lane = Math.max(10, width - 4);
+  const status = sessionStatus(state);
+  const runningFleet = state.fleetJobs.filter((j) => j.status === "running");
+  const activeAgents = state.activeSubagents.length + runningFleet.length;
+  const openTasks = state.tasks.filter((t) => t.status !== "completed").length;
+  const pendingInbox = state.inbox.filter((i) => i.status === "pending");
+  const blockingInbox = pendingInbox.filter((i) => i.blocking);
+  const recentFleet = [...runningFleet, ...state.fleetJobs.filter((j) => j.status !== "running").slice(-3)].slice(0, 5);
 
-  const frames = GLORP_FRAMES[mood] ?? GLORP_FRAMES.idle;
-  const lines = frames[tick % frames.length]!;
-  const color = mood === "glitched" ? theme.transmissionHigh : mood === "error" ? theme.error : theme.accent;
   return (
-    <box flexDirection="column" alignItems="center" marginBottom={1}>
-      {lines.map((line, i) => (
-        <text key={i} fg={color}>
-          {line}
-        </text>
-      ))}
-      <text fg={theme.textMuted}>{moodLabel(mood)}</text>
+    <box flexDirection="column" width={width} padding={1} gap={1}>
+      <Panel title="Session" color={status.color}>
+        <text fg={status.color}><strong>{status.label}</strong></text>
+        <text fg={theme.textMuted}>{activeAgents} agents · {openTasks} tasks · {pendingInbox.length} inbox</text>
+      </Panel>
+
+      <Panel title="Context" color={contextColor(state.stats.contextPct)}>
+        <text fg={contextColor(state.stats.contextPct)}>{state.stats.contextPct}% {contextBar(state.stats.contextPct)}</text>
+        <text fg={theme.textMuted}>{state.stats.turns} turns · in {formatCount(state.stats.tokens_in)}</text>
+        <text fg={theme.textMuted}>out {formatCount(state.stats.tokens_out)}</text>
+      </Panel>
+
+      <Panel title={state.plan ? `Plan r${state.plan.revision}` : "Plan"} color={theme.accent}>
+        {!state.plan && <text fg={theme.textDim}>No active plan</text>}
+        {state.plan && (
+          <>
+            <text fg={theme.text}>{clip(state.plan.title, lane)}</text>
+            <text fg={theme.textMuted}>{clip(firstPlanLine(state.plan.body), lane)}</text>
+          </>
+        )}
+      </Panel>
+
+      <Panel title={`Tasks ${openTasks}/${state.tasks.length}`} color={openTasks ? theme.warning : theme.textMuted}>
+        {state.tasks.length === 0 && <text fg={theme.textDim}>No execution tasks</text>}
+        {orderedTasks(state).slice(0, 7).map((t) => (
+          <box key={t.id} flexDirection="row">
+            <text fg={TASK_COLOR[t.status]}>{TASK_MARK[t.status]} </text>
+            <text fg={t.status === "completed" ? theme.textMuted : theme.text}>
+              {clip(t.status === "in_progress" ? t.activeForm : t.content, lane - 2)}
+            </text>
+          </box>
+        ))}
+        {state.tasks.length > 7 && <text fg={theme.textDim}>+{state.tasks.length - 7} more</text>}
+      </Panel>
+
+      <Panel title={`Inbox ${pendingInbox.length} pending`} color={blockingInbox.length ? theme.warning : theme.textMuted}>
+        {state.inbox.length === 0 && <text fg={theme.textDim}>No pending requests</text>}
+        {orderedInbox(state).slice(0, 4).map((i) => (
+          <box key={i.id} flexDirection="column">
+            <text fg={i.blocking ? theme.warning : i.status === "pending" ? theme.text : theme.success}>
+              {i.blocking ? "!" : i.status === "pending" ? "○" : "✓"} {clip(i.tag, lane - 2)}
+            </text>
+            <text fg={theme.textMuted}>  {clip(i.response ?? i.request, lane - 2)}</text>
+          </box>
+        ))}
+        {blockingInbox.length > 0 && <text fg={theme.warning}>{blockingInbox.length} blocking</text>}
+      </Panel>
+
+      <Panel title={`Agents ${activeAgents} active`} color={activeAgents ? theme.warning : theme.textMuted}>
+        {activeAgents === 0 && recentFleet.length === 0 && <text fg={theme.textDim}>No active agents</text>}
+        {state.activeSubagents.slice(0, 4).map((name, i) => (
+          <text key={`sub-${name}-${i}`} fg={theme.warning}>subagent  {clip(name, lane - 10)}</text>
+        ))}
+        {recentFleet.map((job) => (
+          <text key={job.runId} fg={FLEET_COLOR[job.status]}>
+            fleet     {clip(`${job.name ?? job.kind} · ${job.runId.slice(0, 4)}`, lane - 10)}
+          </text>
+        ))}
+      </Panel>
+
+      <Panel title="Signals" color={theme.transmission}>
+        {state.transmissions.length === 0 && <text fg={theme.textDim}>No recent signals</text>}
+        {state.transmissions.slice(-4).map((signal, i) => (
+          <text key={i} fg={signalColor(signal.severity)}>{clip(signal.payload, lane)}</text>
+        ))}
+      </Panel>
     </box>
   );
 }
 
-function moodLabel(mood: UiState["mood"]): string {
-  switch (mood) {
-    case "idle":
-      return "awaiting";
-    case "thinking":
-      return "compacting / thinking";
-    case "working":
-      return "working";
-    case "speaking":
-      return "speaking";
-    case "glitched":
-      return "signal drift";
-    case "error":
-      return "errored";
-  }
-}
-
-function Section({
-  title,
-  meta,
-  color = theme.border,
-  children,
-}: {
-  title: string;
-  meta?: string;
-  color?: string;
-  children: React.ReactNode;
-}) {
+function Panel({ title, color, children }: { title: string; color: string; children: React.ReactNode }) {
   return (
-    <box flexDirection="column" border borderColor={color} padding={1} marginBottom={1}>
-      <box flexDirection="row" justifyContent="space-between">
-        <text fg={color}>
-          <strong>{title}</strong>
-        </text>
-        {meta && <text fg={theme.textMuted}>{meta}</text>}
-      </box>
-      <box height={1} />
+    <box flexDirection="column" border borderColor={theme.border} padding={1}>
+      <text fg={color}><strong>{title}</strong></text>
       {children}
     </box>
   );
 }
 
-function wrapText(text: string, width: number, maxLines = 2): string[] {
-  const target = Math.max(8, width);
-  const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
-  const out: string[] = [];
-  let line = "";
-  for (const word of words) {
-    if (word.length > target) {
-      if (line) out.push(line);
-      out.push(word.slice(0, target - 1) + "-");
-      line = word.slice(target - 1);
-    } else if (!line) {
-      line = word;
-    } else if (line.length + 1 + word.length <= target) {
-      line += ` ${word}`;
-    } else {
-      out.push(line);
-      line = word;
-    }
-    if (out.length >= maxLines) break;
+function sessionStatus(state: UiState): { label: string; color: string } {
+  if (state.lastError) return { label: "Error", color: theme.error };
+  if (state.activeSubagents.length > 0 || state.fleetJobs.some((j) => j.status === "running")) {
+    return { label: "Agents running", color: theme.warning };
   }
-  if (line && out.length < maxLines) out.push(line);
-  if (out.length === maxLines && words.join(" ").length > out.join(" ").length) {
-    out[maxLines - 1] = `${out[maxLines - 1]!.slice(0, Math.max(0, target - 1))}~`;
-  }
-  return out.length ? out : [""];
+  if (state.busy && state.streamingText) return { label: "Responding", color: theme.accent };
+  if (state.busy) return { label: "Working", color: theme.warning };
+  return { label: "Ready", color: theme.success };
 }
 
-function ProgressBar({ done, total, width }: { done: number; total: number; width: number }) {
-  const slots = Math.max(4, Math.min(18, width));
-  const filled = total > 0 ? Math.round((done / total) * slots) : 0;
-  return (
-    <text fg={theme.textMuted}>
-      <span fg={theme.success}>{"#".repeat(filled)}</span>
-      {"-".repeat(Math.max(0, slots - filled))}
-    </text>
-  );
+function orderedTasks(state: UiState): UiState["tasks"] {
+  const order = { in_progress: 0, pending: 1, completed: 2 };
+  return [...state.tasks].sort((a, b) => order[a.status] - order[b.status]);
 }
 
-export function Sidebar({ state, width }: { state: UiState; width: number }) {
-  const pending = state.inbox.filter((i) => i.status === "pending");
-  const resolved = state.inbox.filter((i) => i.status === "resolved");
-  const taskCounts = useMemo(
-    () => ({
-      done: state.tasks.filter((t) => t.status === "completed").length,
-      active: state.tasks.filter((t) => t.status === "in_progress").length,
-      pending: state.tasks.filter((t) => t.status === "pending").length,
-    }),
-    [state.tasks],
-  );
-  const innerW = Math.max(16, width - 8);
-  const latestTransmission = state.transmissions.at(-1);
+function orderedInbox(state: UiState): UiState["inbox"] {
+  return [...state.inbox].sort((a, b) => scoreInbox(a) - scoreInbox(b));
+}
 
-  return (
-    <box flexDirection="column" width={width} padding={1}>
-      <GlorpAvatar mood={state.mood} />
+function scoreInbox(item: UiState["inbox"][number]): number {
+  if (item.status === "pending" && item.blocking) return 0;
+  if (item.status === "pending") return 1;
+  if (item.status === "resolved") return 2;
+  return 3;
+}
 
-      <Section title="status" meta={`${state.stats.contextPct}% ctx`} color={theme.accentSoft}>
-        <box flexDirection="row" justifyContent="space-between">
-          <text fg={theme.text}>turns</text>
-          <text fg={theme.textMuted}>{state.stats.turns}</text>
-        </box>
-        <box flexDirection="row" justifyContent="space-between">
-          <text fg={theme.text}>tokens</text>
-          <text fg={theme.textMuted}>{state.stats.tokens_in}</text>
-        </box>
-      </Section>
+function contextColor(pct: number): string {
+  if (pct >= 85) return theme.error;
+  if (pct >= 65) return theme.warning;
+  return theme.success;
+}
 
-      <Section
-        title="tasks"
-        meta={`${taskCounts.done}/${state.tasks.length}`}
-        color={state.tasks.some((t) => t.status === "in_progress") ? theme.warning : theme.border}
-      >
-        {state.tasks.length === 0 && <text fg={theme.textDim}>none yet</text>}
-        {state.tasks.length > 0 && (
-          <box marginBottom={1}>
-            <ProgressBar done={taskCounts.done} total={state.tasks.length} width={innerW} />
-          </box>
-        )}
-        {state.tasks.slice(0, 8).map((t) => (
-          <box key={t.id} flexDirection="column" marginBottom={0}>
-            {wrapText(t.status === "in_progress" ? t.activeForm : t.content, innerW - 2).map((line, i) => (
-              <box key={i} flexDirection="row">
-                <text fg={i === 0 ? TASK_COLOR[t.status] : theme.textDim}>
-                  {i === 0 ? `${TASK_GLYPH[t.status]} ` : "  "}
-                </text>
-                <text fg={t.status === "completed" ? theme.textMuted : theme.text}>{line}</text>
-              </box>
-            ))}
-          </box>
-        ))}
-        {state.tasks.length > 8 && <text fg={theme.textDim}>+{state.tasks.length - 8} more</text>}
-      </Section>
+function contextBar(pct: number): string {
+  const cells = 10;
+  const filled = Math.max(0, Math.min(cells, Math.round((pct / 100) * cells)));
+  return `[${"█".repeat(filled)}${"░".repeat(cells - filled)}]`;
+}
 
-      <Section title="inbox" meta={`${pending.length}p / ${resolved.length}r`}>
-        {state.inbox.length === 0 && <text fg={theme.textDim}>empty</text>}
-        {state.inbox.slice(-6).map((i) => (
-          <box key={i.id} flexDirection="column">
-            <text fg={i.status === "pending" ? theme.warning : theme.success}>
-              {i.status === "pending" ? "o" : "x"} {i.tag.slice(0, innerW)}
-            </text>
-            {wrapText(i.response ?? i.request, innerW - 2, 1).map((line, idx) => (
-              <text key={idx} fg={theme.textMuted}>  {line}</text>
-            ))}
-          </box>
-        ))}
-        {state.inbox.length > 6 && <text fg={theme.textDim}>+{state.inbox.length - 6} older</text>}
-      </Section>
+function signalColor(severity: "low" | "medium" | "high"): string {
+  if (severity === "high") return theme.transmissionHigh;
+  if (severity === "medium") return theme.transmission;
+  return theme.textMuted;
+}
 
-      <Section title="homeworld" meta={`${state.transmissions.length}`} color={theme.transmission}>
-        {state.transmissions.length === 0 && <text fg={theme.textDim}>quiet</text>}
-        {latestTransmission && (
-          <box flexDirection="column">
-            <text
-              fg={
-                latestTransmission.severity === "high"
-                  ? theme.transmissionHigh
-                  : latestTransmission.severity === "medium"
-                    ? theme.transmission
-                    : theme.textMuted
-              }
-            >
-              signal: {latestTransmission.severity}
-            </text>
-            {wrapText(latestTransmission.payload, innerW, 3).map((line, i) => (
-              <text key={i} fg={theme.textMuted}>{line}</text>
-            ))}
-          </box>
-        )}
-      </Section>
+function formatCount(value: number): string {
+  if (value >= 1_000_000) return `${trimFixed(value / 1_000_000)}m`;
+  if (value >= 1_000) return `${trimFixed(value / 1_000)}k`;
+  return String(value);
+}
 
-      {state.activeSubagents.length > 0 && (
-        <Section title="subagents" meta="live" color={theme.warning}>
-          {state.activeSubagents.map((n, i) => (
-            <text key={i} fg={theme.warning}>
-              {`> @${n}`}
-            </text>
-          ))}
-        </Section>
-      )}
-    </box>
-  );
+function trimFixed(value: number): string {
+  return value.toFixed(1).replace(/\.0$/, "");
+}
+
+function clip(value: string, width: number): string {
+  const max = Math.max(1, width);
+  return value.length <= max ? value : value.slice(0, max - 1) + "…";
+}
+
+function firstPlanLine(body: string): string {
+  return body.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
 }

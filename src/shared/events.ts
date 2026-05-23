@@ -32,6 +32,13 @@ export interface TaskItem {
   status: "pending" | "in_progress" | "completed";
 }
 
+export interface PlanDocument {
+  title: string;
+  body: string;
+  revision: number;
+  updatedAt: string;
+}
+
 export interface InboxEntry {
   id: string;
   tag: string;
@@ -43,6 +50,17 @@ export interface InboxEntry {
   resolvedAt: string | null;
 }
 
+export interface FleetJobEvent {
+  runId: string;
+  itemId: string;
+  tag: string;
+  name?: string;
+  kind: "research" | "edit-fanout" | "shell-fanout";
+  status: "running" | "resolved" | "error" | "cancelled";
+  startedAt: number;
+  endedAt?: number;
+}
+
 export interface AgentStats {
   turns: number;
   tokens_in: number;
@@ -50,44 +68,36 @@ export interface AgentStats {
   contextPct: number;
 }
 
-export interface SessionHydration {
-  turns: ChatTurn[];
-  title: string | null;
-}
-
-/**
- * A slot pushed onto the agent's display stack. Any custom modal the
- * agent wants to render — confirmation, info card, picker, form — flows
- * through this single mechanism. The UI looks up a renderer by `renderer`
- * name and either renders the matching component or shows a generic
- * fallback. Resolve/reject the slot via GlorpHandle.resolveSlot /
- * GlorpHandle.rejectSlot to unblock the agent (for pushAndWait slots).
- */
 export interface DisplaySlotEvent {
   slotId: string;
   renderer: string;
   input: unknown;
   createdAt: number;
-  /**
-   * True if the renderer is `"permission_request"` — Glove's executor
-   * pushes this kind of slot whenever a tool with `requiresPermission`
-   * needs consent. Set by the bridge for convenience.
-   */
   isPermissionRequest: boolean;
 }
 
 export type BridgeEvent =
-  | { type: "hydrate"; state: SessionHydration }
+  | {
+    type: "session_hydrate";
+    turns: ChatTurn[];
+    title: string | null;
+    plan: PlanDocument | null;
+    tasks: TaskItem[];
+    inbox: InboxEntry[];
+    stats: AgentStats;
+  }
+  | { type: "title"; title: string | null }
   | { type: "turn"; turn: ChatTurn }
   | { type: "turn_update"; id: string; patch: Partial<ChatTurn> }
-  | { type: "title"; title: string | null }
   | { type: "text_delta"; text: string }
   | { type: "text_clear" }
   | { type: "tool_started"; tool: ToolEvent }
   | { type: "tool_finished"; tool: ToolEvent }
   | { type: "busy"; busy: boolean }
+  | { type: "plan"; plan: PlanDocument | null }
   | { type: "tasks"; tasks: TaskItem[] }
   | { type: "inbox"; items: InboxEntry[] }
+  | { type: "fleet"; job: FleetJobEvent }
   | { type: "stats"; stats: AgentStats }
   | { type: "compaction"; phase: "start" | "end" }
   | { type: "subagent"; name: string; phase: "start" | "end"; status?: "success" | "error"; message?: string }

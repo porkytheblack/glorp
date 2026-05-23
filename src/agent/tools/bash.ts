@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { spawn } from "node:child_process";
-import type { GloveFoldArgs } from "glove-core";
+import type { SummaryTool } from "./summaries.ts";
 import { compactText, lineCount } from "./summaries.ts";
 
 const MAX_OUTPUT_BYTES_PER_STREAM = 64 * 1024;
@@ -108,11 +108,11 @@ function makeStreamCapture(label: "stdout" | "stderr") {
   };
 }
 
-export function bashTool(workspace: string): GloveFoldArgs<{
+export function bashTool(workspace: string): SummaryTool<{
   command: string;
   description: string;
   timeout_ms?: number;
-}> {
+}, BashSummaryArgs> {
   return {
     name: "bash",
     description:

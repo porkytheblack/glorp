@@ -2,7 +2,10 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { z } from "zod";
 
+import { Glove } from "glove-core/glove";
+import { Displaymanager } from "glove-core/display-manager";
 import { GlorpStore } from "../src/agent/store.ts";
 import { createFleet } from "../src/agent/station-bridge.ts";
 import {
@@ -89,8 +92,10 @@ describe("GlorpStore", () => {
     // Fresh instance, same id + dir.
     const reloaded = new GlorpStore(sid, dataDir);
     expect(await reloaded.getTitle()).toBe("Friendly login repair");
-    expect((await reloaded.getMessages()).length).toBe(2);
-    expect((await reloaded.getMessages())[0]?.text).toBe("hello");
+    const modelMessages = await reloaded.getMessages();
+    expect(modelMessages.length).toBe(3);
+    expect(modelMessages[0]?.is_skill_injection).toBe(true);
+    expect(modelMessages[1]?.text).toBe("hello");
     expect((await reloaded.getTasks()).length).toBe(1);
     expect((await reloaded.getTasks())[0]?.status).toBe("in_progress");
     expect((await reloaded.getInboxItems()).length).toBe(1);
@@ -114,13 +119,123 @@ describe("GlorpStore", () => {
     const b = await parent.createSubAgentStore("worker", false);
     expect(a).not.toBe(b);
   });
+
+  test("subagent stores persist under the parent session with trigger metadata", async () => {
+    const parent = new GlorpStore("parent-2", dataDir);
+    await parent.appendMessages([{ sender: "user", id: "u1", text: "review the auth flow" }]);
+    const child = await parent.createSubAgentStore("reviewer", false);
+    await child.appendMessages([{ sender: "agent", text: "auth review notes" }]);
+    await new Promise((r) => setTimeout(r, 180));
+
+    const dir = path.join(dataDir, "sessions", "parent-2.subagents", "reviewer");
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+    expect(files).toHaveLength(1);
+    const snap = JSON.parse(fs.readFileSync(path.join(dir, files[0]!), "utf-8"));
+    expect(snap.metadata.kind).toBe("subagent");
+    expect(snap.metadata.parentSessionId).toBe("parent-2");
+    expect(snap.metadata.triggerMessageId).toBe("u1");
+    expect(snap.metadata.triggerMessageText).toBe("review the auth flow");
+    expect(snap.messages[0].text).toBe("auth review notes");
+  });
+
+  test("task updates replace the stored plan instead of appending duplicates", async () => {
+    const store = new GlorpStore("plans-1", dataDir);
+    await store.addTasks([
+      { id: "a", content: "Inspect issue", activeForm: "Inspecting issue", status: "completed" },
+    ]);
+    await store.addTasks([
+      { id: "b", content: "Run tests", activeForm: "Running tests", status: "in_progress" },
+    ]);
+    const tasks = await store.getTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.content).toBe("Run tests");
+    await new Promise((r) => setTimeout(r, 120));
+  });
+
+  test("plan document persists separately from task artifacts", async () => {
+    const store = new GlorpStore("plan-doc-1", dataDir);
+    await store.updatePlan({
+      title: "Auth refactor",
+      body: "Methodology: inspect boundaries, update handlers, then verify auth tests.",
+    });
+    await store.addTasks([
+      { id: "t1", content: "Run auth tests", activeForm: "Running auth tests", status: "pending" },
+    ]);
+    await new Promise((r) => setTimeout(r, 180));
+    const reloaded = new GlorpStore("plan-doc-1", dataDir);
+    expect((await reloaded.getPlan())?.title).toBe("Auth refactor");
+    expect((await reloaded.getTasks())[0]?.content).toBe("Run auth tests");
+  });
+});
+
+describe("Glove tool continuation", () => {
+  test("continues after a tool result and returns the final model response", async () => {
+    let calls = 0;
+    const model: ModelAdapter = {
+      name: "tool-then-final",
+      setSystemPrompt() {},
+      prompt: async (request, notify) => {
+        calls++;
+        if (calls === 1) {
+          const toolCall = {
+            id: "call_1",
+            tool_name: "echo_once",
+            input_args: { text: "hi" },
+          };
+          await notify("tool_use", { id: "call_1", name: "echo_once", input: { text: "hi" } });
+          await notify("model_response_complete", {
+            text: "",
+            tool_calls: [toolCall],
+            stop_reason: "tool_use",
+            tokens_in: 1,
+            tokens_out: 1,
+          });
+          return { messages: [{ sender: "agent", text: "", tool_calls: [toolCall] }], tokens_in: 1, tokens_out: 1 };
+        }
+        const result = request.messages.at(-1)?.tool_results?.[0]?.result.data;
+        expect(result).toBe("echo: hi");
+        await notify("model_response_complete", {
+          text: "done",
+          stop_reason: "end_turn",
+          tokens_in: 1,
+          tokens_out: 1,
+        });
+        return { messages: [{ sender: "agent", text: "done" }], tokens_in: 1, tokens_out: 1 };
+      },
+    };
+
+    const store = new GlorpStore("continue-1", dataDir);
+    const agent = new Glove({
+      store,
+      model,
+      displayManager: new Displaymanager(),
+      serverMode: true,
+      systemPrompt: "test",
+      compaction_config: { compaction_instructions: "compact", max_turns: 10 },
+    })
+      .fold({
+        name: "echo_once",
+        description: "Echo a short string.",
+        inputSchema: z.object({ text: z.string().describe("Text to echo") }),
+        async do(input) {
+          return { status: "success", data: `echo: ${input.text}` };
+        },
+      })
+      .build();
+
+    const response = await agent.processRequest("use the tool");
+    expect(calls).toBe(2);
+    expect(JSON.stringify(response)).toContain("done");
+    expect((await store.getMessages()).some((m) => m.tool_results?.length)).toBe(true);
+    await new Promise((r) => setTimeout(r, 120));
+  });
 });
 
 // =====================================================================
-// Fleet — in-process Station executor
+// Fleet — Station child-process executor
 // =====================================================================
-describe("Fleet (in-process)", () => {
-  test("parallel shell-fanout finishes in roughly the same time", async () => {
+describe("Fleet (Station child processes)", () => {
+  test("parallel shell-fanout beats serial wall-clock despite child startup", async () => {
     const fleet = await createFleet({
       workspace,
       model: fakeModel,
@@ -137,19 +252,20 @@ describe("Fleet (in-process)", () => {
         fleet.dispatch("shell-fanout", {
           itemId: id,
           tag: "parallel",
-          payload: "sleep 0.3 && echo done",
+          payload: "sleep 1 && echo done",
         }),
       ),
     );
-    while (resolves.length < 5 && Date.now() - t0 < 4000) {
+    while (resolves.length < 5 && Date.now() - t0 < 7000) {
       await new Promise((r) => setTimeout(r, 30));
     }
     const elapsed = Date.now() - t0;
     expect(resolves.length).toBe(5);
-    // Serial would be ~1500ms; parallel should be ~350-700ms.
-    expect(elapsed).toBeLessThan(1200);
+    // Serial sleep time alone is ~5000ms; Station child startup adds overhead
+    // but the work should still complete as a parallel batch.
+    expect(elapsed).toBeLessThan(5000);
     await fleet.stop();
-  }, 8_000);
+  }, 9_000);
 
   test("concurrency limiter caps in-flight to MAX_CONCURRENT (=6)", async () => {
     const fleet = await createFleet({
@@ -313,6 +429,7 @@ describe("buildGlorp", () => {
       expect((g.agent as any).promptMachine.enableToolResultSummary).toBe(true);
       const names = tools.map((t) => t.name).sort();
       const required = [
+        "apply_patch",
         "bash",
         "dispatch_fleet",
         "edit",
@@ -322,6 +439,19 @@ describe("buildGlorp", () => {
         "glove_post_to_inbox",
         "glove_update_inbox",
         "glove_update_tasks",
+        "glorp_update_plan",
+        "glove_resources_edit",
+        "glove_resources_glob",
+        "glove_resources_grep",
+        "glove_resources_links_for",
+        "glove_resources_ls",
+        "glove_resources_mkdir",
+        "glove_resources_move",
+        "glove_resources_read",
+        "glove_resources_remove",
+        "glove_resources_set_metadata",
+        "glove_resources_stat",
+        "glove_resources_write",
         "grep",
         "ls",
         "read",
@@ -429,10 +559,10 @@ describe("buildGlorp", () => {
     const unsub = getBridge().subscribe((event) => events.push(event));
     try {
       await g.hydrateUi();
-      const hydrated = events.find((event) => event.type === "hydrate");
+      const hydrated = events.find((event) => event.type === "session_hydrate");
       expect(hydrated).toBeDefined();
-      expect(hydrated.state.title).toBe("Auth resume repair");
-      expect(hydrated.state.turns.map((t: any) => t.text)).toEqual([
+      expect(hydrated.title).toBe("Auth resume repair");
+      expect(hydrated.turns.map((t: any) => t.text)).toEqual([
         "fix auth resume",
         "I'll inspect it.",
       ]);

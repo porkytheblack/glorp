@@ -1,6 +1,6 @@
 import { z } from "zod";
-import type { GloveFoldArgs } from "glove-core";
 import { compactText } from "./summaries.ts";
+import type { SummaryTool } from "./summaries.ts";
 
 const MAX_BYTES = 512 * 1024;
 
@@ -28,10 +28,10 @@ function stripTags(html: string): string {
     .trim();
 }
 
-export const webFetchTool: GloveFoldArgs<{
+export const webFetchTool: SummaryTool<{
   url: string;
   mode?: "text" | "raw";
-}> = {
+}, WebFetchSummaryArgs> = {
   name: "web_fetch",
   description:
     "Fetch a URL and return text. By default strips HTML tags and collapses whitespace. " +

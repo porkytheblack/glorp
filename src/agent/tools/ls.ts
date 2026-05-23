@@ -1,9 +1,9 @@
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { GloveFoldArgs } from "glove-core";
 import { resolveSafePath, relPath, isDir } from "./fs-shared.ts";
 import { firstItems } from "./summaries.ts";
+import type { SummaryTool } from "./summaries.ts";
 
 const MAX_ENTRIES = 500;
 
@@ -15,10 +15,10 @@ interface LsSummaryArgs {
   entries: string[];
 }
 
-export function lsTool(workspace: string): GloveFoldArgs<{
+export function lsTool(workspace: string): SummaryTool<{
   path?: string;
   show_hidden?: boolean;
-}> {
+}, LsSummaryArgs> {
   return {
     name: "ls",
     description: "List directory contents with file types and sizes. Use to explore an unfamiliar tree.",

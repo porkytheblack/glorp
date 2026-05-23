@@ -42,6 +42,7 @@ export async function listSessions(dataDir: string): Promise<SessionInfo[]> {
         tasks?: unknown[];
         inboxItems?: Array<{ status?: string }>;
         tokensIn?: number;
+        tokensOut?: number;
         turnCount?: number;
       };
       const msgs = snap.messages ?? [];
@@ -57,7 +58,7 @@ export async function listSessions(dataDir: string): Promise<SessionInfo[]> {
         totalMessages: msgs.length,
         taskCount: snap.tasks?.length ?? 0,
         pendingInboxCount: (snap.inboxItems ?? []).filter((i) => i.status === "pending").length,
-        tokenCount: snap.tokensIn ?? 0,
+        tokenCount: (snap.tokensIn ?? 0) + (snap.tokensOut ?? 0),
         turnCount: snap.turnCount ?? 0,
         lastActivity: stat.mtime,
       });

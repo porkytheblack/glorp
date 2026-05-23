@@ -12,6 +12,7 @@
     "dev": "bun run --watch src/cli.ts",
     "build": "bun build src/cli.ts --compile --minify --target=bun --outfile=dist/glorp",
     "install-bin": "bash scripts/install.sh",
+    "bench:conventions": "bun scripts/bench-conventions.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/",
     "ci": "bun run typecheck && bun run test"
@@ -19,10 +20,12 @@
   "dependencies": {
     "@opentui/core": "latest",
     "@opentui/react": "latest",
-    "glove-core": "3.0.4",
+    "glove-core": "latest",
     "glove-mcp": "latest",
+    "glove-memory": "^0.1.0",
     "react": "^19.0.0",
     "station-signal": "latest",
+    "tsx": "^4.22.3",
     "zod": "^4.0.0"
   },
   "devDependencies": {

@@ -17,9 +17,9 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/plan", description: "switch to plan-first mode for this turn" },
   { name: "/diff", description: "list files changed since last user message" },
   { name: "/compact", description: "force a context compaction now" },
-  { name: "/clear", description: "compact and reset the working slate" },
+  { name: "/clear", description: "clear and reset the working slate" },
   { name: "/concise", description: "ask glorp to be terser" },
-  { name: "/transmissions", description: "ask about the homeworld-comms panel" },
+  { name: "/transmissions", description: "open the signals log" },
   { name: "/help", description: "show commands" },
   { name: "/quit", description: "exit glorp" },
 ];
