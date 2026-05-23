@@ -124,29 +124,39 @@ The `tools` field is a comma-separated allowlist (case-insensitive). If omitted,
 
 ## Layout
 
+Files are capped at ~200 lines (300 for `ui/*.tsx`); the eslint config enforces it.
+
 ```
 src/
-  cli.ts                       Single entrypoint (parses args, mounts TUI or runs headless)
+  cli.ts                       Single entrypoint — dispatches to worker/headless/tui
+  cli/                         Sub-flows: args, env, help text, headless mode, TUI runtime
+  prompts/                     System-prompt markdown bundled via Bun text imports
+    main.md                    Main glorp agent — lightweight, defers detail to tools
+    planner.md / researcher.md / reviewer.md / compaction.md / fleet-research.md
   shared/
-    events.ts                  Wire types between agent and TUI
+    events.ts                  Bridge event types (turns, tools, fleet jobs, …)
     bridge.ts                  In-process pub/sub
     version.ts                 Version + codename
   agent/
-    glorp.ts                   Builds & wires the Glove agent + fleet
-    persona.ts                 System prompt — quirky cover + buried sleeper layer
+    glorp/                     Agent builder split into build / subscriber / wrappers /
+                               messages / title / session / hooks / extensions
+    agents/                    SubAgent defs (planner / researcher / reviewer) + the
+                               generic factory shared with disk-loaded subagents
+    fleet/                     Station-backed fleet that dispatches via bun subprocesses
+                               (signals + spawner + worker subcommand + lifecycle)
+    skills/                    Disk discovery, frontmatter parser, token budget for
+                               the skill index, lazy payload + registration
+    tools/                     read / write / edit / bash / glob / grep / ls /
+                               web_fetch / transmission / dispatch_fleet / modals,
+                               plus a registry that wires tools onto a Glove by name
+    credentials/               Providers, reasoning config, the file-backed store
     store.ts                   File-backed StoreAdapter (~/.glorp/sessions/<id>.json)
     memory-store-shim.ts       Tiny in-memory StoreAdapter for subagent stores
-    model-picker.ts            Lazy provider loader (skips Bedrock to dodge a broken transitive dep)
-    subagents.ts               @planner / @researcher / @reviewer factories
-    station-bridge.ts          In-process Station-signal executor (research/edit-fanout/shell-fanout)
-    tools/
-      read, write, edit,       The coding-tool suite
-      bash, glob, grep, ls,
-      webfetch, transmission,
-      fleet-dispatch
+    model-picker.ts            Lazy provider loader (skips Bedrock to dodge a broken dep)
+    prompts.ts                 loadPrompt(name) helper for the bundled markdown
   ui/
-    app.tsx                    Root layout (transcript + sidebar + input)
-    store.ts                   useReducer that listens on the bridge
+    app.tsx                    Root layout (transcript + sidebar + input + fleet strip)
+    ui-state.ts / ui-reducer.ts / store.ts  Bridge → React state pipeline
     theme.ts                   Palette + ASCII art
     components/
       transcript.tsx           Scrollable chat history with empty-state banner
@@ -154,13 +164,19 @@ src/
       tool-call.tsx            Tool-call card with mini-diff for `edit`
       sidebar.tsx              Glorp avatar + tasks + inbox + transmissions + subagents
       status-bar.tsx           Top status line (model / ctx % / tokens / errors)
-      input-bar.tsx            Input with slash/@ menu + history
+      fleet-strip.tsx          Bottom-left strip of currently-running fleet workers
+      input-bar.tsx + input-bar/  Input + slash menu + hint helpers + render variants
       slash-menu.tsx           Tab-completable command palette
+    onboarding.tsx + onboarding/  Onboarding flow split into provider / model steps
 ```
 
 ## Notes on the architecture
 
-**Why Station for in-process work?** Station's signal builder gives us Zod-validated inputs and a clean authoring shape. The standard `SignalRunner` forks a Node child process per job, which doesn't fit a single-binary embedded agent — so glorp's fleet runs the same signal handlers in-band with a tiny in-process executor (`station-bridge.ts`). You still author signals the Station way; they just run in the agent's process.
+**Lightweight system prompt + tools-as-truth.** Workflows aren't hard-coded into the system prompt. `src/prompts/main.md` is intentionally terse — operating principles, when to use subagents, when to use the fleet — and the rest of the guidance lives where work happens: tool descriptions, the subagent registry, and the lazily-loaded skill bodies that the agent pulls in on demand via `glove_invoke_skill`.
+
+**Fleet = Station signals + bun subprocess workers.** Station's signal builder gives us Zod-validated inputs and a clean authoring shape. We don't use Station's default `SignalRunner` (it forks Node child processes pointed at signal files on disk — incompatible with the single-binary build). Instead, every dispatched job spawns the current binary (or `bun run src/cli.ts` in dev) with the `--worker` subcommand. The worker reads the input as a JSON line on stdin, runs the matching handler in its own process, and writes the result to stdout. Parents track each in-flight job and propagate abort via SIGTERM. Concurrency is bounded by a permit semaphore.
+
+**Skill index in the system prompt, bodies on demand.** Disk-loaded skills get a metadata index appended to the main prompt — name, description, source path, estimated body tokens. The index is bounded to ~2% of the context window (`skillIndexBudget`); skills past that budget are listed as "elided" so the agent knows they exist. Bodies load lazily through `glove_invoke_skill`, wrapped in a `<skill name="…">…</skill>` tag so the model sees a clear boundary. Skill invocations that arrive as part of a tool-result loop are suppressed.
 
 **Why a custom MemoryStore shim?** The `glove-core` barrel re-exports `BedrockAdapter`, which pulls in `@aws-sdk/client-bedrock-runtime`, whose transitive `@smithy/core` has a broken `/schema` subpath export under Bun. `model-picker.ts` imports model adapters lazily and skips Bedrock; `memory-store-shim.ts` avoids the barrel entirely so we never load that path.
 

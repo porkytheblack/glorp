@@ -76,6 +76,17 @@ export interface DisplaySlotEvent {
   isPermissionRequest: boolean;
 }
 
+export interface FleetJobUiEvent {
+  jobId: string;
+  kind: "research" | "edit-fanout" | "shell-fanout";
+  itemId: string;
+  tag: string;
+  name?: string;
+  startedAt: number;
+  endedAt?: number;
+  status: "running" | "success" | "error";
+}
+
 export type BridgeEvent =
   | { type: "hydrate"; state: SessionHydration }
   | { type: "turn"; turn: ChatTurn }
@@ -97,6 +108,7 @@ export type BridgeEvent =
   | { type: "skill"; name: string; source: "user" | "agent" }
   | { type: "display_slot_pushed"; slot: DisplaySlotEvent }
   | { type: "display_slot_resolved"; slotId: string }
+  | { type: "fleet_job"; job: FleetJobUiEvent }
   | { type: "session_reset" };
 
 /** @deprecated kept for back-compat — replaced by DisplaySlotEvent + isPermissionRequest. */

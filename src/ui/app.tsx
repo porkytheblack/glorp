@@ -1,6 +1,4 @@
 import React, { useCallback, useEffect, useState } from "react";
-import * as path from "node:path";
-import * as os from "node:os";
 import { useTerminalDimensions, useKeyboard } from "@opentui/react";
 import { theme } from "./theme.ts";
 import { useUiState } from "./store.ts";
@@ -8,6 +6,7 @@ import { Transcript } from "./components/transcript.tsx";
 import { Sidebar } from "./components/sidebar.tsx";
 import { StatusBar } from "./components/status-bar.tsx";
 import { InputBar } from "./components/input-bar.tsx";
+import { FleetStrip } from "./components/fleet-strip.tsx";
 import { ModelSwitcher } from "./model-switcher.tsx";
 import { SessionPicker } from "./session-picker.tsx";
 import { TransmissionsLog } from "./transmissions-log.tsx";
@@ -219,6 +218,11 @@ export function App({
         <text fg={theme.textDim}>{truncatePath(workspace, Math.floor(width / 2) - 4)}</text>
         <text fg={theme.textDim}>v{GLORP_VERSION}</text>
       </box>
+      {state.fleetJobs.length > 0 && (
+        <box position="absolute" left={0} bottom={footerH + inputH}>
+          <FleetStrip jobs={state.fleetJobs} />
+        </box>
+      )}
     </box>
   );
 }

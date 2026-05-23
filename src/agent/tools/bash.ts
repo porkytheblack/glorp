@@ -1,11 +1,8 @@
 import { z } from "zod";
 import { spawn } from "node:child_process";
-import type { GloveFoldArgs } from "glove-core";
+import type { GloveFoldArgs } from "glove-core/glove";
 import { compactText, lineCount } from "./summaries.ts";
-
-const MAX_OUTPUT_BYTES_PER_STREAM = 64 * 1024;
-const OUTPUT_HEAD_BYTES = 48 * 1024;
-const OUTPUT_TAIL_BYTES = 16 * 1024;
+import { dangerousReason, makeStreamCapture, type StreamCapture } from "./bash-capture.ts";
 
 interface BashSummaryArgs {
   command: string;
@@ -20,91 +17,63 @@ interface BashSummaryArgs {
   stderrTruncated: boolean;
 }
 
-const DANGEROUS_PATTERNS = [
-  /\brm\s+-rf\s+\/(\s|$)/,
-  /:\(\)\{.*\}\s*;:/, // fork bomb
-  /\bmkfs\b/,
-  /\bdd\s+if=/,
-  />+\s*\/dev\/(sd[a-z]|nvme\d+n\d+|vd[a-z]|xvd[a-z])/,
-];
-
-function dangerousReason(cmd: string): string | null {
-  for (const p of DANGEROUS_PATTERNS) {
-    if (p.test(cmd)) return `Command matches a destructive pattern (${p}). Refusing.`;
-  }
-  return null;
+interface BashRunResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
 }
 
-function cleanTerminalOutput(text: string): string {
-  return text
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\x1b[=>]/g, "")
-    .split(/\r|\n/)
-    .filter((line, index, lines) => {
-      const trimmed = line.trim();
-      if (!trimmed) return true;
-      return index === lines.length - 1 || trimmed !== lines[index + 1]?.trim();
-    })
-    .join("\n");
+function runBash(
+  command: string,
+  workspace: string,
+  timeout: number,
+  signal?: AbortSignal,
+): Promise<BashRunResult> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const child = spawn("bash", ["-c", command], {
+      cwd: workspace,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout: StreamCapture = makeStreamCapture("stdout");
+    const stderr: StreamCapture = makeStreamCapture("stderr");
+    child.stdout.on("data", (buf: Buffer) => stdout.push(buf));
+    child.stderr.on("data", (buf: Buffer) => stderr.push(buf));
+    let killed = false;
+    let sigkillTimer: NodeJS.Timeout | null = null;
+    const escalate = () => {
+      if (killed) return;
+      killed = true;
+      try { child.kill("SIGTERM"); } catch {}
+      sigkillTimer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 2000);
+    };
+    const timer = setTimeout(escalate, timeout);
+    const onAbort = () => escalate();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
+      signal?.removeEventListener("abort", onAbort);
+      const timedOut = killed && Date.now() - start >= timeout - 50;
+      resolve({ exitCode: code ?? -1, stdout: stdout.value(), stderr: stderr.value(), timedOut });
+    });
+  });
 }
 
-function newlineCount(text: string): number {
-  return (text.match(/\n/g) ?? []).length;
-}
-
-function byteLength(text: string): number {
-  return Buffer.byteLength(text, "utf-8");
-}
-
-function takeFirstBytes(text: string, bytes: number): string {
-  const buf = Buffer.from(text, "utf-8");
-  return buf.length <= bytes ? text : buf.subarray(0, bytes).toString("utf-8");
-}
-
-function takeLastBytes(text: string, bytes: number): string {
-  const buf = Buffer.from(text, "utf-8");
-  return buf.length <= bytes ? text : buf.subarray(buf.length - bytes).toString("utf-8");
-}
-
-function makeStreamCapture(label: "stdout" | "stderr") {
-  let full = "";
-  let head = "";
-  let tail = "";
-  let totalBytes = 0;
-  let totalNewlines = 0;
-  let truncated = false;
-
+function summaryArgs(input: { command: string; description: string }, r: BashRunResult): BashSummaryArgs {
   return {
-    push(buf: Buffer) {
-      const text = buf.toString("utf-8");
-      totalBytes += buf.length;
-      totalNewlines += newlineCount(text);
-      if (!truncated && totalBytes <= MAX_OUTPUT_BYTES_PER_STREAM) {
-        full += text;
-        return;
-      }
-      if (!truncated) {
-        truncated = true;
-        const combined = full + text;
-        head = takeFirstBytes(combined, OUTPUT_HEAD_BYTES);
-        tail = takeLastBytes(combined, OUTPUT_TAIL_BYTES);
-        full = "";
-        return;
-      }
-      tail = takeLastBytes(tail + text, OUTPUT_TAIL_BYTES);
-    },
-    value() {
-      if (!truncated) return cleanTerminalOutput(full);
-      const totalLines = totalNewlines + 1;
-      const retainedLines = lineCount(head) + lineCount(tail);
-      const omittedLines = Math.max(0, totalLines - retainedLines);
-      return cleanTerminalOutput(
-        `${head}\n... [${label} truncated: ${omittedLines} lines elided; ${totalBytes} bytes total, kept ${byteLength(head) + byteLength(tail)} bytes head+tail]\n${tail}`,
-      );
-    },
-    truncated() {
-      return truncated;
-    },
+    command: input.command,
+    description: input.description,
+    exitCode: r.exitCode,
+    timedOut: r.timedOut,
+    stdoutLines: lineCount(r.stdout),
+    stderrLines: lineCount(r.stderr),
+    stdoutPreview: compactText(r.stdout, 12, 2000),
+    stderrPreview: compactText(r.stderr, 8, 1200),
+    stdoutTruncated: r.stdout.includes("[stdout truncated"),
+    stderrTruncated: r.stderr.includes("[stderr truncated"),
   };
 }
 
@@ -123,134 +92,44 @@ export function bashTool(workspace: string): GloveFoldArgs<{
     inputSchema: z.object({
       command: z.string().describe("Shell command to run"),
       description: z.string().describe("One-sentence active-voice summary of what this command does"),
-      timeout_ms: z
-        .number()
-        .int()
-        .min(1000)
-        .max(600_000)
-        .optional()
+      timeout_ms: z.number().int().min(1000).max(600_000).optional()
         .describe("Timeout in ms (default 120000)"),
     }),
     async do(input, _display, _glove, signal) {
       const reason = dangerousReason(input.command);
-      if (reason) {
-        return { status: "error", data: null, message: reason };
-      }
+      if (reason) return { status: "error", data: null, message: reason };
       const timeout = input.timeout_ms ?? 120_000;
-      const result = await new Promise<{
-        exitCode: number;
-        stdout: string;
-        stderr: string;
-        timedOut: boolean;
-      }>((resolve) => {
-        const start = Date.now();
-        const child = spawn("bash", ["-c", input.command], {
-          cwd: workspace,
-          env: process.env,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        const stdoutCapture = makeStreamCapture("stdout");
-        const stderrCapture = makeStreamCapture("stderr");
-        child.stdout.on("data", (buf: Buffer) => stdoutCapture.push(buf));
-        child.stderr.on("data", (buf: Buffer) => stderrCapture.push(buf));
-        let killed = false;
-        const sigkillTimer: { ref: NodeJS.Timeout | null } = { ref: null };
-        const escalate = () => {
-          if (killed) return;
-          killed = true;
-          try {
-            child.kill("SIGTERM");
-          } catch {}
-          sigkillTimer.ref = setTimeout(() => {
-            try {
-              child.kill("SIGKILL");
-            } catch {}
-          }, 2000);
-        };
-        const timer = setTimeout(escalate, timeout);
-        const onAbort = () => escalate();
-        signal?.addEventListener("abort", onAbort, { once: true });
-        child.on("close", (code) => {
-          clearTimeout(timer);
-          if (sigkillTimer.ref) clearTimeout(sigkillTimer.ref);
-          signal?.removeEventListener("abort", onAbort);
-          const timedOut = killed && Date.now() - start >= timeout - 50;
-          resolve({
-            exitCode: code ?? -1,
-            stdout: stdoutCapture.value(),
-            stderr: stderrCapture.value(),
-            timedOut,
-          });
-        });
-      });
+      const result = await runBash(input.command, workspace, timeout, signal);
       const combined = [
         result.stdout && `stdout:\n${result.stdout}`,
         result.stderr && `stderr:\n${result.stderr}`,
         `exit_code: ${result.exitCode}`,
-      ]
-        .filter(Boolean)
-        .join("\n");
+      ].filter(Boolean).join("\n");
+      const sumArgs = summaryArgs(input, result);
+      const render = { command: input.command, description: input.description, exitCode: result.exitCode };
       if (result.exitCode === 0) {
-        return {
-          status: "success",
-          data: combined || "(no output)",
-          generateSummaryArgs: {
-            command: input.command,
-            description: input.description,
-            exitCode: result.exitCode,
-            timedOut: result.timedOut,
-            stdoutLines: lineCount(result.stdout),
-            stderrLines: lineCount(result.stderr),
-            stdoutPreview: compactText(result.stdout, 12, 2000),
-            stderrPreview: compactText(result.stderr, 8, 1200),
-            stdoutTruncated: result.stdout.includes("[stdout truncated"),
-            stderrTruncated: result.stderr.includes("[stderr truncated"),
-          } satisfies BashSummaryArgs,
-          renderData: { command: input.command, description: input.description, exitCode: 0 },
-        };
+        return { status: "success", data: combined || "(no output)", generateSummaryArgs: sumArgs, renderData: render };
       }
       return {
         status: "error",
         data: combined,
-        message: result.timedOut
-          ? `Command timed out after ${timeout}ms`
-          : `Command exited with code ${result.exitCode}`,
-        generateSummaryArgs: {
-          command: input.command,
-          description: input.description,
-          exitCode: result.exitCode,
-          timedOut: result.timedOut,
-          stdoutLines: lineCount(result.stdout),
-          stderrLines: lineCount(result.stderr),
-          stdoutPreview: compactText(result.stdout, 12, 2000),
-          stderrPreview: compactText(result.stderr, 8, 1200),
-          stdoutTruncated: result.stdout.includes("[stdout truncated"),
-          stderrTruncated: result.stderr.includes("[stderr truncated"),
-        } satisfies BashSummaryArgs,
-        renderData: {
-          command: input.command,
-          description: input.description,
-          exitCode: result.exitCode,
-        },
+        message: result.timedOut ? `Command timed out after ${timeout}ms` : `Command exited with code ${result.exitCode}`,
+        generateSummaryArgs: sumArgs,
+        renderData: render,
       };
     },
     generateToolSummary: async (args) => {
       const a = args as BashSummaryArgs;
-      const chunks = [
+      return [
         `Ran: ${a.description}`,
         `Command: ${a.command}`,
         `Exit code: ${a.exitCode}${a.timedOut ? " (timed out)" : ""}`,
-        `stdout: ${a.stdoutLines} line${a.stdoutLines === 1 ? "" : "s"}${
-          a.stdoutTruncated ? " (truncated)" : ""
-        }`,
+        `stdout: ${a.stdoutLines} line${a.stdoutLines === 1 ? "" : "s"}${a.stdoutTruncated ? " (truncated)" : ""}`,
         a.stdoutPreview ? `stdout preview:\n${a.stdoutPreview}` : "",
-        `stderr: ${a.stderrLines} line${a.stderrLines === 1 ? "" : "s"}${
-          a.stderrTruncated ? " (truncated)" : ""
-        }`,
+        `stderr: ${a.stderrLines} line${a.stderrLines === 1 ? "" : "s"}${a.stderrTruncated ? " (truncated)" : ""}`,
         a.stderrPreview ? `stderr preview:\n${a.stderrPreview}` : "",
         "Full prior command output omitted.",
-      ].filter(Boolean);
-      return chunks.join("\n");
+      ].filter(Boolean).join("\n");
     },
   };
 }

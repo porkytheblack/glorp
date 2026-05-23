@@ -121,11 +121,7 @@ describe("GlorpStore", () => {
 // =====================================================================
 describe("Fleet (in-process)", () => {
   test("parallel shell-fanout finishes in roughly the same time", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
+    const fleet = createFleet({ workspace, dataDir });
     const resolves: string[] = [];
     fleet.setInboxResolver(async (id) => {
       resolves.push(id);
@@ -141,22 +137,20 @@ describe("Fleet (in-process)", () => {
         }),
       ),
     );
-    while (resolves.length < 5 && Date.now() - t0 < 4000) {
+    while (resolves.length < 5 && Date.now() - t0 < 8000) {
       await new Promise((r) => setTimeout(r, 30));
     }
     const elapsed = Date.now() - t0;
     expect(resolves.length).toBe(5);
-    // Serial would be ~1500ms; parallel should be ~350-700ms.
-    expect(elapsed).toBeLessThan(1200);
+    // Subprocess startup adds ~100-300ms per worker, so we relaxed the
+    // ceiling. Serial would be 5 * (300ms work + ~300ms startup) ≈ 3s+;
+    // parallel ought to stay well under that.
+    expect(elapsed).toBeLessThan(2500);
     await fleet.stop();
-  }, 8_000);
+  }, 12_000);
 
   test("concurrency limiter caps in-flight to MAX_CONCURRENT (=6)", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
+    const fleet = createFleet({ workspace, dataDir });
     const resolves: string[] = [];
     fleet.setInboxResolver(async (id) => {
       resolves.push(id);
@@ -173,23 +167,19 @@ describe("Fleet (in-process)", () => {
         }),
       ),
     );
-    while (resolves.length < 10 && Date.now() - t0 < 6000) {
+    while (resolves.length < 10 && Date.now() - t0 < 12000) {
       await new Promise((r) => setTimeout(r, 30));
     }
     const elapsed = Date.now() - t0;
     expect(resolves.length).toBe(10);
     // With limit 6, 10 jobs of ~300ms each run in 2 batches → ~600ms+.
-    // Without the limit they'd all run in ~300-400ms.
+    // Subprocess startup adds overhead but the lower bound is still real.
     expect(elapsed).toBeGreaterThan(500);
     await fleet.stop();
-  }, 10_000);
+  }, 20_000);
 
   test("failing job is reported with status='error' to the resolver", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
+    const fleet = createFleet({ workspace, dataDir });
     let captured: { id: string; status: "resolved" | "error" } | null = null;
     fleet.setInboxResolver(async (id, _resp, status) => {
       captured = { id, status };
@@ -210,11 +200,7 @@ describe("Fleet (in-process)", () => {
   }, 6_000);
 
   test("stop() kills active children promptly (no orphans, no hang)", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
+    const fleet = createFleet({ workspace, dataDir });
     await fleet.start();
     await fleet.dispatch("shell-fanout", {
       itemId: "longjob",
@@ -231,11 +217,7 @@ describe("Fleet (in-process)", () => {
   }, 8_000);
 
   test("invalid input throws synchronously and doesn't leak a slot", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
+    const fleet = createFleet({ workspace, dataDir });
     await fleet.start();
     await expect(
       fleet.dispatch("shell-fanout", { itemId: 1 as any, tag: "x", payload: "y" }),
