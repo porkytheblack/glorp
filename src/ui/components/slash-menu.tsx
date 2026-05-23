@@ -6,6 +6,8 @@ export interface SlashCommand {
   description: string;
 }
 
+export const SLASH_MENU_VISIBLE_ROWS = 8;
+
 /**
  * Static fallback used if no `extensions` catalogue is supplied (tests,
  * smoke harness). Real runs pass the catalogue from `glorp.extensions`
@@ -28,26 +30,44 @@ export const SUBAGENT_MENTIONS: SlashCommand[] = [
   { name: "@reviewer", description: "review a recent change for issues" },
 ];
 
+export const SKILL_HINTS: SlashCommand[] = [
+  { name: "$concise", description: "trim verbosity for this exchange" },
+];
+
 export function SlashMenu({
   query,
   selectedIndex,
   width,
   slashCommands = SLASH_COMMANDS,
+  skillHints = SKILL_HINTS,
   subagentMentions = SUBAGENT_MENTIONS,
 }: {
   query: string;
   selectedIndex: number;
   width: number;
   slashCommands?: SlashCommand[];
+  skillHints?: SlashCommand[];
   subagentMentions?: SlashCommand[];
 }) {
   const isSlash = query.startsWith("/");
+  const isSkill = query.startsWith("$");
   const isMention = query.startsWith("@");
-  if (!isSlash && !isMention) return null;
-  const pool = isSlash ? slashCommands : subagentMentions;
+  if (!isSlash && !isSkill && !isMention) return null;
+  const pool = isSlash ? slashCommands : isSkill ? skillHints : subagentMentions;
   const matches = pool.filter((c) => c.name.startsWith(query));
-  if (matches.length === 0) return null;
-  const headerLabel = isSlash ? "slash commands" : "subagents";
+  const headerLabel = isSlash ? "slash commands" : isSkill ? "skills" : "subagents";
+  const triggerHint = isSkill ? "to complete as /skill" : "to complete";
+  const clampedSelectedIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, matches.length - 1)));
+  const firstVisibleIndex = Math.min(
+    Math.max(0, clampedSelectedIndex - SLASH_MENU_VISIBLE_ROWS + 1),
+    Math.max(0, matches.length - SLASH_MENU_VISIBLE_ROWS),
+  );
+  const visibleMatches = matches.slice(firstVisibleIndex, firstVisibleIndex + SLASH_MENU_VISIBLE_ROWS);
+  const rangeHint =
+    matches.length > SLASH_MENU_VISIBLE_ROWS
+      ? ` · showing ${firstVisibleIndex + 1}-${firstVisibleIndex + visibleMatches.length}`
+      : "";
+
   return (
     <box
       flexDirection="column"
@@ -58,21 +78,28 @@ export function SlashMenu({
       padding={1}
     >
       <text fg={theme.textDim}>
-        {headerLabel} · {matches.length} match{matches.length === 1 ? "" : "es"} ·{" "}
-        <span fg={theme.accent}>tab</span> to complete
+        {headerLabel} · {matches.length} match{matches.length === 1 ? "" : "es"}{rangeHint} ·{" "}
+        <span fg={theme.accent}>tab</span> {triggerHint}
       </text>
-      {matches.slice(0, 8).map((c, i) => (
-        <box key={c.name} flexDirection="row">
-          <text
-            fg={i === selectedIndex ? theme.bg : theme.accent}
-            bg={i === selectedIndex ? theme.accent : "transparent"}
-          >
-            {" "}
-            {c.name.padEnd(16, " ")}{" "}
-          </text>
-          <text fg={theme.textMuted}> {c.description}</text>
+      {matches.length === 0 ? (
+        <box flexDirection="row">
+          <text fg={theme.textMuted}> no matching {headerLabel}</text>
         </box>
-      ))}
+      ) : (
+        visibleMatches.map((c, i) => {
+          const absoluteIndex = firstVisibleIndex + i;
+          const selected = absoluteIndex === clampedSelectedIndex;
+          return (
+            <box key={c.name} flexDirection="row">
+              <text fg={selected ? theme.bg : theme.accent} bg={selected ? theme.accent : "transparent"}>
+                {" "}
+                {c.name.padEnd(16, " ")}{" "}
+              </text>
+              <text fg={theme.textMuted}> {c.description}</text>
+            </box>
+          );
+        })
+      )}
     </box>
   );
 }

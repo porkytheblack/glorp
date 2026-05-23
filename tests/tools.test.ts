@@ -168,6 +168,17 @@ describe("readTool", () => {
     expect(r.data as string).toContain("    3→line3");
   });
 
+  test("provides a compact summary for older read results", async () => {
+    fs.writeFileSync(path.join(workspace, "a.txt"), "line1\nline2\nline3");
+    const tool = readTool(workspace);
+    const r = await tool.do({ path: "a.txt", offset: 2, limit: 1 }, display, glove);
+    const summary = await tool.generateToolSummary?.(r.generateSummaryArgs);
+    expect(summary).toContain("Read a.txt");
+    expect(summary).toContain("lines 2-2");
+    expect(summary).toContain("Full prior contents omitted");
+    expect(summary).not.toContain("line2");
+  });
+
   test("returns error for nonexistent file", async () => {
     const tool = readTool(workspace);
     const r = await tool.do({ path: "nope.txt" }, display, glove);
@@ -518,6 +529,38 @@ describe("bashTool", () => {
     expect(r.data as string).toContain("stdout truncated");
   }, 15_000);
 
+  test("large stdout keeps head and tail with elision marker", async () => {
+    const tool = bashTool(workspace);
+    const r = await tool.do(
+      {
+        command:
+          "printf 'HEAD-LINE\\n'; yes middle-line | head -n 9000; printf 'TAIL-LINE\\n'",
+        description: "print head and tail",
+      },
+      display,
+      glove,
+    );
+    expect(r.status).toBe("success");
+    const out = r.data as string;
+    expect(out).toContain("HEAD-LINE");
+    expect(out).toContain("TAIL-LINE");
+    expect(out).toContain("lines elided");
+    expect(out.length).toBeLessThan(80_000);
+  }, 15_000);
+
+  test("provides a compact summary for older bash results", async () => {
+    const tool = bashTool(workspace);
+    const r = await tool.do(
+      { command: "printf 'one\\ntwo\\nthree\\n'", description: "print sample lines" },
+      display,
+      glove,
+    );
+    const summary = await tool.generateToolSummary?.(r.generateSummaryArgs);
+    expect(summary).toContain("Ran: print sample lines");
+    expect(summary).toContain("Exit code: 0");
+    expect(summary).toContain("stdout preview");
+  });
+
   test("command runs in workspace cwd", async () => {
     const tool = bashTool(workspace);
     const r = await tool.do({ command: "pwd", description: "pwd" }, display, glove);
@@ -653,6 +696,15 @@ describe("globTool", () => {
     expect(r.status).toBe("success");
     expect(r.data as string).toContain(".gitignore");
   });
+
+  test("provides a compact summary for older glob results", async () => {
+    const tool = globTool(workspace);
+    const r = await tool.do({ pattern: "**/*.ts" }, display, glove);
+    const summary = await tool.generateToolSummary?.(r.generateSummaryArgs);
+    expect(summary).toContain("glob **/*.ts");
+    expect(summary).toContain("path");
+    expect(summary).toContain("Full prior path list omitted");
+  });
 });
 
 // =====================================================================
@@ -721,6 +773,16 @@ describe("grepTool", () => {
     const out = (r.data as string).split("\n").filter((l) => l.includes("MATCH"));
     expect(out.length).toBeLessThanOrEqual(5);
   });
+
+  test("provides a path-count summary for older grep results", async () => {
+    const tool = grepTool(workspace);
+    const r = await tool.do({ pattern: "world" }, display, glove);
+    const summary = await tool.generateToolSummary?.(r.generateSummaryArgs);
+    expect(summary).toContain("3 matches across 3 files");
+    expect(summary).toContain("src/one.ts:1 (1 match)");
+    expect(summary).toContain("Full prior match text omitted");
+    expect(summary).not.toContain("hello world");
+  });
 });
 
 // =====================================================================
@@ -783,6 +845,20 @@ describe("lsTool", () => {
     await expect(tool.do({ path: "/etc" }, display, glove)).rejects.toThrow(
       /outside the workspace/,
     );
+  });
+
+  test("caps very large directory listings", async () => {
+    fs.mkdirSync(path.join(workspace, "many"));
+    for (let i = 0; i < 520; i++) {
+      fs.writeFileSync(path.join(workspace, "many", `f${String(i).padStart(3, "0")}.txt`), "x");
+    }
+    const tool = lsTool(workspace);
+    const r = await tool.do({ path: "many" }, display, glove);
+    expect(r.status).toBe("success");
+    expect(r.data as string).toContain("entries omitted");
+    const summary = await tool.generateToolSummary?.(r.generateSummaryArgs);
+    expect(summary).toContain("ls many: 520 entries");
+    expect(summary).toContain("Full prior directory listing omitted");
   });
 });
 
@@ -863,6 +939,14 @@ describe("webFetchTool", () => {
     expect(r.status).toBe("success");
     expect(r.data as string).toContain("truncated at");
     expect((r.data as string).length).toBeLessThan(525_000);
+  });
+
+  test("provides a compact summary for older fetch results", async () => {
+    const r = await webFetchTool.do({ url: `${baseUrl}/text` }, display, glove);
+    const summary = await webFetchTool.generateToolSummary?.(r.generateSummaryArgs);
+    expect(summary).toContain(`Fetched ${baseUrl}/text`);
+    expect(summary).toContain("Preview:");
+    expect(summary).toContain("Full prior fetch body omitted");
   });
 
   test("fetch abort works", async () => {

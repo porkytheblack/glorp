@@ -2,20 +2,12 @@ import { SignalRunner } from "station-signal";
 import type { ModelAdapter, Context } from "glove-core/core";
 import type { Run, SignalSubscriber } from "station-signal";
 import { fileURLToPath } from "node:url";
-import {
-  editFanoutSignal,
-  researchSignal,
-  shellFanoutSignal,
-} from "./fleet/signals.ts";
+import { editFanoutSignal, researchSignal, shellFanoutSignal } from "./fleet/signals.ts";
 import type { FleetJobEvent } from "../shared/events.ts";
 import type { FleetKind, FleetSignalInput } from "./fleet/types.ts";
 import { parseRunInput, parseRunOutput, sleep, toFleetJob } from "./fleet/runner-utils.ts";
 
-type InboxResolver = (
-  itemId: string,
-  response: string,
-  status: "resolved" | "error",
-) => Promise<void>;
+type InboxResolver = (itemId: string, response: string, status: "resolved" | "error") => Promise<void>;
 
 export interface FleetModelConfig {
   provider?: string;
@@ -26,10 +18,7 @@ export interface FleetModelConfig {
 export interface GlorpFleet {
   start(): Promise<void>;
   stop(): Promise<void>;
-  dispatch(
-    kind: FleetKind,
-    input: { itemId: string; tag: string; payload: string; name?: string },
-  ): Promise<string>;
+  dispatch(kind: FleetKind, input: { itemId: string; tag: string; payload: string; name?: string }): Promise<string>;
   cancel(runId: string): Promise<boolean>;
   cancelAll(): Promise<void>;
   setInboxResolver(fn: InboxResolver): void;
@@ -49,22 +38,11 @@ export async function createFleet(opts: {
 }): Promise<GlorpFleet> {
   let inboxResolver: InboxResolver | null = null;
   let contextRef: Context | null = null;
-  let modelConfig: FleetModelConfig = {
-    provider: opts.provider,
-    model: opts.selectedModel,
-    profileId: opts.profileId,
-  };
+  let modelConfig: FleetModelConfig = { provider: opts.provider, model: opts.selectedModel, profileId: opts.profileId };
   const active = new Map<string, FleetJobEvent>();
   const signalFile = fileURLToPath(new URL("./fleet/signals.ts", import.meta.url));
-  const runner = new SignalRunner({
-    pollIntervalMs: 25,
-    maxConcurrent: 6,
-    subscribers: [fleetSubscriber()],
-  });
-  runner
-    .registerSignal(researchSignal, signalFile)
-    .registerSignal(editFanoutSignal, signalFile)
-    .registerSignal(shellFanoutSignal, signalFile);
+  const runner = new SignalRunner({ pollIntervalMs: 25, maxConcurrent: 6, subscribers: [fleetSubscriber()] });
+  runner.registerSignal(researchSignal, signalFile).registerSignal(editFanoutSignal, signalFile).registerSignal(shellFanoutSignal, signalFile);
 
   let started = false;
   let stopping = false;
@@ -87,28 +65,13 @@ export async function createFleet(opts: {
     },
     async dispatch(kind, input) {
       if (stopping) throw new Error("fleet is stopping");
-      return runner.triggerSignal(kind, {
-        ...input,
-        workspace: opts.workspace,
-        dataDir: opts.dataDir,
-        ...modelConfig,
-      } satisfies FleetSignalInput);
+      return runner.triggerSignal(kind, { ...input, workspace: opts.workspace, dataDir: opts.dataDir, ...modelConfig } satisfies FleetSignalInput);
     },
-    cancel(runId) {
-      return runner.cancel(runId);
-    },
-    async cancelAll() {
-      await Promise.all([...active.keys()].map((runId) => runner.cancel(runId)));
-    },
-    setInboxResolver(fn) {
-      inboxResolver = fn;
-    },
-    setContext(ctx) {
-      contextRef = ctx;
-    },
-    setModelConfig(config) {
-      modelConfig = config;
-    },
+    cancel(runId) { return runner.cancel(runId); },
+    async cancelAll() { await Promise.all([...active.keys()].map((runId) => runner.cancel(runId))); },
+    setInboxResolver(fn) { inboxResolver = fn; },
+    setContext(ctx) { contextRef = ctx; },
+    setModelConfig(config) { modelConfig = config; },
   };
 
   function fleetSubscriber(): SignalSubscriber {
@@ -143,11 +106,7 @@ export async function createFleet(opts: {
     };
   }
 
-  async function resolve(
-    itemId: string,
-    response: string,
-    status: "resolved" | "error",
-  ): Promise<void> {
+  async function resolve(itemId: string, response: string, status: "resolved" | "error"): Promise<void> {
     if (inboxResolver) return inboxResolver(itemId, response, status);
     if (!contextRef) return;
     await contextRef.updateInboxItem(itemId, {
@@ -157,11 +116,7 @@ export async function createFleet(opts: {
     });
   }
 
-  function finish(
-    run: Run,
-    input: FleetSignalInput,
-    status: FleetJobEvent["status"],
-  ): void {
+  function finish(run: Run, input: FleetSignalInput, status: FleetJobEvent["status"]): void {
     const prior = active.get(run.id);
     const job = { ...(prior ?? toFleetJob(run, input, status)), status, endedAt: Date.now() };
     active.delete(run.id);

@@ -11,6 +11,7 @@ import type {
 
 export interface UiState {
   turns: ChatTurn[];
+  title: string | null;
   streamingText: string;
   busy: boolean;
   plan: PlanDocument | null;
@@ -35,11 +36,13 @@ export type UiAction =
   | {
     kind: "session_hydrate";
     turns: ChatTurn[];
+    title: string | null;
     plan: PlanDocument | null;
     tasks: TaskItem[];
     inbox: InboxEntry[];
     stats: AgentStats;
   }
+  | { kind: "title"; title: string | null }
   | { kind: "turn"; turn: ChatTurn }
   | { kind: "turn_update"; id: string; patch: Partial<ChatTurn> }
   | { kind: "text_delta"; text: string }
@@ -63,6 +66,7 @@ export type UiAction =
 
 export const initialUiState: UiState = {
   turns: [],
+  title: null,
   streamingText: "",
   busy: false,
   plan: null,
@@ -84,6 +88,7 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
       next = {
         ...state,
         turns: action.turns,
+        title: action.title,
         plan: action.plan,
         tasks: action.tasks,
         inbox: action.inbox,
@@ -97,6 +102,9 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
       break;
     case "turn":
       next = { ...state, turns: [...state.turns, action.turn] };
+      break;
+    case "title":
+      next = { ...state, title: action.title };
       break;
     case "turn_update":
       next = { ...state, turns: state.turns.map((t) => t.id === action.id ? { ...t, ...action.patch } : t) };

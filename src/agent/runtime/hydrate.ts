@@ -11,8 +11,9 @@ export async function hydrateUiSession(
   bridge: Bridge,
   contextLimit: number,
 ): Promise<void> {
-  const [messages, plan, tasks, inboxItems, tokens, turns] = await Promise.all([
+  const [messages, title, plan, tasks, inboxItems, tokens, turns] = await Promise.all([
     store.getDisplayMessages(),
+    store.getTitle(),
     store.getPlan(),
     store.getTasks(),
     store.getInboxItems(),
@@ -22,6 +23,7 @@ export async function hydrateUiSession(
   bridge.emit({
     type: "session_hydrate",
     turns: turnsFromMessages(messages),
+    title,
     plan,
     tasks: tasks.map((t) => ({
       id: t.id,

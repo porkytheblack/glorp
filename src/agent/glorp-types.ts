@@ -5,6 +5,7 @@ import type { CredentialsStore } from "./credentials.ts";
 
 export interface ExtensionCatalogue {
   slash: Array<{ name: string; description: string }>;
+  skills: Array<{ name: string; description: string }>;
   mentions: Array<{ name: string; description: string }>;
 }
 
@@ -15,6 +16,7 @@ export interface GlorpHandle {
   credentials: CredentialsStore;
   sessionId: string;
   modelLabel: string;
+  title: string | null;
   extensions: ExtensionCatalogue;
   send(text: string): Promise<void>;
   abort(): void;

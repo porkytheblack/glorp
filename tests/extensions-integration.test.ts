@@ -47,8 +47,12 @@ describe("disk-loaded skills register on the agent", () => {
     try {
       const slash = g.extensions.slash.map((s) => s.name);
       expect(slash).toContain("/python-pro");
+      const skillHints = g.extensions.skills.map((s) => s.name);
+      expect(skillHints).toContain("$python-pro");
       const py = g.extensions.slash.find((s) => s.name === "/python-pro");
       expect(py?.description).toBe("Expert Python coding skill");
+      const pyHint = g.extensions.skills.find((s) => s.name === "$python-pro");
+      expect(pyHint?.description).toBe("Expert Python coding skill");
 
       const skills = (g.agent as any).skills as Map<string, { description?: string; exposeToAgent?: boolean }>;
       const reg = skills.get("python-pro");

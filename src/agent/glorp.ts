@@ -7,7 +7,6 @@ import { MAIN_AGENT_TOOLS, createToolRegistry, registerTools } from "./tools/reg
 import { plannerSubAgent, researcherSubAgent, reviewerSubAgent } from "./subagents.ts";
 import { makeDiskSubAgent } from "./agents/disk-subagent.ts";
 import { getBridge } from "../shared/bridge.ts";
-import type { GlorpFleet } from "./station-bridge.ts";
 import { createFleet } from "./station-bridge.ts";
 import { CredentialsStore } from "./credentials.ts";
 import { discoverExtensions } from "./extensions-loader.ts";
@@ -22,13 +21,27 @@ import { registerHooks } from "./runtime/hooks.ts";
 import { createSessionResources, foldResourceTools } from "./runtime/resources.ts";
 import { registerBuiltInSkills, registerDiskSkills } from "./runtime/skills.ts";
 import { buildExtensionCatalogue } from "./runtime/catalogue.ts";
+import { generateSessionTitle, cleanSessionTitle } from "./runtime/title.ts";
+import { createTitleScheduler } from "./runtime/title-scheduler.ts";
+import { wrapGlorpModel } from "./runtime/model-guards.ts";
 import type { BuildGlorpOptions, GlorpHandle } from "./glorp-types.ts";
 import * as path from "node:path";
 import * as os from "node:os";
 
 export type { BuildGlorpOptions, ExtensionCatalogue, GlorpHandle } from "./glorp-types.ts";
+export { cleanSessionTitle, generateSessionTitle };
+export {
+  messageHasOpenTaskUpdate,
+  modelResultHasToolCall,
+  modelResultHasVisibleAgentOutput,
+  modelResultIsIntentOnly,
+  withEmptyResponseRetry,
+  withIntentOnlyContinuation,
+  withTaskUpdateContinuation,
+} from "./runtime/model-guards.ts";
 
 const CONTEXT_LIMIT = 180_000;
+const TITLE_MODEL_TIMEOUT_MS = 15_000;
 
 export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> {
   const dataDir = opts.dataDir ?? path.join(os.homedir(), ".glorp");
@@ -36,9 +49,17 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const resources = createSessionResources(dataDir, opts.sessionId);
   const credentials = opts.credentials ?? new CredentialsStore(dataDir);
   const picked = await pickModel({ provider: opts.provider, model: opts.model, credentials });
+  let model = wrapGlorpModel(picked.adapter);
   let modelLabel = picked.label;
-  const displayManager = new Displaymanager();
   const bridge = getBridge();
+  const titleScheduler = createTitleScheduler({
+    store,
+    bridge,
+    model: picked.adapter,
+    initialTitle: await store.getTitle(),
+    timeoutMs: TITLE_MODEL_TIMEOUT_MS,
+  });
+  const displayManager = new Displaymanager();
   const labelListeners = new Set<(label: string) => void>();
   const diskExtensions = discoverExtensions(opts.workspace);
 
@@ -46,7 +67,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const refresh = createRefreshers(store, bridge, CONTEXT_LIMIT);
   const fleet = await createFleet({
     workspace: opts.workspace,
-    model: picked.adapter,
+    model,
     dataDir,
     provider: opts.provider,
     selectedModel: opts.provider ? picked.model : undefined,
@@ -59,7 +80,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   let abortController: AbortController | null = null;
   const builder = new Glove({
     store,
-    model: picked.adapter,
+    model,
     displayManager,
     serverMode: true,
     systemPrompt: buildGlorpSystemPrompt({
@@ -85,23 +106,21 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     .defineSubAgent(plannerSubAgent({ workspace: opts.workspace, dataDir }))
     .defineSubAgent(researcherSubAgent({ workspace: opts.workspace, dataDir }))
     .defineSubAgent(reviewerSubAgent({ workspace: opts.workspace, dataDir }));
-  for (const sub of diskExtensions.subagents) {
-    builder.defineSubAgent(makeDiskSubAgent(sub, { workspace: opts.workspace, dataDir }));
-  }
+  for (const sub of diskExtensions.subagents) builder.defineSubAgent(makeDiskSubAgent(sub, { workspace: opts.workspace, dataDir }));
   registerHooks(builder);
   registerBuiltInSkills(builder);
   registerDiskSkills(builder, diskExtensions.skills);
 
   const agent = builder.build();
+  (agent as any).promptMachine.enableToolResultSummary = true;
   const inboxContext = makeInboxContext(store);
   ctxRef.current = inboxContext;
   fleet.setContext(inboxContext);
   foldContextTools(agent, inboxContext);
   fleet.setInboxResolver(async (itemId, response, status) => {
-    const payload = status === "error" ? `[fleet error] ${response}` : response;
     await store.updateInboxItem(itemId, {
       status: "resolved",
-      response: payload,
+      response: status === "error" ? `[fleet error] ${response}` : response,
       resolved_at: new Date().toISOString(),
     });
     void refresh.inbox();
@@ -114,48 +133,39 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     store,
     credentials,
     sessionId: opts.sessionId,
+    get title() { return titleScheduler.title; },
     extensions: buildExtensionCatalogue(agent),
-    get modelLabel() {
-      return modelLabel;
+    get modelLabel() { return modelLabel; },
+    onLabelChange(fn) { labelListeners.add(fn); return () => void labelListeners.delete(fn); },
+    async hydrateUi() {
+      await hydrateUiSession(store, bridge, CONTEXT_LIMIT);
+      await titleScheduler.refreshTitle();
+      titleScheduler.schedule();
     },
-    onLabelChange(fn) {
-      labelListeners.add(fn);
-      return () => void labelListeners.delete(fn);
-    },
-    hydrateUi() {
-      return hydrateUiSession(store, bridge, CONTEXT_LIMIT);
-    },
-    resolveSlot(slotId, value) {
-      resolveDisplaySlot(displayManager, bridge, slotId, value);
-    },
+    resolveSlot(slotId, value) { resolveDisplaySlot(displayManager, bridge, slotId, value); },
     rejectSlot(slotId, reason) {
-      try {
-        displayManager.reject(slotId, reason);
-      } catch {}
+      try { displayManager.reject(slotId, reason); } catch {}
       bridge.emit({ type: "display_slot_resolved", slotId });
     },
-    resolvePermission(slotId, allow) {
-      resolveDisplaySlot(displayManager, bridge, slotId, allow);
-    },
-    clearPermission(toolName) {
-      return store.setPermission(toolName, "unset");
-    },
+    resolvePermission(slotId, allow) { resolveDisplaySlot(displayManager, bridge, slotId, allow); },
+    clearPermission(toolName) { return store.setPermission(toolName, "unset"); },
     async swapProfile(profileId) {
       const next = await pickModel({ profileId, credentials });
       abortController?.abort();
-      agent.setModel(next.adapter);
+      await titleScheduler.cancel();
+      titleScheduler.setModel(next.adapter);
+      model = wrapGlorpModel(next.adapter);
+      agent.setModel(model);
       modelLabel = next.label;
-      fleet.setModelConfig({
-        profileId: next.profile?.id,
-        provider: next.profile ? undefined : next.providerId,
-        model: next.profile ? undefined : next.model,
-      });
+      fleet.setModelConfig({ profileId: next.profile?.id, provider: next.profile ? undefined : next.providerId, model: next.profile ? undefined : next.model });
       credentials.setActive(profileId);
       for (const fn of labelListeners) fn(modelLabel);
     },
     async send(text) {
       abortController?.abort();
+      await titleScheduler.cancel();
       abortController = new AbortController();
+      titleScheduler.setRequestInFlight(true);
       bridge.emit({ type: "busy", busy: true });
       bridge.emit({ type: "turn", turn: userTurn(text) });
       try {
@@ -165,18 +175,14 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         if (err?.name === "AbortError") bridge.emit({ type: "turn", turn: systemTurn("aborted") });
         else bridge.emit({ type: "error", message: err?.message ?? String(err) });
       } finally {
+        titleScheduler.setRequestInFlight(false);
         bridge.emit({ type: "busy", busy: false });
         void refresh.all();
+        titleScheduler.schedule();
       }
     },
-    abort() {
-      abortController?.abort();
-      void fleet.cancelAll();
-    },
-    async shutdown() {
-      abortController?.abort();
-      await fleet.stop();
-    },
+    abort() { abortController?.abort(); void titleScheduler.cancel(); void fleet.cancelAll(); titleScheduler.setRequestInFlight(false); },
+    async shutdown() { abortController?.abort(); await titleScheduler.cancel(); await fleet.stop(); },
   };
 }
 
@@ -189,8 +195,6 @@ function systemTurn(text: string) {
 }
 
 function resolveDisplaySlot(displayManager: Displaymanager, bridge: ReturnType<typeof getBridge>, slotId: string, value: unknown): void {
-  try {
-    displayManager.resolve(slotId, value);
-  } catch {}
+  try { displayManager.resolve(slotId, value); } catch {}
   bridge.emit({ type: "display_slot_resolved", slotId });
 }

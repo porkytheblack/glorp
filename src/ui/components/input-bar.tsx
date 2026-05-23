@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useKeyboard } from "@opentui/react";
+import type { KeyEvent, TextareaRenderable } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { SlashMenu, SLASH_COMMANDS, SUBAGENT_MENTIONS } from "./slash-menu.tsx";
+import { SlashMenu, SLASH_COMMANDS, SKILL_HINTS, SLASH_MENU_VISIBLE_ROWS, SUBAGENT_MENTIONS } from "./slash-menu.tsx";
 import type { SlashCommand } from "./slash-menu.tsx";
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
   width: number;
   /** Dynamic catalogue from the agent; falls back to the hardcoded list. */
   slashCommands?: SlashCommand[];
+  skillHints?: SlashCommand[];
   subagentMentions?: SlashCommand[];
   /**
    * Visual variant:
@@ -23,10 +25,61 @@ interface Props {
   variant?: "default" | "hero";
   /** Human-readable model label rendered in the hero variant footer. */
   modelLabel?: string;
+  /** Reports the current rendered height so parent layouts can make room. */
+  onHeightChange?: (height: number) => void;
 }
 
 const MIN_LINES = 1;
 const MAX_LINES = 8;
+
+function isCtrlC(key: { name?: string; sequence?: string; ctrl?: boolean }): boolean {
+  return key.sequence === "\u0003" || (key.ctrl === true && key.name === "c");
+}
+
+function printableKeyText(key: { name?: string; sequence?: string; ctrl?: boolean; meta?: boolean; super?: boolean }) {
+  if (key.ctrl || key.meta || key.super) return undefined;
+  if (key.name === "space") return " ";
+  if (!key.sequence || key.sequence.length !== 1) return undefined;
+  const code = key.sequence.charCodeAt(0);
+  if (code < 32 || code === 127) return undefined;
+  return key.sequence;
+}
+
+export function normalizeSkillAlias(text: string, skillHints: SlashCommand[]): string {
+  const match = /^(\s*)\$([^\s]+)(.*)$/s.exec(text);
+  if (!match) return text;
+  const [, leading = "", name = "", rest = ""] = match;
+  if (!skillHints.some((s) => s.name === `$${name}`)) return text;
+  return `${leading}/${name}${rest}`;
+}
+
+export interface HintToken {
+  query: string;
+  start: number;
+  end: number;
+  trigger: "/" | "$" | "@";
+}
+
+function clampCursorOffset(text: string, cursor: number | undefined) {
+  if (typeof cursor !== "number" || !Number.isFinite(cursor)) return text.length;
+  return Math.max(0, Math.min(text.length, Math.floor(cursor)));
+}
+
+export function findActiveHintToken(text: string, cursor = text.length): HintToken | null {
+  const end = clampCursorOffset(text, cursor);
+  const beforeCursor = text.slice(0, end);
+  const match = /(^|[\s([{,;])([/$@][^\s]*)$/.exec(beforeCursor);
+  if (!match?.[2]) return null;
+  const query = match[2];
+  const trigger = query[0];
+  if (trigger !== "/" && trigger !== "$" && trigger !== "@") return null;
+  return {
+    query,
+    start: end - query.length,
+    end,
+    trigger,
+  };
+}
 
 /**
  * Auto-growing chat input. Uses OpenTUI's `<textarea>` for multi-line wrap
@@ -52,27 +105,100 @@ export function InputBar({
   onQuit,
   width,
   slashCommands = SLASH_COMMANDS,
+  skillHints = SKILL_HINTS,
   subagentMentions = SUBAGENT_MENTIONS,
   variant = "default",
   modelLabel,
+  onHeightChange,
 }: Props) {
   const [value, setValue] = useState("");
+  const [cursorOffset, setCursorOffset] = useState(0);
   const [menuIndex, setMenuIndex] = useState(0);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState<number | null>(null);
   // Ref to the underlying TextareaRenderable so we can call setText("")
   // to actually clear the buffer after submit.
-  const textareaRef = useRef<{ editBuffer?: { setText: (s: string) => void } } | null>(null);
+  const textareaRef = useRef<TextareaRenderable | null>(null);
+  const valueRef = useRef(value);
+  const lastKnownTextareaTextRef = useRef("");
+  const pendingCursorOffsetRef = useRef<number | null>(null);
   // Re-mount counter — bumped on history scrub so the textarea picks up
   // the new initialValue. After submit we clear in-place via the ref.
   const [instanceKey, setInstanceKey] = useState(0);
 
   useEffect(() => {
-    setMenuIndex(0);
-  }, [value.split(/\s/)[0]]);
+    valueRef.current = value;
+  }, [value]);
 
-  const lastToken = value.split(/\s/).at(-1) ?? "";
-  const showingMenu = lastToken.startsWith("/") || lastToken.startsWith("@");
+  const readTextareaCursorOffset = useCallback((text: string) => {
+    return clampCursorOffset(text, textareaRef.current?.cursorOffset ?? text.length);
+  }, []);
+
+  const enforceTextareaCursorOffset = useCallback((text: string, cursor: number) => {
+    const nextCursor = clampCursorOffset(text, cursor);
+    const node = textareaRef.current as (TextareaRenderable & {
+      editBuffer?: { setCursorByOffset?: (offset: number) => void };
+    }) | null;
+    try {
+      if (node) node.cursorOffset = nextCursor;
+    } catch {}
+    try {
+      node?.editBuffer?.setCursorByOffset?.(nextCursor);
+    } catch {}
+  }, []);
+
+  const setTextareaCursorOffset = useCallback((text: string, cursor: number) => {
+    const nextCursor = clampCursorOffset(text, cursor);
+    enforceTextareaCursorOffset(text, nextCursor);
+    setCursorOffset(nextCursor);
+  }, [enforceTextareaCursorOffset]);
+
+  useEffect(() => {
+    const cursor = pendingCursorOffsetRef.current;
+    if (cursor === null) return;
+    enforceTextareaCursorOffset(value, cursor);
+    const timeout = setTimeout(() => {
+      enforceTextareaCursorOffset(value, cursor);
+      if (pendingCursorOffsetRef.current === cursor) {
+        pendingCursorOffsetRef.current = null;
+      }
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [enforceTextareaCursorOffset, value]);
+
+  const setTextareaRef = useCallback((node: TextareaRenderable | null) => {
+    textareaRef.current = node;
+    const next = node?.plainText ?? node?.editBuffer?.getText?.();
+    if (typeof next === "string") {
+      lastKnownTextareaTextRef.current = next;
+      const pendingCursor = pendingCursorOffsetRef.current;
+      if (pendingCursor !== null) {
+        setTextareaCursorOffset(next, pendingCursor);
+      } else {
+        setCursorOffset(clampCursorOffset(next, node?.cursorOffset ?? next.length));
+      }
+    }
+  }, [setTextareaCursorOffset]);
+
+  const activeToken = useMemo(
+    () => findActiveHintToken(value, cursorOffset),
+    [cursorOffset, value],
+  );
+
+  useEffect(() => {
+    setMenuIndex(0);
+  }, [activeToken?.query]);
+
+  const activeQuery = activeToken?.query ?? "";
+  const menuPool = activeToken?.trigger === "/"
+    ? slashCommands
+    : activeToken?.trigger === "$"
+      ? skillHints
+      : activeToken?.trigger === "@"
+        ? subagentMentions
+        : [];
+  const menuMatches = activeToken ? menuPool.filter((c) => c.name.startsWith(activeQuery)) : [];
+  const showingMenu = activeToken !== null;
 
   // Reserve 6 cols of chrome (border + prompt glyph + spaces) when
   // estimating wrapped lines.
@@ -87,7 +213,12 @@ export function InputBar({
     return Math.min(MAX_LINES, Math.max(MIN_LINES, lines));
   }, [value, innerWidth]);
 
-  const boxHeight = visibleLines + 2; // +2 for top/bottom border
+  const menuHeight = showingMenu ? Math.min(SLASH_MENU_VISIBLE_ROWS, menuMatches.length) + 5 : 0;
+  const renderedHeight = menuHeight + visibleLines + (variant === "hero" ? 5 : 3);
+
+  useEffect(() => {
+    onHeightChange?.(renderedHeight);
+  }, [onHeightChange, renderedHeight]);
 
   /** Clear the textarea buffer via the renderable's ref. */
   const clearBuffer = () => {
@@ -97,21 +228,79 @@ export function InputBar({
       /* harmless — fall through to remount */
     }
     setValue("");
+    setCursorOffset(0);
   };
 
+  const readTextareaText = useCallback(() => {
+    const next = textareaRef.current?.plainText ?? textareaRef.current?.editBuffer?.getText?.();
+    if (typeof next === "string") {
+      lastKnownTextareaTextRef.current = next;
+      return next;
+    }
+    return lastKnownTextareaTextRef.current || valueRef.current;
+  }, []);
+
+  const syncTextareaText = useCallback(() => {
+    const next = readTextareaText();
+    setValue(next);
+    setCursorOffset(readTextareaCursorOffset(next));
+  }, [readTextareaCursorOffset, readTextareaText]);
+
+  const handleTextareaContentChange = useCallback(() => {
+    syncTextareaText();
+    queueMicrotask(syncTextareaText);
+    setTimeout(syncTextareaText, 0);
+  }, [syncTextareaText]);
+
+  const handleTextareaCursorChange = useCallback(() => {
+    const next = readTextareaText();
+    setCursorOffset(readTextareaCursorOffset(next));
+  }, [readTextareaCursorOffset, readTextareaText]);
+
+  const handleTextareaKeyDown = useCallback((key: KeyEvent) => {
+    if (key.name === "backspace") {
+      setValue((current) => current.slice(0, -1));
+      setCursorOffset((current) => Math.max(0, current - 1));
+      return;
+    }
+    if (
+      (key.name === "return" || key.name === "kpenter" || key.name === "linefeed") &&
+      (key.shift || key.name === "linefeed") &&
+      !key.ctrl &&
+      !key.meta
+    ) {
+      setValue((current) => `${current}\n`);
+      setCursorOffset((current) => current + 1);
+      return;
+    }
+    const typed = printableKeyText(key);
+    if (typed !== undefined) {
+      setHistoryIdx(null);
+      setValue((current) => `${current}${typed}`);
+      setCursorOffset((current) => current + typed.length);
+    }
+  }, []);
+
   /** Replace the textarea buffer with `text` and update React state. */
-  const setBuffer = (text: string) => {
+  const setBuffer = (text: string, cursor = text.length, remount = false) => {
+    const nextCursor = clampCursorOffset(text, cursor);
     try {
       textareaRef.current?.editBuffer?.setText(text);
     } catch {}
+    lastKnownTextareaTextRef.current = text;
+    pendingCursorOffsetRef.current = nextCursor;
     setValue(text);
+    setTextareaCursorOffset(text, nextCursor);
+    queueMicrotask(() => setTextareaCursorOffset(text, nextCursor));
+    setTimeout(() => setTextareaCursorOffset(text, nextCursor), 0);
+    if (remount) setInstanceKey((k) => k + 1);
   };
 
   useKeyboard((key) => {
     // Ctrl+C: abort the agent if it's working; quit on empty input;
     // otherwise clear the current draft. Always runs — even when busy —
     // so the user can interrupt at any time.
-    if (key.name === "c" && key.ctrl) {
+    if (isCtrlC(key)) {
       if (busy) {
         onAbort();
       } else if (value === "") {
@@ -123,21 +312,26 @@ export function InputBar({
     }
 
     if (showingMenu) {
-      const pool = lastToken.startsWith("/") ? slashCommands : subagentMentions;
-      const matches = pool.filter((c) => c.name.startsWith(lastToken));
-      if (key.name === "tab" && matches.length > 0) {
-        const chosen = matches[Math.min(menuIndex, matches.length - 1)]!.name;
-        const prefix = value.slice(0, value.length - lastToken.length);
-        const next = prefix + chosen + " ";
-        setBuffer(next);
+      if (key.name === "tab") {
+        if (menuMatches.length === 0 || !activeToken) return;
+        const chosen = menuMatches[Math.min(menuIndex, menuMatches.length - 1)]!.name;
+        const prefix = value.slice(0, activeToken.start);
+        const suffix = value.slice(activeToken.end);
+        const completed = chosen.startsWith("$") ? `/${chosen.slice(1)}` : chosen;
+        const spacer = suffix.startsWith(" ") ? "" : " ";
+        const next = prefix + completed + spacer + suffix;
+        const cursorAfterCompletion = prefix.length + completed.length + 1;
+        setBuffer(next, cursorAfterCompletion, true);
         return;
       }
-      if (key.name === "up" && matches.length > 0) {
+      if (key.name === "up") {
+        if (menuMatches.length === 0) return;
         setMenuIndex((i) => Math.max(0, i - 1));
         return;
       }
-      if (key.name === "down" && matches.length > 0) {
-        setMenuIndex((i) => Math.min(matches.length - 1, i + 1));
+      if (key.name === "down") {
+        if (menuMatches.length === 0) return;
+        setMenuIndex((i) => Math.min(menuMatches.length - 1, i + 1));
         return;
       }
     }
@@ -166,53 +360,26 @@ export function InputBar({
 
     // Enter (no shift, no ctrl/meta): submit. Belt-and-braces with the
     // textarea's onSubmit — whichever fires first wins, the other is
-    // deduped via `lastSubmitMsRef`. Some terminal/keymap combos drop
+    // deduped via `submitInflightRef`. Some terminal/keymap combos drop
     // the `keyBindings` override on the textarea, so this useKeyboard
     // backstop guarantees Enter always submits.
     if (
-      (key.name === "return" || key.name === "kpenter" || key.name === "linefeed") &&
+      (key.name === "return" || key.name === "kpenter") &&
       !key.shift &&
       !key.ctrl &&
       !key.meta
     ) {
       // Read the latest content from the textarea's buffer in case the
       // React `value` state hasn't propagated this frame yet.
-      const latest = (textareaRef.current as { plainText?: string } | null)?.plainText ?? value;
-      performSubmit(latest);
+      performSubmit(readTextareaText());
       return;
     }
 
-    // Shift+Enter: insert a newline at the cursor. Backstop for envs where
-    // the textarea's keymap override doesn't apply. The textarea also
-    // handles this via its keymap; we dedupe via newlineInflightRef so
-    // we don't insert two newlines.
-    if (
-      (key.name === "return" || key.name === "kpenter" || key.name === "linefeed") &&
-      key.shift &&
-      !key.ctrl &&
-      !key.meta
-    ) {
-      if (newlineInflightRef.current) return;
-      newlineInflightRef.current = true;
-      setTimeout(() => {
-        newlineInflightRef.current = false;
-      }, 0);
-      const ed = textareaRef.current?.editBuffer;
-      const eb = ed as { insertText?: (s: string) => void } | undefined;
-      if (eb && typeof eb.insertText === "function") {
-        eb.insertText("\n");
-      } else {
-        setValue((v) => v + "\n");
-        setInstanceKey((k) => k + 1);
-      }
-      return;
-    }
   });
 
-  // Inflight guards for the Enter/Shift+Enter belt-and-braces handlers
-  // (see useKeyboard above). Released on the next tick.
+  // Inflight guard for the Enter belt-and-braces handlers (see useKeyboard
+  // above). Released on the next tick.
   const submitInflightRef = useRef(false);
-  const newlineInflightRef = useRef(false);
 
   const performSubmit = (text: string) => {
     // Dedupe across the two Enter paths (useKeyboard backstop + textarea
@@ -224,7 +391,7 @@ export function InputBar({
     setTimeout(() => {
       submitInflightRef.current = false;
     }, 0);
-    const t = text.trim();
+    const t = normalizeSkillAlias(text, skillHints).trim();
     if (!t) return;
     if (busy) return;
     // Clear the buffer FIRST so the user sees the input empty on next
@@ -244,26 +411,25 @@ export function InputBar({
   };
 
   // Override OpenTUI's default textarea bindings: Enter submits, Shift+Enter
-  // inserts a newline. Defaults map plain Enter to newline and only fire
-  // submit on Cmd/Meta+Enter, which doesn't match the chat UX every other
-  // app in the world uses. `keyBindings` is merged onto defaults — same
-  // name+modifier combination replaces, so listing the three Enter
-  // variants under both modifier states does the swap cleanly.
+  // keeps the textarea's native newline action. This mirrors opencode's
+  // renderable-first input flow: the textarea mutates its edit buffer, then
+  // onContentChange reads `plainText`.
   const submitOnEnterBindings = useMemo(
     () => [
       { name: "return", action: "submit" },
       { name: "kpenter", action: "submit" },
-      { name: "linefeed", action: "submit" },
+      { name: "linefeed", action: "newline" },
       { name: "return", shift: true, action: "newline" },
       { name: "kpenter", shift: true, action: "newline" },
+      { name: "linefeed", shift: true, action: "newline" },
     ],
     [],
   );
 
   const borderColor = busy ? theme.warning : theme.borderActive;
   const placeholder = busy
-    ? "Running · Ctrl-C to stop"
-    : "Message Glorp or type /";
+    ? "agent is thinking · press ctrl-c to interrupt"
+    : "ask, /command, $skill, or @subagent · shift+enter newline";
 
   if (variant === "hero") {
     // Hero variant: a single rounded box containing the textarea on top,
@@ -274,10 +440,11 @@ export function InputBar({
     return (
       <box flexDirection="column" width={width}>
         <SlashMenu
-          query={lastToken}
+          query={activeQuery}
           selectedIndex={menuIndex}
           width={width}
           slashCommands={slashCommands}
+          skillHints={skillHints}
           subagentMentions={subagentMentions}
         />
         <box
@@ -292,16 +459,20 @@ export function InputBar({
           {/* Coloured left accent: a single-cell stripe of background colour. */}
           <box width={1} backgroundColor={accent} />
           <box flexDirection="column" flexGrow={1} paddingX={1} paddingY={0}>
-            <box height={visibleLines} flexDirection="row">
-              <GlorpTextarea
+            <box minHeight={MIN_LINES} maxHeight={MAX_LINES} flexDirection="row">
+              <textarea
                 key={instanceKey}
-                innerRef={textareaRef}
+                ref={setTextareaRef}
                 initialValue={value}
-                onContentChange={setValue}
-                onSubmit={() => performSubmit(value)}
+                onContentChange={handleTextareaContentChange}
+                onCursorChange={handleTextareaCursorChange}
+                onSubmit={() => performSubmit(readTextareaText())}
                 focused
+                minHeight={MIN_LINES}
+                maxHeight={MAX_LINES}
+                onKeyDown={handleTextareaKeyDown}
                 wrapMode="word"
-                keyBindings={submitOnEnterBindings}
+                keyBindings={submitOnEnterBindings as any}
                 placeholder={placeholder}
                 textColor={theme.text}
                 placeholderColor={busy ? theme.warning : theme.textDim}
@@ -320,7 +491,7 @@ export function InputBar({
         </box>
         <box flexDirection="row" justifyContent="flex-end" paddingX={1} marginTop={1}>
           <text fg={theme.textDim}>
-            <span fg={theme.text}>tab</span> agents · <span fg={theme.text}>ctrl+m</span> models ·{" "}
+            <span fg={theme.text}>tab</span> hints · <span fg={theme.text}>ctrl+m</span> models ·{" "}
             <span fg={theme.text}>ctrl+p</span> commands
           </text>
         </box>
@@ -333,10 +504,11 @@ export function InputBar({
   return (
     <box flexDirection="column" width={width}>
       <SlashMenu
-        query={lastToken}
+        query={activeQuery}
         selectedIndex={menuIndex}
         width={width}
         slashCommands={slashCommands}
+        skillHints={skillHints}
         subagentMentions={subagentMentions}
       />
       <box
@@ -349,21 +521,25 @@ export function InputBar({
         alignItems="stretch"
       >
         <box width={1} backgroundColor={busy ? theme.warning : theme.accentSoft} />
-        <box flexDirection="row" flexGrow={1} paddingX={1} alignItems="flex-start" height={boxHeight - 2}>
+        <box flexDirection="row" flexGrow={1} paddingX={1} alignItems="flex-start" minHeight={MIN_LINES}>
           <text fg={busy ? theme.warning : theme.accent}>
             <strong>{promptGlyph}</strong>
           </text>
           <text> </text>
-          <box flexGrow={1} height={visibleLines}>
-            <GlorpTextarea
+          <box flexGrow={1} minHeight={MIN_LINES} maxHeight={MAX_LINES}>
+            <textarea
               key={instanceKey}
-              innerRef={textareaRef}
+              ref={setTextareaRef}
               initialValue={value}
-              onContentChange={setValue}
-              onSubmit={() => performSubmit(value)}
+              onContentChange={handleTextareaContentChange}
+              onCursorChange={handleTextareaCursorChange}
+              onSubmit={() => performSubmit(readTextareaText())}
               focused
+              minHeight={MIN_LINES}
+              maxHeight={MAX_LINES}
+              onKeyDown={handleTextareaKeyDown}
               wrapMode="word"
-              keyBindings={submitOnEnterBindings}
+              keyBindings={submitOnEnterBindings as any}
               placeholder={placeholder}
               textColor={theme.text}
               placeholderColor={busy ? theme.warning : theme.textDim}
@@ -378,43 +554,10 @@ export function InputBar({
           {busy ? "Running · Ctrl-C to stop" : modelLabel ?? ""}
         </text>
         <text fg={theme.textDim}>
-          <span fg={theme.text}>tab</span> agents · <span fg={theme.text}>ctrl+m</span> models ·{" "}
+          <span fg={theme.text}>tab</span> hints · <span fg={theme.text}>ctrl+m</span> models ·{" "}
           <span fg={theme.text}>ctrl+p</span> commands
         </text>
       </box>
     </box>
   );
-}
-
-interface GlorpTextareaProps {
-  initialValue?: string;
-  onContentChange?: (value: string) => void;
-  onSubmit?: () => void;
-  focused?: boolean;
-  /** Wrap long lines. "word" wraps at word boundaries, "char" at any char. */
-  wrapMode?: "none" | "char" | "word";
-  /** Custom key bindings merged onto OpenTUI's defaults. */
-  keyBindings?: Array<{ name: string; ctrl?: boolean; shift?: boolean; meta?: boolean; super?: boolean; action: string }>;
-  placeholder?: string;
-  textColor?: string;
-  placeholderColor?: string;
-  backgroundColor?: string;
-  focusedBackgroundColor?: string;
-  /** Ref to the underlying TextareaRenderable so callers can clear it. */
-  innerRef?: React.MutableRefObject<{ editBuffer?: { setText: (s: string) => void } } | null>;
-}
-
-function GlorpTextarea(props: GlorpTextareaProps): React.ReactElement {
-  const { innerRef, onContentChange, ...rest } = props;
-  const adapter = onContentChange
-    ? (event: { content?: string } | string) => {
-        const v = typeof event === "string" ? event : (event.content ?? "");
-        onContentChange(v);
-      }
-    : undefined;
-  return React.createElement("textarea", {
-    ...rest,
-    onContentChange: adapter,
-    ref: innerRef,
-  } as unknown as React.TextareaHTMLAttributes<HTMLTextAreaElement>);
 }

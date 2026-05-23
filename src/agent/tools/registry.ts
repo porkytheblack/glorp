@@ -13,6 +13,7 @@ import {
   fleetDispatchTool,
   globTool,
   grepTool,
+  inboxManageTool,
   lsTool,
   planTool,
   readTool,
@@ -55,6 +56,7 @@ export type ToolName =
   | "ls"
   | "web_fetch"
   | "transmission"
+  | "glove_update_inbox"
   | "dispatch_fleet"
   | "ask_confirm"
   | "show_info"
@@ -85,6 +87,7 @@ export function createToolRegistry(deps: ToolRegistryDeps): Record<ToolName, Too
     ls: () => lsTool(deps.workspace),
     web_fetch: () => webFetchTool,
     transmission: () => transmissionTool(requireDep(deps.dataDir, "dataDir")),
+    glove_update_inbox: () => inboxManageTool(requireDep(deps.contextRef?.current, "context")),
     dispatch_fleet: () =>
       fleetDispatchTool(
         requireDep(deps.fleet, "fleet"),
@@ -109,7 +112,7 @@ export function registerTools<T extends { fold<I>(args: GloveFoldArgs<I>): T }>(
   return glove;
 }
 
-function requireDep<T>(value: T | undefined, name: string): T {
-  if (value === undefined) throw new Error(`Tool registry missing ${name}`);
+function requireDep<T>(value: T | null | undefined, name: string): NonNullable<T> {
+  if (value == null) throw new Error(`Tool registry missing ${name}`);
   return value;
 }

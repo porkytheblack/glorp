@@ -15,6 +15,8 @@ export interface SnapshotMeta {
 export interface Snapshot {
   metadata?: SnapshotMeta;
   messages: Message[];
+  title?: string | null;
+  titleUpdatedAt?: string | null;
   tokensIn: number;
   tokensOut: number;
   turnCount: number;

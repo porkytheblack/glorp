@@ -9,7 +9,7 @@ import type { PermissionRequest } from "../../shared/events.ts";
  * executor pushes `permission_request` slots whenever a tool with
  * `requiresPermission: true` needs consent.
  */
-export function PermissionSlot({ slot, onResolve }: SlotRendererProps) {
+export function PermissionSlot({ slot, onResolve, onReject }: SlotRendererProps) {
   const input = slot.input as { toolName?: string; toolInput?: unknown };
   const request: PermissionRequest = {
     slotId: slot.slotId,
@@ -17,5 +17,5 @@ export function PermissionSlot({ slot, onResolve }: SlotRendererProps) {
     toolInput: input.toolInput,
     createdAt: slot.createdAt,
   };
-  return <PermissionPrompt request={request} onResolve={(allow) => onResolve(allow)} />;
+  return <PermissionPrompt request={request} onResolve={(allow) => onResolve(allow)} onReject={onReject} />;
 }

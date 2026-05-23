@@ -155,6 +155,7 @@ async function runTui(args: Args): Promise<void> {
   const renderer = await createCliRenderer({
     targetFps: 60,
     exitOnCtrlC: false,
+    useKittyKeyboard: {},
   });
 
   // Onboarding first if needed.
@@ -188,10 +189,15 @@ async function runTui(args: Args): Promise<void> {
   // user switches sessions mid-run.
   const root = createRoot(renderer);
   let stopped = false;
+  let busy = false;
+  const unsubscribeBusy = getBridge().subscribe((ev) => {
+    if (ev.type === "busy") busy = ev.busy;
+  });
 
   const onQuit = async () => {
     if (stopped) return;
     stopped = true;
+    unsubscribeBusy();
     try {
       await glorp.shutdown();
     } finally {
@@ -240,7 +246,13 @@ async function runTui(args: Args): Promise<void> {
 
   render();
 
-  process.on("SIGINT", () => void onQuit());
+  process.on("SIGINT", () => {
+    if (busy) {
+      glorp.abort();
+      return;
+    }
+    void onQuit();
+  });
   process.on("SIGTERM", () => void onQuit());
 }
 

@@ -12,6 +12,8 @@ export class GlorpStore implements StoreAdapter {
   private dataDir: string;
   private metadata: SnapshotMeta;
   private messages: Message[] = [];
+  private title: string | null = null;
+  private titleUpdatedAt: string | null = null;
   private tokensIn = 0;
   private tokensOut = 0;
   private turnCount = 0;
@@ -39,6 +41,8 @@ export class GlorpStore implements StoreAdapter {
       const snap = JSON.parse(fs.readFileSync(this.filePath, "utf-8")) as Partial<Snapshot>;
       this.metadata = snap.metadata ?? this.metadata;
       this.messages = snap.messages ?? [];
+      this.title = cleanTitle(snap.title);
+      this.titleUpdatedAt = snap.titleUpdatedAt ?? null;
       this.tokensIn = snap.tokensIn ?? 0;
       this.tokensOut = snap.tokensOut ?? 0;
       this.turnCount = snap.turnCount ?? 0;
@@ -76,6 +80,8 @@ export class GlorpStore implements StoreAdapter {
     return {
       metadata: this.metadata,
       messages: this.messages,
+      title: this.title,
+      titleUpdatedAt: this.titleUpdatedAt,
       tokensIn: this.tokensIn,
       tokensOut: this.tokensOut,
       turnCount: this.turnCount,
@@ -86,20 +92,27 @@ export class GlorpStore implements StoreAdapter {
     };
   }
 
+  async flush(): Promise<void> {
+    while (this.writePromise) await this.writePromise;
+    if (this.dirty) {
+      this.scheduleFlush();
+      if (this.writePromise) await this.writePromise;
+    }
+  }
+
   async getMessages(): Promise<Message[]> {
-    return withSessionState(this.messages, {
-      plan: this.plan,
-      tasks: this.tasks,
-      inboxItems: this.inboxItems,
-    });
+    return withSessionState(this.messages, { plan: this.plan, tasks: this.tasks, inboxItems: this.inboxItems });
   }
   async getDisplayMessages(): Promise<Message[]> { return [...this.messages]; }
+  async getTitle(): Promise<string | null> { return this.title; }
 
-  async appendMessages(msgs: Message[]): Promise<void> {
-    this.messages.push(...msgs);
+  async setTitle(title: string | null): Promise<void> {
+    this.title = cleanTitle(title);
+    this.titleUpdatedAt = this.title ? new Date().toISOString() : null;
     this.scheduleFlush();
   }
 
+  async appendMessages(msgs: Message[]): Promise<void> { this.messages.push(...msgs); this.scheduleFlush(); }
   async getTokenCount(): Promise<number> { return this.tokensIn + this.tokensOut; }
 
   async addTokens(args: TokenConsumptionCounter): Promise<void> {
@@ -109,11 +122,7 @@ export class GlorpStore implements StoreAdapter {
   }
 
   async getTurnCount(): Promise<number> { return this.turnCount; }
-
-  async incrementTurn(): Promise<void> {
-    this.turnCount++;
-    this.scheduleFlush();
-  }
+  async incrementTurn(): Promise<void> { this.turnCount++; this.scheduleFlush(); }
 
   async resetCounters(): Promise<void> {
     this.tokensIn = 0;
@@ -123,24 +132,15 @@ export class GlorpStore implements StoreAdapter {
   }
 
   async getTasks(): Promise<Task[]> { return [...this.tasks]; }
-
   async getPlan(): Promise<PlanDocument | null> { return this.plan ? { ...this.plan } : null; }
 
   async updatePlan(input: Pick<PlanDocument, "title" | "body">): Promise<PlanDocument> {
-    this.plan = {
-      title: input.title,
-      body: input.body,
-      revision: (this.plan?.revision ?? 0) + 1,
-      updatedAt: new Date().toISOString(),
-    };
+    this.plan = { title: input.title, body: input.body, revision: (this.plan?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
     this.scheduleFlush();
     return { ...this.plan };
   }
 
-  async addTasks(tasks: Task[]): Promise<void> {
-    this.tasks = [...tasks];
-    this.scheduleFlush();
-  }
+  async addTasks(tasks: Task[]): Promise<void> { this.tasks = [...tasks]; this.scheduleFlush(); }
 
   async updateTask(id: string, updates: Partial<Pick<Task, "status" | "content" | "activeForm">>) {
     const task = this.tasks.find((t) => t.id === id);
@@ -157,11 +157,7 @@ export class GlorpStore implements StoreAdapter {
   }
 
   async getInboxItems(): Promise<InboxItem[]> { return [...this.inboxItems]; }
-
-  async addInboxItem(item: InboxItem): Promise<void> {
-    this.inboxItems.push(item);
-    this.scheduleFlush();
-  }
+  async addInboxItem(item: InboxItem): Promise<void> { this.inboxItems.push(item); this.scheduleFlush(); }
 
   async updateInboxItem(id: string, updates: Partial<Pick<InboxItem, "status" | "response" | "resolved_at">>) {
     const item = this.inboxItems.find((i) => i.id === id);
@@ -173,28 +169,16 @@ export class GlorpStore implements StoreAdapter {
 
   async createSubAgentStore(namespace: string, durable = false): Promise<StoreAdapter> {
     const trigger = latestTriggerMessage(this.messages);
-    const triggerKey = safeFilePart(trigger.id);
     const name = safeFilePart(namespace);
     const runKey = durable ? "durable" : `${Date.now()}_${++this.subStoreSeq}`;
-    const filePath = path.join(
-      this.dataDir,
-      "sessions",
-      `${safeFilePart(this.identifier)}.subagents`,
-      name,
-      `${triggerKey}_${runKey}.json`,
-    );
-    return new GlorpStore(`${this.identifier}__${namespace}__${triggerKey}__${runKey}`, this.dataDir, {
+    const filePath = path.join(this.dataDir, "sessions", `${safeFilePart(this.identifier)}.subagents`, name, `${safeFilePart(trigger.id)}_${runKey}.json`);
+    return new GlorpStore(`${this.identifier}__${namespace}__${trigger.id}__${runKey}`, this.dataDir, {
       filePath,
-      metadata: {
-        kind: "subagent",
-        parentSessionId: this.identifier,
-        namespace,
-        triggerMessageId: trigger.id,
-        triggerMessageIndex: trigger.index,
-        triggerMessageText: trigger.text,
-        durable,
-        createdAt: new Date().toISOString(),
-      },
+      metadata: { kind: "subagent", parentSessionId: this.identifier, namespace, triggerMessageId: trigger.id, triggerMessageIndex: trigger.index, triggerMessageText: trigger.text, durable, createdAt: new Date().toISOString() },
     });
   }
+}
+
+function cleanTitle(title: unknown): string | null {
+  return typeof title === "string" && title.trim() ? title.replace(/\s+/g, " ").trim() : null;
 }

@@ -36,6 +36,9 @@ export function buildExtensionCatalogue(agent: unknown): ExtensionCatalogue {
       { name: "/help", description: "show commands" },
       { name: "/quit", description: "exit glorp" },
     ],
+    skills: skillEntries
+      .filter(([, s]) => s?.exposeToAgent !== false)
+      .map(([name, s]) => ({ name: `$${name}`, description: s?.description ?? "skill" })),
     mentions: subAgentEntries.map(([name, s]) => ({
       name: `@${name}`,
       description: s?.description ?? "subagent",

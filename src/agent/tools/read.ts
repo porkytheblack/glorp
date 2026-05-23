@@ -1,16 +1,27 @@
 import { z } from "zod";
 import * as fs from "node:fs";
-import type { GloveFoldArgs } from "glove-core";
 import { resolveSafePath, relPath, isFile } from "./fs-shared.ts";
+import type { SummaryTool } from "./summaries.ts";
 
 const MAX_BYTES = 1024 * 1024; // 1 MB cap before we truncate.
-const MAX_LINES = 4000;
+const DEFAULT_LINES = 500;
+const MAX_LINES = 2000;
 
-export function readTool(workspace: string): GloveFoldArgs<{
+interface ReadSummaryArgs {
+  path: string;
+  start: number;
+  end: number;
+  totalLines: number;
+  bytes: number;
+  truncatedByBytes: boolean;
+  limitedByLines: boolean;
+}
+
+export function readTool(workspace: string): SummaryTool<{
   path: string;
   offset?: number;
   limit?: number;
-}> {
+}, ReadSummaryArgs> {
   return {
     name: "read",
     description:
@@ -31,7 +42,7 @@ export function readTool(workspace: string): GloveFoldArgs<{
         .min(1)
         .max(MAX_LINES)
         .optional()
-        .describe(`Max lines to read (default ${MAX_LINES})`),
+        .describe(`Max lines to read (default ${DEFAULT_LINES}, max ${MAX_LINES})`),
     }),
     async do(input) {
       const abs = resolveSafePath(workspace, input.path);
@@ -58,7 +69,7 @@ export function readTool(workspace: string): GloveFoldArgs<{
       }
       const lines = body.split("\n");
       const start = (input.offset ?? 1) - 1;
-      const end = Math.min(lines.length, start + (input.limit ?? MAX_LINES));
+      const end = Math.min(lines.length, start + (input.limit ?? DEFAULT_LINES));
       const slice = lines.slice(start, end);
       const numbered = slice
         .map((line, i) => `${String(start + i + 1).padStart(5, " ")}→${line}`)
@@ -70,6 +81,15 @@ export function readTool(workspace: string): GloveFoldArgs<{
       return {
         status: "success",
         data: numbered + more,
+        generateSummaryArgs: {
+          path: relPath(workspace, abs),
+          start: start + 1,
+          end,
+          totalLines: lines.length,
+          bytes: stat.size,
+          truncatedByBytes: stat.size > MAX_BYTES,
+          limitedByLines: end < lines.length,
+        } satisfies ReadSummaryArgs,
         renderData: {
           path: relPath(workspace, abs),
           lines: lines.length,
@@ -77,6 +97,17 @@ export function readTool(workspace: string): GloveFoldArgs<{
           start: start + 1,
         },
       };
+    },
+    generateToolSummary: async (args) => {
+      const a = args as ReadSummaryArgs;
+      const range = a.end >= a.start ? `lines ${a.start}-${a.end}` : `no lines at offset ${a.start}`;
+      const suffix = [
+        a.limitedByLines ? "line-limited" : "",
+        a.truncatedByBytes ? `byte-truncated at ${MAX_BYTES} bytes` : "",
+      ].filter(Boolean);
+      return `Read ${a.path} (${range} of ${a.totalLines} lines, ${a.bytes} bytes)${
+        suffix.length ? ` [${suffix.join(", ")}]` : ""
+      }. Full prior contents omitted; re-read a targeted range if needed.`;
     },
   };
 }

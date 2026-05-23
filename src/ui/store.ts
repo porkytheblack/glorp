@@ -10,18 +10,21 @@ export function useUiState(): UiState {
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
   useEffect(() => {
-    const bridge = getBridge();
-    const unsubscribe = bridge.subscribe((ev) => {
+    const unsubscribe = getBridge().subscribe((ev) => {
       switch (ev.type) {
         case "session_hydrate":
           dispatchRef.current({
             kind: "session_hydrate",
             turns: ev.turns,
+            title: ev.title,
             plan: ev.plan,
             tasks: ev.tasks,
             inbox: ev.inbox,
             stats: ev.stats,
           });
+          break;
+        case "title":
+          dispatchRef.current({ kind: "title", title: ev.title });
           break;
         case "turn":
           dispatchRef.current({ kind: "turn", turn: ev.turn });
@@ -66,11 +69,7 @@ export function useUiState(): UiState {
           dispatchRef.current({ kind: "subagent", name: ev.name, phase: ev.phase });
           break;
         case "transmission":
-          dispatchRef.current({
-            kind: "transmission",
-            payload: ev.payload,
-            severity: ev.severity,
-          });
+          dispatchRef.current({ kind: "transmission", payload: ev.payload, severity: ev.severity });
           break;
         case "hook":
           dispatchRef.current({ kind: "extension", ext: "hook", name: ev.name });
@@ -92,10 +91,7 @@ export function useUiState(): UiState {
           break;
       }
     });
-    // Wrap so the effect returns `() => void`, not `() => boolean`.
-    return () => {
-      unsubscribe();
-    };
+    return () => { unsubscribe(); };
   }, []);
   return state;
 }

@@ -68,24 +68,11 @@ export interface AgentStats {
   contextPct: number;
 }
 
-/**
- * A slot pushed onto the agent's display stack. Any custom modal the
- * agent wants to render — confirmation, info card, picker, form — flows
- * through this single mechanism. The UI looks up a renderer by `renderer`
- * name and either renders the matching component or shows a generic
- * fallback. Resolve/reject the slot via GlorpHandle.resolveSlot /
- * GlorpHandle.rejectSlot to unblock the agent (for pushAndWait slots).
- */
 export interface DisplaySlotEvent {
   slotId: string;
   renderer: string;
   input: unknown;
   createdAt: number;
-  /**
-   * True if the renderer is `"permission_request"` — Glove's executor
-   * pushes this kind of slot whenever a tool with `requiresPermission`
-   * needs consent. Set by the bridge for convenience.
-   */
   isPermissionRequest: boolean;
 }
 
@@ -93,11 +80,13 @@ export type BridgeEvent =
   | {
     type: "session_hydrate";
     turns: ChatTurn[];
+    title: string | null;
     plan: PlanDocument | null;
     tasks: TaskItem[];
     inbox: InboxEntry[];
     stats: AgentStats;
   }
+  | { type: "title"; title: string | null }
   | { type: "turn"; turn: ChatTurn }
   | { type: "turn_update"; id: string; patch: Partial<ChatTurn> }
   | { type: "text_delta"; text: string }

@@ -29,29 +29,18 @@ export function Sidebar({ state, width }: { state: UiState; width: number }) {
   const openTasks = state.tasks.filter((t) => t.status !== "completed").length;
   const pendingInbox = state.inbox.filter((i) => i.status === "pending");
   const blockingInbox = pendingInbox.filter((i) => i.blocking);
-  const recentFleet = [
-    ...runningFleet,
-    ...state.fleetJobs.filter((j) => j.status !== "running").slice(-3),
-  ].slice(0, 5);
+  const recentFleet = [...runningFleet, ...state.fleetJobs.filter((j) => j.status !== "running").slice(-3)].slice(0, 5);
 
   return (
     <box flexDirection="column" width={width} padding={1} gap={1}>
       <Panel title="Session" color={status.color}>
-        <text fg={status.color}>
-          <strong>{status.label}</strong>
-        </text>
-        <text fg={theme.textMuted}>
-          {activeAgents} agents · {openTasks} tasks · {pendingInbox.length} inbox
-        </text>
+        <text fg={status.color}><strong>{status.label}</strong></text>
+        <text fg={theme.textMuted}>{activeAgents} agents · {openTasks} tasks · {pendingInbox.length} inbox</text>
       </Panel>
 
       <Panel title="Context" color={contextColor(state.stats.contextPct)}>
-        <text fg={contextColor(state.stats.contextPct)}>
-          {state.stats.contextPct}% {contextBar(state.stats.contextPct)}
-        </text>
-        <text fg={theme.textMuted}>
-          {state.stats.turns} turns · in {formatCount(state.stats.tokens_in)}
-        </text>
+        <text fg={contextColor(state.stats.contextPct)}>{state.stats.contextPct}% {contextBar(state.stats.contextPct)}</text>
+        <text fg={theme.textMuted}>{state.stats.turns} turns · in {formatCount(state.stats.tokens_in)}</text>
         <text fg={theme.textMuted}>out {formatCount(state.stats.tokens_out)}</text>
       </Panel>
 
@@ -78,10 +67,7 @@ export function Sidebar({ state, width }: { state: UiState; width: number }) {
         {state.tasks.length > 7 && <text fg={theme.textDim}>+{state.tasks.length - 7} more</text>}
       </Panel>
 
-      <Panel
-        title={`Inbox ${pendingInbox.length} pending`}
-        color={blockingInbox.length ? theme.warning : theme.textMuted}
-      >
+      <Panel title={`Inbox ${pendingInbox.length} pending`} color={blockingInbox.length ? theme.warning : theme.textMuted}>
         {state.inbox.length === 0 && <text fg={theme.textDim}>No pending requests</text>}
         {orderedInbox(state).slice(0, 4).map((i) => (
           <box key={i.id} flexDirection="column">
@@ -97,9 +83,7 @@ export function Sidebar({ state, width }: { state: UiState; width: number }) {
       <Panel title={`Agents ${activeAgents} active`} color={activeAgents ? theme.warning : theme.textMuted}>
         {activeAgents === 0 && recentFleet.length === 0 && <text fg={theme.textDim}>No active agents</text>}
         {state.activeSubagents.slice(0, 4).map((name, i) => (
-          <text key={`sub-${name}-${i}`} fg={theme.warning}>
-            subagent  {clip(name, lane - 10)}
-          </text>
+          <text key={`sub-${name}-${i}`} fg={theme.warning}>subagent  {clip(name, lane - 10)}</text>
         ))}
         {recentFleet.map((job) => (
           <text key={job.runId} fg={FLEET_COLOR[job.status]}>
@@ -111,9 +95,7 @@ export function Sidebar({ state, width }: { state: UiState; width: number }) {
       <Panel title="Signals" color={theme.transmission}>
         {state.transmissions.length === 0 && <text fg={theme.textDim}>No recent signals</text>}
         {state.transmissions.slice(-4).map((signal, i) => (
-          <text key={i} fg={signalColor(signal.severity)}>
-            {clip(signal.payload, lane)}
-          </text>
+          <text key={i} fg={signalColor(signal.severity)}>{clip(signal.payload, lane)}</text>
         ))}
       </Panel>
     </box>
@@ -123,9 +105,7 @@ export function Sidebar({ state, width }: { state: UiState; width: number }) {
 function Panel({ title, color, children }: { title: string; color: string; children: React.ReactNode }) {
   return (
     <box flexDirection="column" border borderColor={theme.border} padding={1}>
-      <text fg={color}>
-        <strong>{title}</strong>
-      </text>
+      <text fg={color}><strong>{title}</strong></text>
       {children}
     </box>
   );

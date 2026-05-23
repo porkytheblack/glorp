@@ -1,8 +1,19 @@
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { GloveFoldArgs } from "glove-core";
 import { resolveSafePath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
+import { firstItems } from "./summaries.ts";
+import type { SummaryTool } from "./summaries.ts";
+
+interface GrepSummaryArgs {
+  pattern: string;
+  root: string;
+  glob?: string;
+  total: number;
+  truncated: boolean;
+  context: number;
+  files: Array<{ path: string; count: number; firstLine: number }>;
+}
 
 async function* walk(root: string): AsyncGenerator<string> {
   const entries = await fs.promises.readdir(root, { withFileTypes: true });
@@ -16,14 +27,14 @@ async function* walk(root: string): AsyncGenerator<string> {
   }
 }
 
-export function grepTool(workspace: string): GloveFoldArgs<{
+export function grepTool(workspace: string): SummaryTool<{
   pattern: string;
   path?: string;
   glob?: string;
   case_insensitive?: boolean;
   max_results?: number;
   context?: number;
-}> {
+}, GrepSummaryArgs> {
   return {
     name: "grep",
     description:
@@ -61,6 +72,7 @@ export function grepTool(workspace: string): GloveFoldArgs<{
       const max = input.max_results ?? 200;
       const ctx = input.context ?? 0;
       const out: string[] = [];
+      const byFile = new Map<string, { count: number; firstLine: number }>();
       let total = 0;
 
       for await (const file of walk(root)) {
@@ -77,6 +89,9 @@ export function grepTool(workspace: string): GloveFoldArgs<{
         const lines = body.split("\n");
         for (let i = 0; i < lines.length; i++) {
           if (re.test(lines[i]!)) {
+            const current = byFile.get(rel);
+            if (current) current.count++;
+            else byFile.set(rel, { count: 1, firstLine: i + 1 });
             const start = Math.max(0, i - ctx);
             const end = Math.min(lines.length, i + ctx + 1);
             if (ctx > 0) out.push(`--- ${rel}`);
@@ -92,8 +107,36 @@ export function grepTool(workspace: string): GloveFoldArgs<{
       return {
         status: "success",
         data: out.length === 0 ? "(no matches)" : out.join("\n"),
+        generateSummaryArgs: {
+          pattern: input.pattern,
+          root: path.relative(workspace, root) || ".",
+          glob: input.glob,
+          total,
+          truncated: total >= max,
+          context: ctx,
+          files: Array.from(byFile.entries()).map(([file, info]) => ({
+            path: file,
+            count: info.count,
+            firstLine: info.firstLine,
+          })),
+        } satisfies GrepSummaryArgs,
         renderData: { pattern: input.pattern, count: total, truncated: total >= max },
       };
+    },
+    generateToolSummary: async (args) => {
+      const a = args as GrepSummaryArgs;
+      if (a.total === 0) {
+        return `grep /${a.pattern}/ in ${a.root}${a.glob ? ` (${a.glob})` : ""}: no matches.`;
+      }
+      const files = a.files.map((f) => `${f.path}:${f.firstLine} (${f.count} match${f.count === 1 ? "" : "es"})`);
+      return [
+        `grep /${a.pattern}/ in ${a.root}${a.glob ? ` (${a.glob})` : ""}: ${a.total} match${
+          a.total === 1 ? "" : "es"
+        } across ${a.files.length} file${a.files.length === 1 ? "" : "s"}${a.truncated ? " (truncated)" : ""}.`,
+        a.context ? `Context requested: ${a.context} line${a.context === 1 ? "" : "s"}.` : "",
+        firstItems(files, 20),
+        "Full prior match text omitted; re-run grep or read specific files if needed.",
+      ].filter(Boolean).join("\n");
     },
   };
 }

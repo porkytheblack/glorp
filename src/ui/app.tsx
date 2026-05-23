@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useTerminalDimensions, useKeyboard } from "@opentui/react";
 import { theme } from "./theme.ts";
 import { useUiState } from "./store.ts";
@@ -14,12 +14,18 @@ import { getSlotRenderer, UnknownSlot } from "./slot-renderers/index.tsx";
 import { EmptyHero } from "./empty-hero.tsx";
 import { GLORP_VERSION } from "../shared/version.ts";
 import type { GlorpHandle } from "../agent/glorp.ts";
+import type { DisplaySlotEvent } from "../shared/events.ts";
+import type { SlotRenderer } from "./slot-renderers/registry.tsx";
 
 const MIN_SIDEBAR = 26;
 const MAX_SIDEBAR = 40;
 const NARROW_THRESHOLD = 90;
 
 type Overlay = null | "model" | "session" | "transmissions" | "permissions";
+
+function isAbortKey(key: { name?: string; sequence?: string; ctrl?: boolean }): boolean {
+  return key.sequence === "\u0003" || (key.ctrl === true && key.name === "c");
+}
 
 export function App({
   glorp,
@@ -38,6 +44,7 @@ export function App({
   const state = useUiState();
   const [modelLabel, setModelLabel] = useState(glorp.modelLabel);
   const [overlay, setOverlay] = useState<Overlay>(null);
+  const [inputHeight, setInputHeight] = useState(4);
 
   useEffect(() => glorp.onLabelChange(setModelLabel), [glorp]);
 
@@ -46,8 +53,16 @@ export function App({
     void glorp.hydrateUi();
   }, [glorp]);
 
+  const handleInputHeightChange = useCallback((next: number) => {
+    setInputHeight((current) => (current === next ? current : next));
+  }, []);
+
   useKeyboard((key) => {
-    if (overlay) return;
+    if (state.busy && isAbortKey(key)) {
+      glorp.abort();
+      return;
+    }
+    if (overlay) return; // overlay owns the keyboard until it closes
     if (key.name === "m" && key.ctrl) return setOverlay("model");
     if (key.name === "s" && key.ctrl && onSwapSession) return setOverlay("session");
     if (key.name === "t" && key.ctrl) return setOverlay("transmissions");
@@ -60,11 +75,7 @@ export function App({
   const pendingSlot = state.displaySlots[0];
   if (pendingSlot) {
     const Renderer = getSlotRenderer(pendingSlot.renderer) ?? UnknownSlot;
-    return React.createElement(Renderer, {
-      slot: pendingSlot,
-      onResolve: (value: unknown) => glorp.resolveSlot(pendingSlot.slotId, value),
-      onReject: (reason?: string) => glorp.rejectSlot(pendingSlot.slotId, reason),
-    });
+    return <DisplaySlotHost glorp={glorp} slot={pendingSlot} Renderer={Renderer} />;
   }
 
   if (overlay === "model") {
@@ -125,6 +136,7 @@ export function App({
         workspace={workspace}
         busy={state.busy}
         slashCommands={glorp.extensions.slash}
+        skillHints={glorp.extensions.skills}
         subagentMentions={glorp.extensions.mentions}
         onSubmit={(text) => {
           void glorp.send(text);
@@ -142,7 +154,7 @@ export function App({
   );
   const mainWidth = sidebarVisible ? width - sidebarWidth : width;
   const statusH = 1;
-  const inputH = 5;
+  const inputH = Math.min(Math.max(4, inputHeight), Math.max(4, height - 2));
   const footerH = 1;
   const transcriptH = Math.max(1, height - statusH - inputH - footerH);
 
@@ -170,12 +182,14 @@ export function App({
           width={width}
           modelLabel={modelLabel}
           slashCommands={glorp.extensions.slash}
+          skillHints={glorp.extensions.skills}
           subagentMentions={glorp.extensions.mentions}
           onSubmit={(text) => {
             void glorp.send(text);
           }}
           onAbort={() => glorp.abort()}
           onQuit={onQuit}
+          onHeightChange={handleInputHeightChange}
         />
       </box>
       <box flexDirection="row" justifyContent="space-between" width={width} paddingX={1}>
@@ -184,6 +198,45 @@ export function App({
       </box>
     </box>
   );
+}
+
+function DisplaySlotHost({
+  glorp,
+  slot,
+  Renderer,
+}: {
+  glorp: GlorpHandle;
+  slot: DisplaySlotEvent;
+  Renderer: SlotRenderer;
+}) {
+  const [closed, setClosed] = useState(false);
+  const close = useCallback((fn: () => void) => {
+    setClosed((wasClosed) => {
+      if (wasClosed) return wasClosed;
+      fn();
+      return true;
+    });
+  }, []);
+
+  useKeyboard((key) => {
+    if (closed) return;
+    if (isAbortKey(key)) {
+      close(() => {
+        glorp.rejectSlot(slot.slotId, "cancelled");
+        glorp.abort();
+      });
+      return;
+    }
+    if (key.name === "escape") {
+      close(() => glorp.rejectSlot(slot.slotId, "cancelled"));
+    }
+  });
+
+  return React.createElement(Renderer, {
+    slot,
+    onResolve: (value: unknown) => close(() => glorp.resolveSlot(slot.slotId, value)),
+    onReject: (reason?: string) => close(() => glorp.rejectSlot(slot.slotId, reason ?? "cancelled")),
+  });
 }
 
 function truncatePath(p: string, max = 38): string {

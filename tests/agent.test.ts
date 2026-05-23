@@ -8,7 +8,19 @@ import { Glove } from "glove-core/glove";
 import { Displaymanager } from "glove-core/display-manager";
 import { GlorpStore } from "../src/agent/store.ts";
 import { createFleet } from "../src/agent/station-bridge.ts";
-import { buildGlorp } from "../src/agent/glorp.ts";
+import {
+  buildGlorp,
+  cleanSessionTitle,
+  generateSessionTitle,
+  messageHasOpenTaskUpdate,
+  modelResultIsIntentOnly,
+  modelResultHasVisibleAgentOutput,
+  modelResultHasToolCall,
+  withEmptyResponseRetry,
+  withIntentOnlyContinuation,
+  withTaskUpdateContinuation,
+} from "../src/agent/glorp.ts";
+import { getBridge } from "../src/shared/bridge.ts";
 import {
   plannerSubAgent,
   researcherSubAgent,
@@ -73,11 +85,13 @@ describe("GlorpStore", () => {
     });
     await store.addTokens({ tokens_in: 1000, tokens_out: 234 });
     await store.incrementTurn();
+    await store.setTitle("Friendly login repair");
     // Wait past the 50ms flush coalesce window.
-    await new Promise((r) => setTimeout(r, 250));
+    await store.flush();
 
     // Fresh instance, same id + dir.
     const reloaded = new GlorpStore(sid, dataDir);
+    expect(await reloaded.getTitle()).toBe("Friendly login repair");
     const modelMessages = await reloaded.getMessages();
     expect(modelMessages.length).toBe(3);
     expect(modelMessages[0]?.is_skill_injection).toBe(true);
@@ -411,7 +425,8 @@ describe("buildGlorp", () => {
       dataDir,
     });
     try {
-      const tools = (g.agent as any).executor.tools as Array<{ name: string }>;
+      const tools = (g.agent as any).executor.tools as Array<{ name: string; description?: string; run?: Function }>;
+      expect((g.agent as any).promptMachine.enableToolResultSummary).toBe(true);
       const names = tools.map((t) => t.name).sort();
       const required = [
         "apply_patch",
@@ -422,6 +437,7 @@ describe("buildGlorp", () => {
         "glove_invoke_skill",
         "glove_invoke_subagent",
         "glove_post_to_inbox",
+        "glove_update_inbox",
         "glove_update_tasks",
         "glorp_update_plan",
         "glove_resources_edit",
@@ -446,7 +462,112 @@ describe("buildGlorp", () => {
       for (const name of required) {
         expect(names).toContain(name);
       }
+      const taskTool = tools.find((t) => t.name === "glove_update_tasks");
+      expect(taskTool?.description).toContain("bookkeeping only");
+      const result = await taskTool?.run?.({
+        todos: [{ content: "Inspect", activeForm: "Inspecting", status: "in_progress" }],
+      });
+      expect(JSON.stringify(result?.data)).toContain("continue immediately");
+      await g.store.addInboxItem({
+        id: "block-1",
+        tag: "fleet:research:test",
+        request: "Fetch docs that are no longer required",
+        response: null,
+        status: "pending",
+        blocking: true,
+        created_at: new Date().toISOString(),
+        resolved_at: null,
+      });
+      const inboxTool = tools.find((t) => t.name === "glove_update_inbox");
+      const inboxResult = await inboxTool?.run?.({
+        item_ids: ["block-1"],
+        reason: "Direct web_fetch results already supplied the needed docs.",
+      });
+      expect(inboxResult?.status).toBe("success");
+      const consumed = (await g.store.getInboxItems()).find((item) => item.id === "block-1");
+      expect(consumed?.status).toBe("consumed");
+      expect(consumed?.blocking).toBe(true);
+      expect(consumed?.response).toContain("Direct web_fetch");
+      await g.store.addInboxItem({
+        id: "hidden-id-1",
+        tag: "fleet_check",
+        request: "Visible tag only blocker",
+        response: null,
+        status: "pending",
+        blocking: true,
+        created_at: new Date().toISOString(),
+        resolved_at: null,
+      });
+      const tagResult = await inboxTool?.run?.({
+        tags: ["fleet_check"],
+        reason: "The visible fleet_check blocker is obsolete.",
+      });
+      expect(tagResult?.status).toBe("success");
+      expect(JSON.stringify(tagResult?.data)).toContain("hidden-id-1");
+      expect(JSON.stringify(tagResult?.data)).toContain("fleet_check");
+      const tagConsumed = (await g.store.getInboxItems()).find((item) => item.id === "hidden-id-1");
+      expect(tagConsumed?.status).toBe("consumed");
+      expect(tagConsumed?.response).toContain("fleet_check blocker");
+      const repeatedTagResult = await inboxTool?.run?.({
+        tags: ["fleet_check"],
+        reason: "The visible fleet_check blocker is still obsolete.",
+      });
+      expect(repeatedTagResult?.status).toBe("success");
+      expect(JSON.stringify(repeatedTagResult?.data)).toContain("already_consumed");
+      expect(JSON.stringify(repeatedTagResult?.data)).not.toContain('"missing_tags":["fleet_check"]');
+      await g.store.addInboxItem({
+        id: "hidden-id-2",
+        tag: "second_visible_tag",
+        request: "Visible tag passed in the wrong schema field",
+        response: null,
+        status: "pending",
+        blocking: true,
+        created_at: new Date().toISOString(),
+        resolved_at: null,
+      });
+      const tagInIdFieldResult = await inboxTool?.run?.({
+        item_ids: ["second_visible_tag"],
+        reason: "The model passed a visible tag in item_ids.",
+      });
+      expect(tagInIdFieldResult?.status).toBe("success");
+      const secondConsumed = (await g.store.getInboxItems()).find((item) => item.id === "hidden-id-2");
+      expect(secondConsumed?.status).toBe("consumed");
     } finally {
+      await g.shutdown();
+    }
+  });
+
+  test("hydrateUi replays persisted visible messages and title after resume", async () => {
+    const seed = new GlorpStore("resume-1", dataDir);
+    await seed.appendMessages([
+      { id: "u1", sender: "user", text: "fix auth resume" },
+      { id: "a1", sender: "agent", text: "I'll inspect it." },
+      { id: "c1", sender: "agent", text: "summary internals", is_compaction: true },
+      { id: "s1", sender: "user", text: "skill payload", is_skill_injection: true },
+      {
+        id: "tr1",
+        sender: "user",
+        text: "tool result internals",
+        tool_results: [{ call_id: "x", tool_name: "read", result: { status: "success", data: "ok" } }],
+      } as any,
+    ]);
+    await seed.setTitle("Auth resume repair");
+    await seed.flush();
+
+    const g = await buildGlorp({ workspace, sessionId: "resume-1", dataDir });
+    const events: any[] = [];
+    const unsub = getBridge().subscribe((event) => events.push(event));
+    try {
+      await g.hydrateUi();
+      const hydrated = events.find((event) => event.type === "session_hydrate");
+      expect(hydrated).toBeDefined();
+      expect(hydrated.title).toBe("Auth resume repair");
+      expect(hydrated.turns.map((t: any) => t.text)).toEqual([
+        "fix auth resume",
+        "I'll inspect it.",
+      ]);
+    } finally {
+      unsub();
       await g.shutdown();
     }
   });
@@ -456,5 +577,374 @@ describe("buildGlorp", () => {
     await g.shutdown();
     // Second shutdown should not throw.
     await g.shutdown();
+  });
+});
+
+describe("session title generation", () => {
+  test("cleans model-produced title text", () => {
+    expect(cleanSessionTitle('Title: "Fix Login Resume."')).toBe("Fix Login Resume");
+  });
+
+  test("generates a title from visible transcript messages", async () => {
+    const calls: any[] = [];
+    const titleModel: ModelAdapter = {
+      name: "title-model",
+      async prompt(request) {
+        calls.push(request);
+        return {
+          messages: [{ sender: "agent", text: "Title: Resume Transcript Loading." }],
+          tokens_in: 10,
+          tokens_out: 4,
+        };
+      },
+      setSystemPrompt() {},
+    };
+
+    const title = await generateSessionTitle(titleModel, [
+      { sender: "user", text: "previous chat messages do not load" },
+      { sender: "agent", text: "I'll inspect the store adapter." },
+      { sender: "agent", text: "compaction summary", is_compaction: true },
+    ]);
+    expect(title).toBe("Resume Transcript Loading");
+    expect(calls[0].messages[0].text).toContain("User: previous chat messages do not load");
+    expect(calls[0].messages[0].text).not.toContain("compaction summary");
+  });
+});
+
+describe("model empty-response guard", () => {
+  test("detects visible agent text or tool calls", () => {
+    expect(
+      modelResultHasVisibleAgentOutput({
+        messages: [{ sender: "agent", text: "done" }],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(true);
+    expect(
+      modelResultHasVisibleAgentOutput({
+        messages: [{ sender: "agent", text: "", tool_calls: [{ tool_name: "read", input_args: {} }] }],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(true);
+    expect(
+      modelResultHasVisibleAgentOutput({
+        messages: [{ sender: "agent", text: "", reasoning_content: "thinking only" }],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(false);
+    expect(
+      modelResultHasToolCall({
+        messages: [{ sender: "agent", text: "", tool_calls: [{ tool_name: "read", input_args: {} }] }],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(true);
+  });
+
+  test("detects intent-only agent text", () => {
+    expect(
+      modelResultIsIntentOnly({
+        messages: [{ sender: "agent", text: "I'll inspect the relevant files now." }],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(true);
+    expect(
+      modelResultIsIntentOnly({
+        messages: [{ sender: "agent", text: "Let me run the tests next." }],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(true);
+    expect(
+      modelResultIsIntentOnly({
+        messages: [
+          {
+            sender: "agent",
+            text: "Based on the session summary, all content is gathered. Now I'll rewrite the script to incorporate all pages.",
+          },
+        ],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(true);
+    expect(
+      modelResultIsIntentOnly({
+        messages: [
+          {
+            sender: "agent",
+            text: "Proceeding. The fleet jobs failed, but the direct web_fetch content is available. Writing the comprehensive docx generator now.",
+          },
+        ],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(true);
+    expect(
+      modelResultIsIntentOnly({
+        messages: [
+          {
+            sender: "agent",
+            text: "The blocking inbox item is not required for this path. I can proceed with the script rewrite.",
+          },
+        ],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(true);
+    expect(
+      modelResultIsIntentOnly({
+        messages: [{ sender: "agent", text: "The issue is fixed and tests pass." }],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(false);
+    expect(
+      modelResultIsIntentOnly({
+        messages: [{ sender: "agent", text: "I'll inspect.", tool_calls: [{ tool_name: "read", input_args: {} }] }],
+        tokens_in: 0,
+        tokens_out: 0,
+      }),
+    ).toBe(false);
+  });
+
+  test("retries an invisible reasoning-only completion once", async () => {
+    const seenRequests: any[] = [];
+    const model: ModelAdapter = {
+      name: "empty-first",
+      async prompt(request) {
+        seenRequests.push(request);
+        if (seenRequests.length === 1) {
+          return {
+            messages: [{ sender: "agent", text: "", reasoning_content: "thinking only" }],
+            tokens_in: 10,
+            tokens_out: 4096,
+          };
+        }
+        return {
+          messages: [{ sender: "agent", text: "visible answer" }],
+          tokens_in: 11,
+          tokens_out: 3,
+        };
+      },
+      setSystemPrompt() {},
+    };
+
+    const guarded = withEmptyResponseRetry(model);
+    const result = await guarded.prompt(
+      { messages: [{ sender: "user", text: "do the thing" }] },
+      async () => {},
+    );
+
+    expect(seenRequests.length).toBe(2);
+    expect(seenRequests[1].messages.at(-1)?.text).toContain("no visible answer");
+    expect(result.messages.at(-1)?.text).toBe("visible answer");
+  });
+
+  test("retries intent-only text generally without emitting it", async () => {
+    const seenRequests: any[] = [];
+    const emitted: string[] = [];
+    const model: ModelAdapter = {
+      name: "intent-only-first",
+      async prompt(request, notify) {
+        seenRequests.push(request);
+        if (seenRequests.length === 1) {
+          await notify("model_response" as any, { text: "I'll inspect the files now." } as any);
+          return {
+            messages: [{ sender: "agent", text: "I'll inspect the files now." }],
+            tokens_in: 10,
+            tokens_out: 6,
+          };
+        }
+        await notify("tool_use" as any, { id: "tc1", name: "read", input: { file: "src/app.ts" } } as any);
+        return {
+          messages: [
+            {
+              sender: "agent",
+              text: "",
+              tool_calls: [{ id: "tc1", tool_name: "read", input_args: { file: "src/app.ts" } }],
+            },
+          ],
+          tokens_in: 11,
+          tokens_out: 3,
+        };
+      },
+      setSystemPrompt() {},
+    };
+
+    const guarded = withIntentOnlyContinuation(model);
+    const result = await guarded.prompt(
+      { messages: [{ sender: "user", text: "fix this bug" }] },
+      async (event, data) => {
+        if (event === "model_response") emitted.push((data as { text?: string }).text ?? "");
+        if (event === "tool_use") emitted.push(`tool:${(data as { name?: string }).name}`);
+      },
+    );
+
+    expect(seenRequests.length).toBe(2);
+    expect(seenRequests[1].messages.at(-1)?.text).toContain("only stated an intention");
+    expect(emitted).toEqual(["tool:read"]);
+    expect(result.messages.at(-1)?.tool_calls?.[0]?.tool_name).toBe("read");
+  });
+
+  test("detects task updates with unfinished work", () => {
+    expect(
+      messageHasOpenTaskUpdate({
+        sender: "user",
+        text: "tool results",
+        tool_results: [
+          {
+            tool_name: "glove_update_tasks",
+            result: {
+              status: "success",
+              data: {
+                tasks: [
+                  { id: "t1", content: "Inspect", activeForm: "Inspecting", status: "completed" },
+                  { id: "t2", content: "Patch", activeForm: "Patching", status: "in_progress" },
+                ],
+              },
+            },
+          },
+        ],
+      }),
+    ).toBe(true);
+
+    expect(
+      messageHasOpenTaskUpdate({
+        sender: "user",
+        text: "tool results",
+        tool_results: [
+          {
+            tool_name: "glove_update_tasks",
+            result: {
+              status: "success",
+              data: {
+                tasks: [
+                  { id: "t1", content: "Inspect", activeForm: "Inspecting", status: "completed" },
+                ],
+              },
+            },
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  test("retries intent-only text after an open task update without emitting it", async () => {
+    const seenRequests: any[] = [];
+    const emitted: string[] = [];
+    const model: ModelAdapter = {
+      name: "task-stop-first",
+      async prompt(request, notify) {
+        seenRequests.push(request);
+        if (seenRequests.length === 1) {
+          await notify("model_response" as any, { text: "I'll start editing now." } as any);
+          return {
+            messages: [{ sender: "agent", text: "I'll start editing now." }],
+            tokens_in: 10,
+            tokens_out: 6,
+          };
+        }
+        await notify("tool_use" as any, { id: "tc1", name: "read", input: { file: "src/app.ts" } } as any);
+        return {
+          messages: [
+            {
+              sender: "agent",
+              text: "",
+              tool_calls: [{ id: "tc1", tool_name: "read", input_args: { file: "src/app.ts" } }],
+            },
+          ],
+          tokens_in: 11,
+          tokens_out: 3,
+        };
+      },
+      setSystemPrompt() {},
+    };
+
+    const guarded = withTaskUpdateContinuation(model);
+    const result = await guarded.prompt(
+      {
+        messages: [
+          {
+            sender: "user",
+            text: "tool results",
+            tool_results: [
+              {
+                tool_name: "glove_update_tasks",
+                result: {
+                  status: "success",
+                  data: {
+                    tasks: [
+                      { id: "t1", content: "Edit file", activeForm: "Editing file", status: "in_progress" },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      async (event, data) => {
+        if (event === "model_response") emitted.push((data as { text?: string }).text ?? "");
+        if (event === "tool_use") emitted.push(`tool:${(data as { name?: string }).name}`);
+      },
+    );
+
+    expect(seenRequests.length).toBe(2);
+    expect(seenRequests[1].messages.at(-1)?.text).toContain("Continue now");
+    expect(emitted).toEqual(["tool:read"]);
+    expect(result.messages.at(-1)?.tool_calls?.[0]?.tool_name).toBe("read");
+  });
+
+  test("does not retry after a completed task update", async () => {
+    const seenRequests: any[] = [];
+    const emitted: string[] = [];
+    const model: ModelAdapter = {
+      name: "task-complete",
+      async prompt(request, notify) {
+        seenRequests.push(request);
+        await notify("model_response" as any, { text: "Done." } as any);
+        return {
+          messages: [{ sender: "agent", text: "Done." }],
+          tokens_in: 10,
+          tokens_out: 1,
+        };
+      },
+      setSystemPrompt() {},
+    };
+
+    const guarded = withTaskUpdateContinuation(model);
+    const result = await guarded.prompt(
+      {
+        messages: [
+          {
+            sender: "user",
+            text: "tool results",
+            tool_results: [
+              {
+                tool_name: "glove_update_tasks",
+                result: {
+                  status: "success",
+                  data: {
+                    tasks: [
+                      { id: "t1", content: "Edit file", activeForm: "Editing file", status: "completed" },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      async (event, data) => {
+        if (event === "model_response") emitted.push((data as { text?: string }).text ?? "");
+      },
+    );
+
+    expect(seenRequests.length).toBe(1);
+    expect(emitted).toEqual(["Done."]);
+    expect(result.messages.at(-1)?.text).toBe("Done.");
   });
 });

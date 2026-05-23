@@ -1,11 +1,20 @@
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { GloveFoldArgs } from "glove-core";
 import { resolveSafePath, relPath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
+import { firstItems } from "./summaries.ts";
+import type { SummaryTool } from "./summaries.ts";
 
 // Hidden files that are still useful to surface in code searches.
 const HIDDEN_ALLOWLIST = new Set([".env", ".env.example", ".gitignore", ".dockerignore", ".npmrc"]);
+
+interface GlobSummaryArgs {
+  pattern: string;
+  root: string;
+  count: number;
+  truncated: boolean;
+  paths: string[];
+}
 
 async function* walk(root: string, ignore: ReadonlySet<string>): AsyncGenerator<string> {
   const entries = await fs.promises.readdir(root, { withFileTypes: true });
@@ -20,11 +29,11 @@ async function* walk(root: string, ignore: ReadonlySet<string>): AsyncGenerator<
   }
 }
 
-export function globTool(workspace: string): GloveFoldArgs<{
+export function globTool(workspace: string): SummaryTool<{
   pattern: string;
   path?: string;
   limit?: number;
-}> {
+}, GlobSummaryArgs> {
   return {
     name: "glob",
     description:
@@ -59,6 +68,13 @@ export function globTool(workspace: string): GloveFoldArgs<{
       return {
         status: "success",
         data: final.length === 0 ? "(no matches)" : final.join("\n"),
+        generateSummaryArgs: {
+          pattern: input.pattern,
+          root: relPath(workspace, root),
+          count: final.length,
+          truncated: hits.length > limit,
+          paths: final.slice(0, 50),
+        } satisfies GlobSummaryArgs,
         renderData: {
           pattern: input.pattern,
           root: relPath(workspace, root),
@@ -66,6 +82,17 @@ export function globTool(workspace: string): GloveFoldArgs<{
           truncated: hits.length > limit,
         },
       };
+    },
+    generateToolSummary: async (args) => {
+      const a = args as GlobSummaryArgs;
+      if (a.count === 0) return `glob ${a.pattern} in ${a.root}: no matches.`;
+      return [
+        `glob ${a.pattern} in ${a.root}: ${a.count} path${a.count === 1 ? "" : "s"}${
+          a.truncated ? " (truncated)" : ""
+        }.`,
+        firstItems(a.paths, 20),
+        "Full prior path list omitted; re-run glob with a narrower pattern if needed.",
+      ].join("\n");
     },
   };
 }

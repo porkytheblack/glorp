@@ -1,8 +1,24 @@
 import { z } from "zod";
 import { spawn } from "node:child_process";
-import type { GloveFoldArgs } from "glove-core";
+import type { SummaryTool } from "./summaries.ts";
+import { compactText, lineCount } from "./summaries.ts";
 
-const MAX_OUTPUT_BYTES_PER_STREAM = 256 * 1024;
+const MAX_OUTPUT_BYTES_PER_STREAM = 64 * 1024;
+const OUTPUT_HEAD_BYTES = 48 * 1024;
+const OUTPUT_TAIL_BYTES = 16 * 1024;
+
+interface BashSummaryArgs {
+  command: string;
+  description: string;
+  exitCode: number;
+  timedOut: boolean;
+  stdoutLines: number;
+  stderrLines: number;
+  stdoutPreview: string;
+  stderrPreview: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+}
 
 const DANGEROUS_PATTERNS = [
   /\brm\s+-rf\s+\/(\s|$)/,
@@ -19,11 +35,84 @@ function dangerousReason(cmd: string): string | null {
   return null;
 }
 
-export function bashTool(workspace: string): GloveFoldArgs<{
+function cleanTerminalOutput(text: string): string {
+  return text
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[=>]/g, "")
+    .split(/\r|\n/)
+    .filter((line, index, lines) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      return index === lines.length - 1 || trimmed !== lines[index + 1]?.trim();
+    })
+    .join("\n");
+}
+
+function newlineCount(text: string): number {
+  return (text.match(/\n/g) ?? []).length;
+}
+
+function byteLength(text: string): number {
+  return Buffer.byteLength(text, "utf-8");
+}
+
+function takeFirstBytes(text: string, bytes: number): string {
+  const buf = Buffer.from(text, "utf-8");
+  return buf.length <= bytes ? text : buf.subarray(0, bytes).toString("utf-8");
+}
+
+function takeLastBytes(text: string, bytes: number): string {
+  const buf = Buffer.from(text, "utf-8");
+  return buf.length <= bytes ? text : buf.subarray(buf.length - bytes).toString("utf-8");
+}
+
+function makeStreamCapture(label: "stdout" | "stderr") {
+  let full = "";
+  let head = "";
+  let tail = "";
+  let totalBytes = 0;
+  let totalNewlines = 0;
+  let truncated = false;
+
+  return {
+    push(buf: Buffer) {
+      const text = buf.toString("utf-8");
+      totalBytes += buf.length;
+      totalNewlines += newlineCount(text);
+      if (!truncated && totalBytes <= MAX_OUTPUT_BYTES_PER_STREAM) {
+        full += text;
+        return;
+      }
+      if (!truncated) {
+        truncated = true;
+        const combined = full + text;
+        head = takeFirstBytes(combined, OUTPUT_HEAD_BYTES);
+        tail = takeLastBytes(combined, OUTPUT_TAIL_BYTES);
+        full = "";
+        return;
+      }
+      tail = takeLastBytes(tail + text, OUTPUT_TAIL_BYTES);
+    },
+    value() {
+      if (!truncated) return cleanTerminalOutput(full);
+      const totalLines = totalNewlines + 1;
+      const retainedLines = lineCount(head) + lineCount(tail);
+      const omittedLines = Math.max(0, totalLines - retainedLines);
+      return cleanTerminalOutput(
+        `${head}\n... [${label} truncated: ${omittedLines} lines elided; ${totalBytes} bytes total, kept ${byteLength(head) + byteLength(tail)} bytes head+tail]\n${tail}`,
+      );
+    },
+    truncated() {
+      return truncated;
+    },
+  };
+}
+
+export function bashTool(workspace: string): SummaryTool<{
   command: string;
   description: string;
   timeout_ms?: number;
-}> {
+}, BashSummaryArgs> {
   return {
     name: "bash",
     description:
@@ -60,35 +149,10 @@ export function bashTool(workspace: string): GloveFoldArgs<{
           env: process.env,
           stdio: ["ignore", "pipe", "pipe"],
         });
-        let stdout = "";
-        let stderr = "";
-        let stdoutBytes = 0;
-        let stderrBytes = 0;
-        let stdoutTruncated = false;
-        let stderrTruncated = false;
-        const onChunk = (which: "stdout" | "stderr") => (buf: Buffer) => {
-          const truncated = which === "stdout" ? stdoutTruncated : stderrTruncated;
-          if (truncated) return;
-          const used = which === "stdout" ? stdoutBytes : stderrBytes;
-          const remaining = MAX_OUTPUT_BYTES_PER_STREAM - used;
-          if (remaining <= 0) {
-            if (which === "stdout") stdoutTruncated = true;
-            else stderrTruncated = true;
-            return;
-          }
-          const slice = buf.length > remaining ? buf.slice(0, remaining) : buf;
-          if (which === "stdout") {
-            stdoutBytes += slice.length;
-            stdout += slice.toString("utf-8");
-            if (buf.length > remaining) stdoutTruncated = true;
-          } else {
-            stderrBytes += slice.length;
-            stderr += slice.toString("utf-8");
-            if (buf.length > remaining) stderrTruncated = true;
-          }
-        };
-        child.stdout.on("data", onChunk("stdout"));
-        child.stderr.on("data", onChunk("stderr"));
+        const stdoutCapture = makeStreamCapture("stdout");
+        const stderrCapture = makeStreamCapture("stderr");
+        child.stdout.on("data", (buf: Buffer) => stdoutCapture.push(buf));
+        child.stderr.on("data", (buf: Buffer) => stderrCapture.push(buf));
         let killed = false;
         const sigkillTimer: { ref: NodeJS.Timeout | null } = { ref: null };
         const escalate = () => {
@@ -111,9 +175,12 @@ export function bashTool(workspace: string): GloveFoldArgs<{
           if (sigkillTimer.ref) clearTimeout(sigkillTimer.ref);
           signal?.removeEventListener("abort", onAbort);
           const timedOut = killed && Date.now() - start >= timeout - 50;
-          if (stdoutTruncated) stdout += "\n... [stdout truncated at 256KB]";
-          if (stderrTruncated) stderr += "\n... [stderr truncated at 256KB]";
-          resolve({ exitCode: code ?? -1, stdout, stderr, timedOut });
+          resolve({
+            exitCode: code ?? -1,
+            stdout: stdoutCapture.value(),
+            stderr: stderrCapture.value(),
+            timedOut,
+          });
         });
       });
       const combined = [
@@ -127,6 +194,18 @@ export function bashTool(workspace: string): GloveFoldArgs<{
         return {
           status: "success",
           data: combined || "(no output)",
+          generateSummaryArgs: {
+            command: input.command,
+            description: input.description,
+            exitCode: result.exitCode,
+            timedOut: result.timedOut,
+            stdoutLines: lineCount(result.stdout),
+            stderrLines: lineCount(result.stderr),
+            stdoutPreview: compactText(result.stdout, 12, 2000),
+            stderrPreview: compactText(result.stderr, 8, 1200),
+            stdoutTruncated: result.stdout.includes("[stdout truncated"),
+            stderrTruncated: result.stderr.includes("[stderr truncated"),
+          } satisfies BashSummaryArgs,
           renderData: { command: input.command, description: input.description, exitCode: 0 },
         };
       }
@@ -136,12 +215,42 @@ export function bashTool(workspace: string): GloveFoldArgs<{
         message: result.timedOut
           ? `Command timed out after ${timeout}ms`
           : `Command exited with code ${result.exitCode}`,
+        generateSummaryArgs: {
+          command: input.command,
+          description: input.description,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          stdoutLines: lineCount(result.stdout),
+          stderrLines: lineCount(result.stderr),
+          stdoutPreview: compactText(result.stdout, 12, 2000),
+          stderrPreview: compactText(result.stderr, 8, 1200),
+          stdoutTruncated: result.stdout.includes("[stdout truncated"),
+          stderrTruncated: result.stderr.includes("[stderr truncated"),
+        } satisfies BashSummaryArgs,
         renderData: {
           command: input.command,
           description: input.description,
           exitCode: result.exitCode,
         },
       };
+    },
+    generateToolSummary: async (args) => {
+      const a = args as BashSummaryArgs;
+      const chunks = [
+        `Ran: ${a.description}`,
+        `Command: ${a.command}`,
+        `Exit code: ${a.exitCode}${a.timedOut ? " (timed out)" : ""}`,
+        `stdout: ${a.stdoutLines} line${a.stdoutLines === 1 ? "" : "s"}${
+          a.stdoutTruncated ? " (truncated)" : ""
+        }`,
+        a.stdoutPreview ? `stdout preview:\n${a.stdoutPreview}` : "",
+        `stderr: ${a.stderrLines} line${a.stderrLines === 1 ? "" : "s"}${
+          a.stderrTruncated ? " (truncated)" : ""
+        }`,
+        a.stderrPreview ? `stderr preview:\n${a.stderrPreview}` : "",
+        "Full prior command output omitted.",
+      ].filter(Boolean);
+      return chunks.join("\n");
     },
   };
 }

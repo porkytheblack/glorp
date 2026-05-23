@@ -13,6 +13,7 @@ interface Props {
   onAbort: () => void;
   onQuit: () => void;
   slashCommands?: SlashCommand[];
+  skillHints?: SlashCommand[];
   subagentMentions?: SlashCommand[];
 }
 
@@ -38,6 +39,7 @@ export function EmptyHero({
   onAbort,
   onQuit,
   slashCommands,
+  skillHints,
   subagentMentions,
 }: Props) {
   // Compact input: 60-80% of viewport width, capped so it doesn't sprawl
@@ -63,6 +65,7 @@ export function EmptyHero({
             modelLabel={modelLabel}
             variant="hero"
             slashCommands={slashCommands}
+            skillHints={skillHints}
             subagentMentions={subagentMentions}
             onSubmit={onSubmit}
             onAbort={onAbort}

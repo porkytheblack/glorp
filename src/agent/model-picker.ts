@@ -131,6 +131,30 @@ async function buildAdapter(args: {
     });
   }
 
+  // Xiaomi MiMo has a dedicated adapter in glove-core. It uses the
+  // OpenAI-compatible wire shape but handles MiMo's reasoning_content
+  // round-trip and larger default completion budget.
+  const isCustomMimo =
+    provider?.type === "custom" &&
+    (provider.adapter === "mimo" ||
+      (provider.adapter == null &&
+        (/xiaomimimo\.com/i.test(baseURL ?? "") || /^mimo(?:-|$)/i.test(model))));
+  if (providerId === "mimo" || isCustomMimo) {
+    const { MimoAdapter } = await import("glove-core/models/mimo");
+    const effort =
+      reasoning?.kind === "effort" && reasoning.effort !== "minimal"
+        ? reasoning.effort
+        : undefined;
+    return new MimoAdapter({
+      apiKey,
+      model,
+      stream: true,
+      maxTokens: 8192,
+      ...(baseURL ? { baseURL } : {}),
+      ...(effort ? { reasoningEffort: effort } : {}),
+    });
+  }
+
   // OpenAI-compat (used by openai, openrouter, gemini, groq, ollama, and custom).
   const { OpenAICompatAdapter } = await import("glove-core/models/openai-compat");
   const compatOpts: any = {
@@ -192,6 +216,8 @@ function defaultBaseURLFor(providerId: string): string {
       return "https://generativelanguage.googleapis.com/v1beta/openai/";
     case "groq":
       return "https://api.groq.com/openai/v1";
+    case "mimo":
+      return "https://api.xiaomimimo.com/v1";
     case "ollama":
       return process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
     default:
@@ -205,6 +231,7 @@ function envDetectedProvider(): string | undefined {
   if (process.env.OPENROUTER_API_KEY) return "openrouter";
   if (process.env.GEMINI_API_KEY) return "gemini";
   if (process.env.GROQ_API_KEY) return "groq";
+  if (process.env.MIMO_API_KEY) return "mimo";
   return undefined;
 }
 
