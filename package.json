@@ -17,12 +17,12 @@
     "ci": "bun run typecheck && bun run test"
   },
   "dependencies": {
-    "glove-core": "latest",
-    "glove-mcp": "latest",
-    "station-signal": "latest",
     "@opentui/core": "latest",
     "@opentui/react": "latest",
+    "glove-core": "3.0.4",
+    "glove-mcp": "latest",
     "react": "^19.0.0",
+    "station-signal": "latest",
     "zod": "^4.0.0"
   },
   "devDependencies": {

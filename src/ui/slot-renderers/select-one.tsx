@@ -5,7 +5,8 @@ import type { SlotRendererProps } from "./registry.tsx";
 
 /**
  * `select_one` slot — pick one option from a list. Resolves with the
- * selected `value` (or `label` if no value provided). Reject with esc.
+ * selected `value` (or `label` if no value provided), or with a custom
+ * free-form answer typed by the user. Reject with esc.
  *
  * Input: { question?: string, options: Array<{ label: string, value?: string, description?: string }> }
  */
@@ -17,16 +18,29 @@ export function SelectOneSlot({ slot, onResolve, onReject }: SlotRendererProps) 
   };
   const options = input.options ?? [];
   const [cursor, setCursor] = useState(0);
+  const [custom, setCustom] = useState("");
   const clamped = Math.min(cursor, Math.max(0, options.length - 1));
 
   useKeyboard((key) => {
     if (key.name === "escape") return onReject("cancelled");
-    if (key.name === "up" || key.name === "k") setCursor((c) => Math.max(0, c - 1));
-    else if (key.name === "down" || key.name === "j")
-      setCursor((c) => Math.min(options.length - 1, c + 1));
+    if (key.name === "backspace") {
+      setCustom((current) => current.slice(0, -1));
+      return;
+    }
+    if (key.ctrl && key.name === "u") {
+      setCustom("");
+      return;
+    }
+    if (key.name === "up") setCursor((c) => Math.max(0, c - 1));
+    else if (key.name === "down") setCursor((c) => Math.min(options.length - 1, c + 1));
     else if (key.name === "return") {
+      const customAnswer = custom.trim();
+      if (customAnswer) return onResolve(customAnswer);
       const opt = options[clamped];
       if (opt) onResolve(opt.value ?? opt.label);
+    } else {
+      const typed = printableKeyText(key);
+      if (typed !== undefined) setCustom((current) => `${current}${typed}`);
     }
   });
 
@@ -52,7 +66,7 @@ export function SelectOneSlot({ slot, onResolve, onReject }: SlotRendererProps) 
         <text fg={theme.accent}>
           <strong>{input.question ?? "choose one"}</strong>
         </text>
-        <text fg={theme.textDim}>↑↓ pick · enter select · esc cancel</text>
+        <text fg={theme.textDim}>↑↓ pick · type custom · enter submit · esc cancel</text>
         <box marginTop={1} flexDirection="column">
           {options.length === 0 && <text fg={theme.textMuted}>(no options provided)</text>}
           {options.map((o, i) => {
@@ -69,7 +83,32 @@ export function SelectOneSlot({ slot, onResolve, onReject }: SlotRendererProps) 
             );
           })}
         </box>
+        <box
+          marginTop={1}
+          border
+          borderColor={custom.trim() ? theme.accent : theme.border}
+          paddingX={1}
+          minHeight={3}
+          flexDirection="row"
+        >
+          <text fg={theme.accent}>
+            <strong>›</strong>
+          </text>
+          <text> </text>
+          <text fg={custom ? theme.text : theme.textMuted}>
+            {custom || "free-form answer"}
+          </text>
+        </box>
       </box>
     </box>
   );
+}
+
+function printableKeyText(key: { name?: string; sequence?: string; ctrl?: boolean; meta?: boolean; super?: boolean }) {
+  if (key.ctrl || key.meta || key.super) return undefined;
+  if (key.name === "space") return " ";
+  if (!key.sequence || key.sequence.length !== 1) return undefined;
+  const code = key.sequence.charCodeAt(0);
+  if (code < 32 || code === 127) return undefined;
+  return key.sequence;
 }

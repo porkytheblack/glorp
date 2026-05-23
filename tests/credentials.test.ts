@@ -65,10 +65,12 @@ describe("CredentialsStore", () => {
     store.upsertProvider({
       type: "custom",
       id: "custom-foo",
+      adapter: "mimo",
       baseURL: "https://example.com/v1",
       apiKey: "sk-foo",
     });
     expect(store.getProvider("custom-foo")?.baseURL).toBe("https://example.com/v1");
+    expect(store.getProvider("custom-foo")?.adapter).toBe("mimo");
   });
 
   test("removeProvider also drops orphan profiles", () => {
@@ -164,6 +166,10 @@ describe("modelAcceptsReasoning", () => {
     expect(modelAcceptsReasoning("groq", "deepseek-r1-distill-llama-70b")).toBe(true);
   });
 
+  test("mimo models do", () => {
+    expect(modelAcceptsReasoning("mimo", "mimo-v2.5-pro")).toBe(true);
+  });
+
   test("gemini does not", () => {
     expect(modelAcceptsReasoning("gemini", "gemini-2.5-pro")).toBe(false);
   });
@@ -186,6 +192,9 @@ describe("reasoningKindFor (provider-specific)", () => {
   });
   test("groq deepseek-r1 → effort", () => {
     expect(reasoningKindFor("groq", "deepseek-r1-distill-llama-70b")).toBe("effort");
+  });
+  test("mimo → effort", () => {
+    expect(reasoningKindFor("mimo", "mimo-v2.5-pro")).toBe("effort");
   });
 });
 

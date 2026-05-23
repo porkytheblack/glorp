@@ -9,6 +9,7 @@ import * as path from "node:path";
  */
 export interface SessionInfo {
   id: string;
+  title: string | null;
   firstUserMessage: string | null;
   agentMessageCount: number;
   userMessageCount: number;
@@ -36,6 +37,7 @@ export async function listSessions(dataDir: string): Promise<SessionInfo[]> {
       const stat = await fs.promises.stat(full);
       const raw = await fs.promises.readFile(full, "utf-8");
       const snap = JSON.parse(raw) as {
+        title?: string | null;
         messages?: Array<{ sender?: string; text?: string }>;
         tasks?: unknown[];
         inboxItems?: Array<{ status?: string }>;
@@ -48,6 +50,7 @@ export async function listSessions(dataDir: string): Promise<SessionInfo[]> {
       const userCount = msgs.filter((m) => m.sender === "user").length;
       results.push({
         id: file.replace(/\.json$/, ""),
+        title: typeof snap.title === "string" && snap.title.trim() ? snap.title.trim() : null,
         firstUserMessage: firstUser,
         agentMessageCount: agentCount,
         userMessageCount: userCount,

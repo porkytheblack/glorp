@@ -4,6 +4,7 @@ import {
   CredentialsStore,
   modelAcceptsReasoning,
   normaliseReasoning,
+  reasoningProviderId,
   reasoningLabel,
   reasoningOptionsFor,
 } from "../agent/credentials.ts";
@@ -65,7 +66,9 @@ export function ModelSwitcher({ credentials, activeProfileId, onPick, onClose }:
     if (key.name === "r") {
       const p = profiles[clampedCursor];
       if (!p) return;
-      const opts = reasoningOptionsFor(p.providerId, p.model);
+      const provider = credentials.getProvider(p.providerId);
+      const effectiveProviderId = reasoningProviderId(p.providerId, provider);
+      const opts = reasoningOptionsFor(effectiveProviderId, p.model);
       if (opts.length === 0) return; // model doesn't accept reasoning
       const current = normaliseReasoning(p.reasoning);
       const idx = opts.findIndex(
@@ -144,7 +147,9 @@ export function ModelSwitcher({ credentials, activeProfileId, onPick, onClose }:
             const highlighted = i === clampedCursor;
             const fg = highlighted ? theme.bg : active ? theme.accent : theme.text;
             const bg = highlighted ? theme.accent : "transparent";
-            const reasoningCapable = modelAcceptsReasoning(p.providerId, p.model);
+            const provider = credentials.getProvider(p.providerId);
+            const effectiveProviderId = reasoningProviderId(p.providerId, provider);
+            const reasoningCapable = modelAcceptsReasoning(effectiveProviderId, p.model);
             const reasoningStr = reasoningCapable
               ? ` [${reasoningLabel(normaliseReasoning(p.reasoning))}]`
               : "";

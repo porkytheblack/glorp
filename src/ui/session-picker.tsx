@@ -122,7 +122,7 @@ export function SessionPicker({
           const fg = highlighted ? theme.bg : active ? theme.accent : theme.text;
           const bg = highlighted ? theme.accent : "transparent";
           const star = active ? "●" : "○";
-          const preview = (s.firstUserMessage ?? "(no user message yet)")
+          const preview = (s.title ?? s.firstUserMessage ?? "(no user message yet)")
             .replace(/\s+/g, " ")
             .slice(0, 60);
           const meta = `${s.totalMessages}m · ${s.turnCount}t · ${formatTokens(s.tokenCount)}tk · ${relativeTime(s.lastActivity)}`;

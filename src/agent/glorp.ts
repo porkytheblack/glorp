@@ -10,6 +10,8 @@ import type {
   ToolResultData,
   Tool,
   Context,
+  Message,
+  ModelPromptResult,
 } from "glove-core/core";
 import { createTaskTool } from "glove-core/tools/task-tool";
 import { createInboxTool } from "glove-core/tools/inbox-tool";
@@ -27,6 +29,7 @@ import {
   webFetchTool,
   transmissionTool,
   fleetDispatchTool,
+  inboxManageTool,
   askConfirmTool,
   showInfoTool,
   askChoiceTool,
@@ -44,10 +47,18 @@ import { MemoryStore as ShimMemoryStore } from "./memory-store-shim.ts";
 import * as path from "node:path";
 import * as os from "node:os";
 
+const TASK_UPDATE_TOOL_NAME = "glove_update_tasks";
+const TASK_UPDATE_CONTINUATION_NOTE =
+  "Task list updated. Task updates are bookkeeping only: if any task is still pending or in_progress, continue immediately with the next concrete tool call. Do not stop after this tool with intent-only text.";
+const TASK_UPDATE_CONTINUATION_PROMPT =
+  "[internal continuation] You just updated the task list and at least one task is still pending or in_progress. Continue now with the next concrete tool call or, if genuinely blocked, state the blocker. Do not stop with intent-only text.";
+
 /** Extension catalogue the input bar uses to drive autocomplete + hints. */
 export interface ExtensionCatalogue {
   /** `/name description` entries — hooks + user-invokable skills. */
   slash: Array<{ name: string; description: string }>;
+  /** `$name description` entries — user-invokable skills. */
+  skills: Array<{ name: string; description: string }>;
   /** `@name description` entries — registered subagents. */
   mentions: Array<{ name: string; description: string }>;
 }
@@ -61,8 +72,11 @@ export interface GlorpHandle {
   sessionId: string;
   /** Human-readable label for the active model (e.g. "anthropic · sonnet"). */
   modelLabel: string;
+  /** Persisted short title for this chat, generated from the conversation. */
+  title: string | null;
   /** Slash commands + @subagents the UI should hint when the user types `/` or `@`. */
   extensions: ExtensionCatalogue;
+  hydrateUi(): Promise<void>;
   send(text: string): Promise<void>;
   abort(): void;
   shutdown(): Promise<void>;
@@ -100,6 +114,11 @@ export interface BuildGlorpOptions {
 }
 
 const CONTEXT_LIMIT = 180_000;
+const MAX_SKILL_PAYLOAD_CHARS = 12_000;
+const MAX_SKILL_INDEX_HEADINGS = 80;
+const TITLE_MODEL_TIMEOUT_MS = 15_000;
+const TITLE_MAX_MESSAGES = 10;
+const TITLE_MAX_CHARS_PER_MESSAGE = 700;
 
 /**
  * Human-readable descriptions for the hooks we register. Used by the
@@ -160,6 +179,7 @@ function makeDiskSubAgent(sub: LoadedSubagent, workspace: string) {
           compaction_instructions: "Summarise progress on the assigned task; drop chatter.",
           max_turns: 12,
         },
+        enableToolResultSummary: true,
       });
       for (const toolName of requested) {
         const factory = (ALL_TOOLS as Record<string, undefined | (() => GloveFoldArgs<any>)>)[toolName];
@@ -185,12 +205,374 @@ function toolToFoldArgs<I>(tool: Tool<I>): GloveFoldArgs<I> {
     requiresPermission: tool.requiresPermission,
     unAbortable: tool.unAbortable,
     do: (input, _display, _glove, signal) => tool.run(input, undefined, signal),
+    generateToolSummary: tool.generateSummary,
   };
+}
+
+function taskToolToFoldArgs<I>(tool: Tool<I>): GloveFoldArgs<I> {
+  const folded = toolToFoldArgs(tool);
+  return {
+    ...folded,
+    description: `${tool.description}\n\nImportant: ${TASK_UPDATE_CONTINUATION_NOTE}`,
+    async do(input, _display, _glove, signal) {
+      const result = await tool.run(input, undefined, signal);
+      if (result.status !== "success") return result;
+      const data = result.data;
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        return {
+          ...result,
+          data: {
+            ...data,
+            _agentInstruction: TASK_UPDATE_CONTINUATION_NOTE,
+          },
+        };
+      }
+      return {
+        ...result,
+        data: {
+          value: data,
+          _agentInstruction: TASK_UPDATE_CONTINUATION_NOTE,
+        },
+      };
+    },
+  };
+}
+
+function skillPayload(skill: LoadedSkill): string {
+  const refsHint = skill.referencePaths.length
+    ? `\n\n---\nReference files in this skill (read only the file you need):\n${skill.referencePaths.map((p) => `  ${p}`).join("\n")}`
+    : "";
+  if (skill.body.length <= MAX_SKILL_PAYLOAD_CHARS) {
+    return `${skill.body}${refsHint}`;
+  }
+  return (
+    `${skill.body.slice(0, MAX_SKILL_PAYLOAD_CHARS)}\n\n` +
+    `---\n[Skill body truncated from ${skill.body.length} to ${MAX_SKILL_PAYLOAD_CHARS} characters to preserve context. ` +
+    `Source: ${skill.sourcePath}. Use grep to find terms or read with the line offsets below for specific sections.]\n\n` +
+    skillHeadingIndex(skill.body, skill.sourcePath) +
+    refsHint
+  );
+}
+
+function skillHeadingIndex(body: string, sourcePath: string): string {
+  const lines = body.split("\n");
+  const headings: Array<{ line: number; level: number; title: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const match = /^(#{1,4})\s+(.+?)\s*$/.exec(lines[i]!);
+    if (!match) continue;
+    headings.push({
+      line: i + 1,
+      level: match[1]!.length,
+      title: match[2]!.replace(/\s+/g, " ").trim(),
+    });
+    if (headings.length >= MAX_SKILL_INDEX_HEADINGS) break;
+  }
+  if (headings.length === 0) {
+    return `Heading index unavailable. Read targeted ranges from ${sourcePath}.\n`;
+  }
+  const rows = headings.map((h) => {
+    const indent = "  ".repeat(Math.max(0, h.level - 1));
+    return `- line ${h.line}: ${indent}${h.title}`;
+  });
+  const more =
+    headings.length >= MAX_SKILL_INDEX_HEADINGS
+      ? `\n- ... heading index capped at ${MAX_SKILL_INDEX_HEADINGS}; use grep for later sections.`
+      : "";
+  return `Heading index for omitted sections in ${sourcePath}:\n${rows.join("\n")}${more}\n`;
+}
+
+function visibleMessageText(message: Message): string {
+  const text = message.pre_modified_text ?? message.text ?? "";
+  if (text.trim()) return text;
+  const parts = message.content ?? [];
+  return parts
+    .map((part) => {
+      if (part.type === "text") return part.text ?? "";
+      return `[${part.type} attachment]`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function isVisibleTranscriptMessage(message: Message): boolean {
+  if (message.is_compaction || message.is_compaction_request || message.is_skill_injection) return false;
+  if (message.tool_results?.length) return false;
+  const text = visibleMessageText(message).trim();
+  if (!text) return false;
+  return true;
+}
+
+function hasVisibleAgentOutput(message: Message): boolean {
+  if (message.sender !== "agent") return false;
+  if ((message.tool_calls?.length ?? 0) > 0) return true;
+  return visibleMessageText(message).trim().length > 0;
+}
+
+export function modelResultHasVisibleAgentOutput(result: ModelPromptResult | Message): boolean {
+  const messages = "messages" in result ? result.messages : [result];
+  return messages.some(hasVisibleAgentOutput);
+}
+
+export function modelResultHasToolCall(result: ModelPromptResult | Message): boolean {
+  const messages = "messages" in result ? result.messages : [result];
+  return messages.some((message) => (message.tool_calls?.length ?? 0) > 0);
+}
+
+function isIntentOnlyText(text: string): boolean {
+  const normalized = text
+    .replace(/[’‘]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  if (!normalized) return false;
+
+  const verbs =
+    "(?:start|begin|check|inspect|look|read|open|review|edit|update|patch|fix|run|test|verify|investigate|continue|proceed|work|implement|make|add|wire|trace|debug|rewrite|write|create|generate|build|validate|resolve)";
+  const gerunds =
+    "(?:checking|inspecting|reading|opening|reviewing|editing|updating|patching|fixing|running|testing|verifying|investigating|continuing|proceeding|implementing|adding|wiring|tracing|debugging|rewriting|writing|creating|generating|building|validating|resolving)";
+  return [
+    new RegExp(`\\bi'll\\s+${verbs}\\b`),
+    new RegExp(`\\bi will\\s+${verbs}\\b`),
+    new RegExp(`\\bi'm going to\\s+${verbs}\\b`),
+    new RegExp(`\\bi can\\s+${verbs}\\b`),
+    new RegExp(`\\blet me\\s+${verbs}\\b`),
+    new RegExp(`\\bnext,?\\s+i(?:'ll| will)\\s+${verbs}\\b`),
+    new RegExp(`\\bnow\\s+i(?:'ll| will)\\s+${verbs}\\b`),
+    new RegExp(`^${gerunds}\\b`),
+    new RegExp(`\\b${gerunds}\\s+(?:now|next|the|this|with|using)\\b`),
+  ].some((pattern) => pattern.test(normalized));
+}
+
+export function modelResultIsIntentOnly(result: ModelPromptResult | Message): boolean {
+  if (modelResultHasToolCall(result)) return false;
+  const messages = "messages" in result ? result.messages : [result];
+  const agentTexts = messages
+    .filter((message) => message.sender === "agent")
+    .map((message) => visibleMessageText(message).trim())
+    .filter(Boolean);
+  if (agentTexts.length === 0) return false;
+  return agentTexts.every(isIntentOnlyText);
+}
+
+const EMPTY_RESPONSE_RETRY_PROMPT =
+  "[internal retry] Your previous completion produced no visible answer or tool call. " +
+  "Answer the user's latest request now. Keep any reasoning internal and produce visible text or a tool call.";
+const INTENT_ONLY_CONTINUATION_PROMPT =
+  "[internal continuation] Your previous completion only stated an intention to continue, but made no tool call. " +
+  "Continue now with the concrete next tool call. If you said a pending blocking inbox item is irrelevant or obsolete, " +
+  "first call glove_update_inbox with item_ids when you know them, or tags when you only know the visible tag. If genuinely blocked, state the blocker clearly.";
+
+export function withEmptyResponseRetry(model: ModelAdapter): ModelAdapter {
+  return {
+    get name() {
+      return model.name;
+    },
+    setSystemPrompt(systemPrompt: string) {
+      model.setSystemPrompt(systemPrompt);
+    },
+    async prompt(request, notify, signal) {
+      const first = await model.prompt(request, notify, signal);
+      if (signal?.aborted || modelResultHasVisibleAgentOutput(first)) {
+        return first;
+      }
+      return model.prompt(
+        {
+          ...request,
+          messages: [
+            ...request.messages,
+            {
+              sender: "user",
+              text: EMPTY_RESPONSE_RETRY_PROMPT,
+            },
+          ],
+        },
+        notify,
+        signal,
+      );
+    },
+  };
+}
+
+export function withIntentOnlyContinuation(model: ModelAdapter): ModelAdapter {
+  return {
+    get name() {
+      return model.name;
+    },
+    setSystemPrompt(systemPrompt: string) {
+      model.setSystemPrompt(systemPrompt);
+    },
+    async prompt(request, notify, signal) {
+      const bufferedEvents: Array<{ eventType: string; data: unknown }> = [];
+      const bufferedNotify: SubscriberAdapter["record"] = async (eventType, data) => {
+        bufferedEvents.push({ eventType: eventType as string, data });
+      };
+
+      const first = await model.prompt(request, bufferedNotify, signal);
+      if (signal?.aborted || !modelResultIsIntentOnly(first)) {
+        await replayBufferedEvents(notify, bufferedEvents);
+        return first;
+      }
+
+      return model.prompt(
+        {
+          ...request,
+          messages: [
+            ...request.messages,
+            {
+              sender: "user",
+              text: INTENT_ONLY_CONTINUATION_PROMPT,
+              is_skill_injection: true,
+            },
+          ],
+        },
+        notify,
+        signal,
+      );
+    },
+  };
+}
+
+function hasOpenTasks(data: unknown): boolean {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const tasks = (data as { tasks?: unknown }).tasks;
+  if (!Array.isArray(tasks)) return false;
+  return tasks.some((task) => {
+    if (!task || typeof task !== "object") return false;
+    return (task as { status?: unknown }).status !== "completed";
+  });
+}
+
+export function messageHasOpenTaskUpdate(message: Message | undefined): boolean {
+  return (message?.tool_results ?? []).some((toolResult) => {
+    if (toolResult.tool_name.toLowerCase() !== TASK_UPDATE_TOOL_NAME) return false;
+    if (toolResult.result.status !== "success") return false;
+    return hasOpenTasks(toolResult.result.data);
+  });
+}
+
+async function replayBufferedEvents(
+  notify: SubscriberAdapter["record"],
+  events: Array<{ eventType: string; data: unknown }>,
+) {
+  for (const event of events) {
+    await notify(event.eventType as any, event.data as any);
+  }
+}
+
+export function withTaskUpdateContinuation(model: ModelAdapter): ModelAdapter {
+  return {
+    get name() {
+      return model.name;
+    },
+    setSystemPrompt(systemPrompt: string) {
+      model.setSystemPrompt(systemPrompt);
+    },
+    async prompt(request, notify, signal) {
+      if (!messageHasOpenTaskUpdate(request.messages.at(-1))) {
+        return model.prompt(request, notify, signal);
+      }
+
+      const bufferedEvents: Array<{ eventType: string; data: unknown }> = [];
+      const bufferedNotify: SubscriberAdapter["record"] = async (eventType, data) => {
+        bufferedEvents.push({ eventType: eventType as string, data });
+      };
+
+      const first = await model.prompt(request, bufferedNotify, signal);
+      if (signal?.aborted || modelResultHasToolCall(first)) {
+        await replayBufferedEvents(notify, bufferedEvents);
+        return first;
+      }
+
+      return model.prompt(
+        {
+          ...request,
+          messages: [
+            ...request.messages,
+            {
+              sender: "user",
+              text: TASK_UPDATE_CONTINUATION_PROMPT,
+              is_skill_injection: true,
+            },
+          ],
+        },
+        notify,
+        signal,
+      );
+    },
+  };
+}
+
+function wrapGlorpModel(model: ModelAdapter): ModelAdapter {
+  return withIntentOnlyContinuation(withTaskUpdateContinuation(withEmptyResponseRetry(model)));
+}
+
+function messagesToChatTurns(sessionId: string, messages: Message[]): ChatTurn[] {
+  const visible = messages.filter(isVisibleTranscriptMessage);
+  const now = Date.now();
+  return visible.map((message, index) => ({
+    id: message.id ?? `h_${sessionId}_${index}`,
+    kind: message.sender === "user" ? "user" : "agent",
+    text: visibleMessageText(message),
+    createdAt: now - (visible.length - index),
+  }));
+}
+
+function truncateForTitle(text: string): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length <= TITLE_MAX_CHARS_PER_MESSAGE
+    ? clean
+    : `${clean.slice(0, TITLE_MAX_CHARS_PER_MESSAGE - 1)}...`;
+}
+
+export function cleanSessionTitle(raw: string): string | null {
+  let title = raw
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .find((line) => line.trim()) ?? "";
+  title = title
+    .replace(/^title\s*:\s*/i, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!title) return null;
+  if (title.length > 60) title = title.slice(0, 60).replace(/\s+\S*$/, "").trim();
+  return title || null;
+}
+
+export async function generateSessionTitle(
+  model: ModelAdapter,
+  messages: Message[],
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const visible = messages.filter(isVisibleTranscriptMessage);
+  if (!visible.some((m) => m.sender === "user")) return null;
+  const transcript = visible
+    .slice(0, TITLE_MAX_MESSAGES)
+    .map((m) => `${m.sender === "user" ? "User" : "Assistant"}: ${truncateForTitle(visibleMessageText(m))}`)
+    .join("\n");
+  const result = await model.prompt(
+    {
+      messages: [
+        {
+          sender: "user",
+          text:
+            "Generate a concise chat title for this coding conversation.\n" +
+            "Rules: return only the title, no quotes, no markdown, no trailing punctuation, 3-7 words, max 60 characters.\n\n" +
+            transcript,
+        },
+      ],
+    },
+    async () => {},
+    signal,
+  );
+  return cleanSessionTitle(result.messages.at(-1)?.text ?? "");
 }
 
 export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> {
   const dataDir = opts.dataDir ?? path.join(os.homedir(), ".glorp");
   const store = new GlorpStore(opts.sessionId, dataDir);
+  let sessionTitle = await store.getTitle();
   if (process.env.GLORP_DEBUG) console.error("[boot] store ready");
   const credentials = opts.credentials ?? new CredentialsStore(dataDir);
   const picked = await pickModel({
@@ -198,7 +580,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     model: opts.model,
     credentials,
   });
-  let model: ModelAdapter = picked.adapter;
+  let model: ModelAdapter = wrapGlorpModel(picked.adapter);
   let modelLabel = picked.label;
   if (process.env.GLORP_DEBUG) console.error("[boot] model ready:", modelLabel);
   const displayManager = new Displaymanager();
@@ -249,14 +631,39 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   let abortController: AbortController | null = null;
   const activeTools = new Map<string, ToolEvent>();
   let streamingTextBuffer = "";
+  let compactionInFlight = false;
+  let suppressCompactionResponse = false;
+  let requestAborted = false;
+  let emittedAgentTextsThisRequest = new Set<string>();
+  let titleGeneration: Promise<void> | null = null;
+  let titleAbortController: AbortController | null = null;
+  let requestInFlight = false;
   let unkIdCounter = 0;
   const synthesizeId = () => `_unk_${++unkIdCounter}`;
+  const normaliseAgentText = (text: string) => text.replace(/\s+/g, " ").trim();
+  const emitAgentTurn = (text: string) => {
+    const key = normaliseAgentText(text);
+    if (!key || emittedAgentTextsThisRequest.has(key)) return false;
+    emittedAgentTextsThisRequest.add(key);
+    bridge.emit({
+      type: "turn",
+      turn: {
+        id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        kind: "agent",
+        text,
+        createdAt: Date.now(),
+      },
+    });
+    return true;
+  };
 
   const subscriber: SubscriberAdapter = {
     async record(event_type, data) {
       switch (event_type) {
         case "text_delta": {
           const { text } = data as { text: string };
+          if (requestAborted) break;
+          if (compactionInFlight || suppressCompactionResponse) break;
           streamingTextBuffer += text;
           bridge.emit({ type: "text_delta", text });
           break;
@@ -268,21 +675,26 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
           // adapters emit only `model_response`. Handling them separately
           // keeps both paths clean.
           const d = data as { text: string };
+          if (requestAborted) {
+            streamingTextBuffer = "";
+            bridge.emit({ type: "text_clear" });
+            void refreshStats();
+            break;
+          }
+          if (compactionInFlight || suppressCompactionResponse) {
+            streamingTextBuffer = "";
+            suppressCompactionResponse = false;
+            bridge.emit({ type: "text_clear" });
+            void refreshStats();
+            break;
+          }
           if (streamingTextBuffer || d.text) {
             const finalText = d.text || streamingTextBuffer;
             // Clear the streaming row BEFORE appending the final turn so
             // the UI doesn't briefly render both at once.
             bridge.emit({ type: "text_clear" });
             streamingTextBuffer = "";
-            bridge.emit({
-              type: "turn",
-              turn: {
-                id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-                kind: "agent",
-                text: finalText,
-                createdAt: Date.now(),
-              },
-            });
+            emitAgentTurn(finalText);
           }
           void refreshStats();
           break;
@@ -290,35 +702,29 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         case "model_response": {
           // Sync (non-streaming) adapter only — emit if streaming buffer is empty.
           const d = data as { text: string };
+          if (requestAborted) {
+            void refreshStats();
+            break;
+          }
+          if (compactionInFlight || suppressCompactionResponse) {
+            suppressCompactionResponse = false;
+            void refreshStats();
+            break;
+          }
           if (!streamingTextBuffer && d.text) {
-            bridge.emit({
-              type: "turn",
-              turn: {
-                id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-                kind: "agent",
-                text: d.text,
-                createdAt: Date.now(),
-              },
-            });
+            emitAgentTurn(d.text);
           }
           void refreshStats();
           break;
         }
         case "tool_use": {
           const d = data as { id: string; name: string; input: unknown };
+          if (requestAborted) break;
           // Collapse the streaming buffer first so a tool card never appears
           // mid-stream alongside still-rendering text.
           if (streamingTextBuffer) {
             bridge.emit({ type: "text_clear" });
-            bridge.emit({
-              type: "turn",
-              turn: {
-                id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-                kind: "agent",
-                text: streamingTextBuffer,
-                createdAt: Date.now(),
-              },
-            });
+            emitAgentTurn(streamingTextBuffer);
             streamingTextBuffer = "";
           }
           const ev: ToolEvent = {
@@ -338,6 +744,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
             call_id?: string;
             result: ToolResultData;
           };
+          if (requestAborted) break;
           // If call_id is missing, look up the most recent active tool by
           // name rather than synthesising a fresh id (which would strand
           // the matching `tool_use` event).
@@ -371,11 +778,19 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
           break;
         }
         case "compaction_start": {
+          compactionInFlight = true;
+          suppressCompactionResponse = true;
+          streamingTextBuffer = "";
+          bridge.emit({ type: "text_clear" });
           bridge.emit({ type: "compaction", phase: "start" });
           break;
         }
         case "compaction_end": {
+          compactionInFlight = false;
           bridge.emit({ type: "compaction", phase: "end" });
+          setTimeout(() => {
+            if (!compactionInFlight) suppressCompactionResponse = false;
+          }, 1000);
           void refreshStats();
           break;
         }
@@ -459,6 +874,53 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     } catch {}
   }
 
+  async function hydrateUi() {
+    const messages = await store.getMessages();
+    sessionTitle = await store.getTitle();
+    bridge.emit({
+      type: "hydrate",
+      state: {
+        turns: messagesToChatTurns(opts.sessionId, messages),
+        title: sessionTitle,
+      },
+    });
+    await refreshStats();
+    await refreshTasks();
+    await refreshInbox();
+    scheduleTitleGeneration();
+  }
+
+  async function cancelTitleGeneration() {
+    if (!titleGeneration) return;
+    titleAbortController?.abort();
+    try {
+      await titleGeneration;
+    } catch {}
+  }
+
+  function scheduleTitleGeneration() {
+    if (sessionTitle || titleGeneration || requestInFlight) return;
+    titleAbortController = new AbortController();
+    const timeout = setTimeout(() => titleAbortController?.abort(), TITLE_MODEL_TIMEOUT_MS);
+    titleGeneration = (async () => {
+      try {
+        const messages = await store.getMessages();
+        const title = await generateSessionTitle(model, messages, titleAbortController?.signal);
+        if (!title || sessionTitle) return;
+        sessionTitle = title;
+        await store.setTitle(title);
+        bridge.emit({ type: "title", title });
+      } catch {
+        // Title generation is best-effort; chat should never fail because
+        // a metadata call timed out or the model rejected the request.
+      } finally {
+        clearTimeout(timeout);
+        titleAbortController = null;
+        titleGeneration = null;
+      }
+    })();
+  }
+
   // Build the main agent.
   const builder = new Glove({
     store,
@@ -471,6 +933,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       compaction_context_limit: CONTEXT_LIMIT,
       max_turns: 200,
     },
+    enableToolResultSummary: true,
   });
 
   builder.addSubscriber(subscriber);
@@ -524,14 +987,6 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
 
   builder.defineHook("clear", async ({ controls }) => {
     await controls.forceCompaction();
-    return {
-      shortCircuit: {
-        message: {
-          sender: "agent",
-          text: "*sweeps the workspace clean with a tentacle* — context compacted. Fresh slate, friend-shape.",
-        },
-      },
-    };
   });
 
   builder.defineHook("transmissions", async () => ({
@@ -569,10 +1024,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   }
 
   for (const skill of diskExtensions.skills) {
-    const refsHint = skill.referencePaths.length
-      ? `\n\n---\nReference files in this skill (use the \`read\` tool):\n${skill.referencePaths.map((p) => `  ${p}`).join("\n")}`
-      : "";
-    const payload = `${skill.body}${refsHint}`;
+    const payload = skillPayload(skill);
     builder.defineSkill({
       name: skill.name,
       description: skill.description,
@@ -615,8 +1067,9 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   // Fold the task + inbox tools now that the Context exists. createTaskTool /
   // createInboxTool return raw `Tool<I>` objects; convert to GloveFoldArgs
   // (different field names: `input_schema` → `inputSchema`, `run` → `do`).
-  agent.fold(toolToFoldArgs(createTaskTool(inboxContext)));
+  agent.fold(taskToolToFoldArgs(createTaskTool(inboxContext)));
   agent.fold(toolToFoldArgs(createInboxTool(inboxContext)));
+  agent.fold(inboxManageTool(inboxContext));
   fleet.setInboxResolver(async (itemId, response, status) => {
     // Inbox status enum is "pending" | "resolved" | "consumed". Fleet
     // failures are still "resolved" from the inbox's perspective — the
@@ -663,20 +1116,28 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         ["reviewer", { description: "review a recent change for issues" }],
       ] as const);
 
+  const exposedSkillHints = skillEntries
+    .filter(([, s]) => (s as { exposeToAgent?: boolean })?.exposeToAgent !== false)
+    .map(([name, s]) => ({
+      name,
+      description: (s as { description?: string })?.description ?? "skill",
+    }));
   const slashHints: Array<{ name: string; description: string }> = [
     ...hookNames.map((name) => ({
       name: `/${name}`,
       description: HOOK_DESCRIPTIONS[name] ?? "hook",
     })),
-    ...skillEntries
-      .filter(([, s]) => (s as { exposeToAgent?: boolean })?.exposeToAgent !== false)
-      .map(([name, s]) => ({
-        name: `/${name}`,
-        description: (s as { description?: string })?.description ?? "skill",
-      })),
+    ...exposedSkillHints.map((s) => ({
+      name: `/${s.name}`,
+      description: s.description,
+    })),
     { name: "/help", description: "show commands" },
     { name: "/quit", description: "exit glorp" },
   ];
+  const skillHints = exposedSkillHints.map((s) => ({
+    name: `$${s.name}`,
+    description: s.description,
+  }));
   const mentionHints = subAgentEntries.map(([name, s]) => ({
     name: `@${name}`,
     description: (s as { description?: string })?.description ?? "subagent",
@@ -690,11 +1151,16 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     sessionId: opts.sessionId,
     extensions: {
       slash: slashHints,
+      skills: skillHints,
       mentions: mentionHints,
     },
     get modelLabel() {
       return modelLabel;
     },
+    get title() {
+      return sessionTitle;
+    },
+    hydrateUi,
     onLabelChange(fn) {
       labelListeners.add(fn);
       return () => {
@@ -730,8 +1196,9 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       // Hot-swap is only safe when no request is in flight; abort any
       // pending one first so the new model owns the next prompt.
       abortController?.abort();
-      agent.setModel(next.adapter);
-      model = next.adapter;
+      await cancelTitleGeneration();
+      model = wrapGlorpModel(next.adapter);
+      agent.setModel(model);
       modelLabel = next.label;
       credentials.setActive(profileId);
       for (const fn of labelListeners) {
@@ -742,7 +1209,11 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     },
     async send(text: string) {
       abortController?.abort();
+      await cancelTitleGeneration();
       abortController = new AbortController();
+      requestAborted = false;
+      requestInFlight = true;
+      emittedAgentTextsThisRequest = new Set();
       bridge.emit({ type: "busy", busy: true });
       bridge.emit({
         type: "turn",
@@ -754,8 +1225,22 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         },
       });
       try {
-        await agent.processRequest(text, abortController.signal);
+        const result = await agent.processRequest(text, abortController.signal);
+        if (!requestAborted && !modelResultHasVisibleAgentOutput(result)) {
+          bridge.emit({
+            type: "turn",
+            turn: {
+              id: `s_${Date.now().toString(36)}`,
+              kind: "system",
+              text: "*model returned no visible response after retry*",
+              createdAt: Date.now(),
+            },
+          });
+        }
       } catch (err: any) {
+        if (requestAborted) {
+          return;
+        }
         if (err?.name === "AbortError") {
           bridge.emit({
             type: "turn",
@@ -770,17 +1255,37 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
           bridge.emit({ type: "error", message: err?.message ?? String(err) });
         }
       } finally {
+        requestInFlight = false;
         bridge.emit({ type: "busy", busy: false });
         void refreshStats();
         void refreshTasks();
         void refreshInbox();
+        if (!requestAborted) scheduleTitleGeneration();
       }
     },
     abort() {
+      if (!abortController || abortController.signal.aborted) return;
+      requestAborted = true;
       abortController?.abort();
+      requestInFlight = false;
+      streamingTextBuffer = "";
+      activeTools.clear();
+      bridge.emit({ type: "text_clear" });
+      bridge.emit({ type: "busy", busy: false });
+      bridge.emit({
+        type: "turn",
+        turn: {
+          id: `s_${Date.now().toString(36)}`,
+          kind: "system",
+          text: "*aborted by friend-shape*",
+          createdAt: Date.now(),
+        },
+      });
     },
     async shutdown() {
       abortController?.abort();
+      await cancelTitleGeneration();
+      await store.flush();
       await fleet.stop();
     },
   };

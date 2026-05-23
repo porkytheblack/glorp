@@ -1,7 +1,17 @@
 import { z } from "zod";
 import type { GloveFoldArgs } from "glove-core";
+import { compactText } from "./summaries.ts";
 
 const MAX_BYTES = 512 * 1024;
+
+interface WebFetchSummaryArgs {
+  url: string;
+  mode: "text" | "raw";
+  contentType: string | null;
+  bytes: number;
+  truncated: boolean;
+  preview: string;
+}
 
 function stripTags(html: string): string {
   return html
@@ -52,6 +62,14 @@ export const webFetchTool: GloveFoldArgs<{
       return {
         status: "success",
         data: out + (truncated ? `\n... [truncated at ${MAX_BYTES} bytes]` : ""),
+        generateSummaryArgs: {
+          url: input.url,
+          mode: input.mode ?? "text",
+          contentType: res.headers.get("content-type"),
+          bytes: buf.byteLength,
+          truncated,
+          preview: compactText(out, 24, 4000),
+        } satisfies WebFetchSummaryArgs,
         renderData: {
           url: input.url,
           contentType: res.headers.get("content-type"),
@@ -62,5 +80,15 @@ export const webFetchTool: GloveFoldArgs<{
     } catch (err: any) {
       return { status: "error", data: null, message: `fetch failed: ${err.message}` };
     }
+  },
+  generateToolSummary: async (args) => {
+    const a = args as WebFetchSummaryArgs;
+    return [
+      `Fetched ${a.url} (${a.mode}, ${a.contentType ?? "unknown content-type"}, ${a.bytes} bytes${
+        a.truncated ? `, truncated at ${MAX_BYTES} bytes` : ""
+      }).`,
+      a.preview ? `Preview:\n${a.preview}` : "",
+      "Full prior fetch body omitted; fetch again if exact text is needed.",
+    ].filter(Boolean).join("\n");
   },
 };

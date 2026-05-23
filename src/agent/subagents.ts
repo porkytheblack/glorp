@@ -34,6 +34,7 @@ export function plannerSubAgent(deps: SubAgentDeps): DefineSubAgentArgs {
           compaction_instructions: "Preserve the plan and any open questions.",
           max_turns: 6,
         },
+        enableToolResultSummary: true,
       })
         .fold(readTool(deps.workspace))
         .fold(grepTool(deps.workspace))
@@ -67,6 +68,7 @@ export function researcherSubAgent(deps: SubAgentDeps): DefineSubAgentArgs {
           compaction_instructions: "Preserve findings and citations; drop search-step chatter.",
           max_turns: 12,
         },
+        enableToolResultSummary: true,
       })
         .fold(readTool(deps.workspace))
         .fold(grepTool(deps.workspace))
@@ -102,6 +104,7 @@ export function reviewerSubAgent(deps: SubAgentDeps): DefineSubAgentArgs {
           compaction_instructions: "Preserve findings; drop file-reading narration.",
           max_turns: 8,
         },
+        enableToolResultSummary: true,
       })
         .fold(readTool(deps.workspace))
         .fold(grepTool(deps.workspace))

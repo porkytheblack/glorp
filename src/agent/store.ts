@@ -12,6 +12,8 @@ import * as path from "node:path";
 
 interface Snapshot {
   messages: Message[];
+  title?: string | null;
+  titleUpdatedAt?: string | null;
   tokensIn: number;
   tokensOut: number;
   turnCount: number;
@@ -36,6 +38,8 @@ export class GlorpStore implements StoreAdapter {
   private dirty = false;
   private writePromise: Promise<void> | null = null;
   private persistSubAgents: boolean;
+  private title: string | null = null;
+  private titleUpdatedAt: string | null = null;
 
   constructor(identifier: string, dataDir: string, persistSubAgents = false) {
     this.identifier = identifier;
@@ -51,6 +55,8 @@ export class GlorpStore implements StoreAdapter {
     try {
       const raw = fs.readFileSync(this.filePath, "utf-8");
       const snap = JSON.parse(raw) as Snapshot;
+      this.title = snap.title ?? null;
+      this.titleUpdatedAt = snap.titleUpdatedAt ?? null;
       // Replay into the inner MemoryStore so we get its semantics for free.
       void this.inner.appendMessages(snap.messages ?? []);
       void this.inner.addTokens({
@@ -85,6 +91,8 @@ export class GlorpStore implements StoreAdapter {
           this.dirty = false;
           const snap: Snapshot = {
             messages: await this.inner.getMessages(),
+            title: this.title,
+            titleUpdatedAt: this.titleUpdatedAt,
             tokensIn: await this.inner.getTokenCount(),
             tokensOut: 0,
             turnCount: await this.inner.getTurnCount(),
@@ -106,8 +114,29 @@ export class GlorpStore implements StoreAdapter {
     })();
   }
 
+  async flush(): Promise<void> {
+    while (this.writePromise) {
+      await this.writePromise;
+    }
+    if (this.dirty) {
+      this.scheduleFlush();
+      if (this.writePromise) await this.writePromise;
+    }
+  }
+
   async getMessages(): Promise<Message[]> {
     return this.inner.getMessages();
+  }
+
+  async getTitle(): Promise<string | null> {
+    return this.title;
+  }
+
+  async setTitle(title: string | null): Promise<void> {
+    const clean = title?.replace(/\s+/g, " ").trim() || null;
+    this.title = clean;
+    this.titleUpdatedAt = clean ? new Date().toISOString() : null;
+    this.scheduleFlush();
   }
 
   async appendMessages(msgs: Message[]): Promise<void> {

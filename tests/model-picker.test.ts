@@ -15,6 +15,7 @@ const KEY_VARS = [
   "OPENROUTER_API_KEY",
   "GEMINI_API_KEY",
   "GROQ_API_KEY",
+  "MIMO_API_KEY",
 ];
 
 beforeEach(() => {
@@ -115,13 +116,23 @@ describe("pickModel", () => {
     expect(picked.model).toMatch(/claude/);
   });
 
-  test("env-var precedence is anthropic > openai > openrouter > gemini > groq", async () => {
+  test("env-var precedence is anthropic > openai > openrouter > gemini > groq > mimo", async () => {
     process.env.OPENAI_API_KEY = "k";
     process.env.OPENROUTER_API_KEY = "k";
     process.env.GROQ_API_KEY = "k";
+    process.env.MIMO_API_KEY = "k";
     const credentials = new CredentialsStore(dataDir);
     const picked = await pickModel({ credentials });
     expect(picked.providerId).toBe("openai");
+  });
+
+  test("mimo env fallback uses the dedicated MiMo adapter", async () => {
+    process.env.MIMO_API_KEY = "k";
+    const credentials = new CredentialsStore(dataDir);
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("mimo");
+    expect(picked.model).toBe("mimo-v2.5");
+    expect(picked.adapter.name).toBe("mimo:mimo-v2.5");
   });
 
   test("throws when no config and no env", async () => {
@@ -151,6 +162,89 @@ describe("pickModel", () => {
     // The adapter is constructed but we don't try to call it (would 404).
     expect(picked.adapter).toBeDefined();
     expect(picked.adapter.name).toBeDefined();
+  });
+
+  test("custom Xiaomi endpoint is routed through the MiMo adapter", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-xiaomi",
+      baseURL: "https://api.xiaomimimo.com/v1",
+      apiKey: "sk-custom",
+    });
+    credentials.upsertProfile({
+      id: "custom-xiaomi__mimo",
+      label: "xiaomi · mimo",
+      providerId: "custom-xiaomi",
+      model: "mimo-v2.5-pro",
+    });
+    credentials.setActive("custom-xiaomi__mimo");
+
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("custom-xiaomi");
+    expect(picked.adapter.name).toBe("mimo:mimo-v2.5-pro");
+  });
+
+  test("custom provider can explicitly select the MiMo adapter", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-private-mimo",
+      adapter: "mimo",
+      baseURL: "https://mimo-proxy.example/v1",
+      apiKey: "sk-custom",
+    });
+    credentials.upsertProfile({
+      id: "custom-private-mimo__model",
+      label: "private mimo",
+      providerId: "custom-private-mimo",
+      model: "mimo-v2.5-pro",
+    });
+    credentials.setActive("custom-private-mimo__model");
+
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("custom-private-mimo");
+    expect(picked.adapter.name).toBe("mimo:mimo-v2.5-pro");
+  });
+
+  test("custom provider can force OpenAI-compatible even for a Xiaomi-looking URL", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-openai-shim",
+      adapter: "openai-compat",
+      baseURL: "https://api.xiaomimimo.com/v1",
+      apiKey: "sk-custom",
+    });
+    credentials.upsertProfile({
+      id: "custom-openai-shim__model",
+      label: "shim",
+      providerId: "custom-openai-shim",
+      model: "mimo-v2.5-pro",
+    });
+    credentials.setActive("custom-openai-shim__model");
+
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("custom-openai-shim");
+    expect(picked.adapter.name).toBe("openai-compat:mimo-v2.5-pro");
+  });
+
+  test("known mimo profile uses the dedicated MiMo adapter", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({ type: "known", id: "mimo", apiKey: "k" });
+    credentials.upsertProfile({
+      id: "mimo__pro",
+      label: "mimo · pro",
+      providerId: "mimo",
+      model: "mimo-v2.5-pro",
+      reasoning: { kind: "effort", effort: "high" },
+    });
+    credentials.setActive("mimo__pro");
+
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("mimo");
+    expect(picked.adapter.name).toBe("mimo:mimo-v2.5-pro");
+    expect(picked.label).toContain("high");
   });
 
   test("reasoning effort is included in the label and on the picked profile", async () => {

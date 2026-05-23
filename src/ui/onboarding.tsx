@@ -2,13 +2,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import {
   CredentialsStore,
+  CUSTOM_PROVIDER_ADAPTERS,
   KNOWN_PROVIDERS,
   findKnownProvider,
   modelAcceptsReasoning,
   reasoningKindFor,
   reasoningOptionsFor,
+  reasoningProviderId,
 } from "../agent/credentials.ts";
 import type {
+  CustomProviderAdapter,
   ModelProfile,
   ProviderConfig,
   ReasoningConfig,
@@ -20,7 +23,8 @@ type Step =
   | { kind: "enter-key"; providerId: string }
   | { kind: "custom-name" }
   | { kind: "custom-baseurl"; name: string }
-  | { kind: "custom-apikey"; name: string; baseURL: string }
+  | { kind: "custom-adapter"; name: string; baseURL: string }
+  | { kind: "custom-apikey"; name: string; baseURL: string; adapter: CustomProviderAdapter }
   | { kind: "pick-model"; providerId: string }
   | { kind: "pick-reasoning"; providerId: string; model: string }
   | { kind: "done" };
@@ -104,7 +108,7 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
             onChange={setInput}
             onSubmit={(baseURL) => {
               setInput("");
-              setStep({ kind: "custom-apikey", name: step.name, baseURL });
+              setStep({ kind: "custom-adapter", name: step.name, baseURL });
             }}
             onBack={() => {
               setInput("");
@@ -112,10 +116,24 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
             }}
           />
         )}
+        {step.kind === "custom-adapter" && (
+          <CustomAdapter
+            name={step.name}
+            baseURL={step.baseURL}
+            onPick={(adapter) => {
+              setStep({ kind: "custom-apikey", name: step.name, baseURL: step.baseURL, adapter });
+            }}
+            onBack={() => {
+              setInput("");
+              setStep({ kind: "custom-baseurl", name: step.name });
+            }}
+          />
+        )}
         {step.kind === "custom-apikey" && (
           <CustomApiKey
             name={step.name}
             baseURL={step.baseURL}
+            adapter={step.adapter}
             value={input}
             onChange={setInput}
             onSubmit={(apiKey) => {
@@ -123,6 +141,7 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
               const cfg: ProviderConfig = {
                 type: "custom",
                 id: providerId,
+                adapter: step.adapter,
                 baseURL: step.baseURL,
                 apiKey: apiKey.trim() || undefined,
               };
@@ -132,15 +151,18 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
             }}
             onBack={() => {
               setInput("");
-              setStep({ kind: "custom-baseurl", name: step.name });
+              setStep({ kind: "custom-adapter", name: step.name, baseURL: step.baseURL });
             }}
           />
         )}
         {step.kind === "pick-model" && (
           <PickModel
             providerId={step.providerId}
+            provider={credentials.getProvider(step.providerId)}
             onPick={(model) => {
-              if (modelAcceptsReasoning(step.providerId, model)) {
+              const provider = credentials.getProvider(step.providerId);
+              const reasoningId = reasoningProviderId(step.providerId, provider);
+              if (modelAcceptsReasoning(reasoningId, model)) {
                 setStep({ kind: "pick-reasoning", providerId: step.providerId, model });
               } else {
                 finalize(credentials, step.providerId, model, { kind: "off" }, onComplete);
@@ -149,7 +171,12 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
             onBack={() => {
               const provider = credentials.getProvider(step.providerId);
               if (provider?.type === "custom") {
-                setStep({ kind: "custom-apikey", name: step.providerId.replace(/^custom-/, ""), baseURL: provider.baseURL ?? "" });
+                setStep({
+                  kind: "custom-apikey",
+                  name: step.providerId.replace(/^custom-/, ""),
+                  baseURL: provider.baseURL ?? "",
+                  adapter: provider.adapter ?? "openai-compat",
+                });
               } else {
                 setStep({ kind: "enter-key", providerId: step.providerId });
               }
@@ -159,6 +186,7 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
         {step.kind === "pick-reasoning" && (
           <PickReasoning
             providerId={step.providerId}
+            provider={credentials.getProvider(step.providerId)}
             model={step.model}
             onPick={(reasoning) => {
               finalize(credentials, step.providerId, step.model, reasoning, onComplete);
@@ -314,7 +342,7 @@ function CustomBaseURL(props: {
       <text fg={theme.accent}>
         <strong>3. {props.name} — base URL</strong>
       </text>
-      <text fg={theme.textMuted}>OpenAI-compatible endpoint (e.g. https://api.example.com/v1).</text>
+      <text fg={theme.textMuted}>Endpoint URL (e.g. https://api.example.com/v1).</text>
       <box marginTop={1} border borderColor={theme.borderActive} padding={0} paddingX={1} height={3}>
         <text fg={theme.accent}>
           <strong>›</strong>
@@ -335,9 +363,39 @@ function CustomBaseURL(props: {
   );
 }
 
+function CustomAdapter(props: {
+  name: string;
+  baseURL: string;
+  onPick: (adapter: CustomProviderAdapter) => void;
+  onBack: () => void;
+}) {
+  const options = CUSTOM_PROVIDER_ADAPTERS.map((adapter) => ({
+    name: adapter.label,
+    value: adapter.id,
+    description: adapter.description,
+  }));
+  return (
+    <box flexDirection="column">
+      <text fg={theme.accent}>
+        <strong>4. {props.name} — adapter</strong>
+      </text>
+      <text fg={theme.textMuted}>Endpoint: {props.baseURL}</text>
+      <box marginTop={1}>
+        <select
+          options={options}
+          focused
+          height={Math.min(8, options.length + 2)}
+          onSelect={(_i: number, opt: any) => opt && props.onPick(opt.value)}
+        />
+      </box>
+    </box>
+  );
+}
+
 function CustomApiKey(props: {
   name: string;
   baseURL: string;
+  adapter: CustomProviderAdapter;
   value: string;
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
@@ -346,10 +404,10 @@ function CustomApiKey(props: {
   return (
     <box flexDirection="column">
       <text fg={theme.accent}>
-        <strong>4. {props.name} — API key (optional)</strong>
+        <strong>5. {props.name} — API key (optional)</strong>
       </text>
       <text fg={theme.textMuted}>
-        Leave empty for unauthenticated endpoints. Endpoint: {props.baseURL}
+        Leave empty for unauthenticated endpoints. Adapter: {adapterLabel(props.adapter)} · Endpoint: {props.baseURL}
       </text>
       <box marginTop={1} border borderColor={theme.borderActive} padding={0} paddingX={1} height={3}>
         <text fg={theme.accent}>
@@ -371,24 +429,40 @@ function CustomApiKey(props: {
   );
 }
 
-function PickModel(props: { providerId: string; onPick: (model: string) => void; onBack: () => void }) {
+function PickModel(props: {
+  providerId: string;
+  provider?: ProviderConfig;
+  onPick: (model: string) => void;
+  onBack: () => void;
+}) {
   const meta = findKnownProvider(props.providerId);
+  const customDefaults = useMemo(
+    () =>
+      props.provider?.type === "custom" && props.provider.adapter === "mimo"
+        ? (findKnownProvider("mimo")?.defaultModels ?? [])
+        : [],
+    [props.provider?.adapter, props.provider?.type],
+  );
   const [typed, setTyped] = useState("");
-  const [mode, setMode] = useState<"pick" | "type">(meta ? "pick" : "type");
+  const [mode, setMode] = useState<"pick" | "type">(meta || customDefaults.length > 0 ? "pick" : "type");
   const options = useMemo(() => {
     const base =
-      meta?.defaultModels.map((m) => ({ name: m, value: m, description: "" })) ?? [];
-    if (meta) base.push({ name: "(type a custom model name)", value: "__type__", description: "" });
+      meta?.defaultModels.map((m) => ({ name: m, value: m, description: "" })) ??
+      customDefaults.map((m) => ({ name: m, value: m, description: "" }));
+    if (meta || customDefaults.length > 0) {
+      base.push({ name: "(type a custom model name)", value: "__type__", description: "" });
+    }
     return base;
-  }, [meta]);
+  }, [customDefaults, meta]);
 
   return (
     <box flexDirection="column">
       <text fg={theme.accent}>
-        <strong>{meta ? "3" : "5"}. Pick a model</strong>
+        <strong>{meta ? "3" : "6"}. Pick a model</strong>
       </text>
       <text fg={theme.textMuted}>
         Provider: {meta?.label ?? props.providerId}
+        {props.provider?.type === "custom" ? ` · adapter: ${adapterLabel(props.provider.adapter)}` : ""}
       </text>
       {mode === "pick" && (
         <box marginTop={1}>
@@ -431,6 +505,7 @@ function PickModel(props: { providerId: string; onPick: (model: string) => void;
 
 function PickReasoning(props: {
   providerId: string;
+  provider?: ProviderConfig;
   model: string;
   onPick: (r: ReasoningConfig) => void;
   onBack: () => void;
@@ -438,11 +513,12 @@ function PickReasoning(props: {
   // Provider-specific options: GPT/o-series get effort levels, Anthropic
   // gets budget_tokens, OpenRouter gets the reasoningObject, Qwen3 gets
   // enable_thinking + budget. The select shows whichever set applies.
+  const effectiveProviderId = reasoningProviderId(props.providerId, props.provider);
   const reasoningOptions = useMemo(
-    () => reasoningOptionsFor(props.providerId, props.model),
-    [props.providerId, props.model],
+    () => reasoningOptionsFor(effectiveProviderId, props.model),
+    [effectiveProviderId, props.model],
   );
-  const kind = reasoningKindFor(props.providerId, props.model);
+  const kind = reasoningKindFor(effectiveProviderId, props.model);
   const opts = reasoningOptions.map((o, i) => ({
     name: o.label,
     value: String(i),
@@ -451,7 +527,7 @@ function PickReasoning(props: {
   return (
     <box flexDirection="column">
       <text fg={theme.accent}>
-        <strong>4. Reasoning ({kind ?? "n/a"})</strong>
+        <strong>{props.provider?.type === "custom" ? "7" : "4"}. Reasoning ({kind ?? "n/a"})</strong>
       </text>
       <text fg={theme.textMuted}>
         {props.model} on {props.providerId} accepts a thinking hint. You can change this later with Ctrl+M.
@@ -490,7 +566,13 @@ function finalize(
   onComplete: (p: ModelProfile) => void,
 ): void {
   const known = findKnownProvider(providerId);
-  const allModels = new Set<string>([model, ...(known?.defaultModels ?? [])]);
+  const provider = credentials.getProvider(providerId);
+  const customDefaultModels =
+    provider?.type === "custom" && provider.adapter === "mimo"
+      ? (findKnownProvider("mimo")?.defaultModels ?? [])
+      : [];
+  const effectiveReasoningProviderId = reasoningProviderId(providerId, provider);
+  const allModels = new Set<string>([model, ...(known?.defaultModels ?? []), ...customDefaultModels]);
   let activeProfile: ModelProfile | null = null;
   const now = new Date().toISOString();
 
@@ -498,7 +580,7 @@ function finalize(
     // Only propagate the reasoning config when the kind matches what the
     // model accepts. Otherwise default to off.
     const isChosen = m === model;
-    const supports = reasoningKindFor(providerId, m);
+    const supports = reasoningKindFor(effectiveReasoningProviderId, m);
     const matchesKind =
       reasoning.kind !== "off" && supports !== null && supports === reasoning.kind;
     const r: ReasoningConfig = isChosen
@@ -534,6 +616,10 @@ function reasoningLabelFor(r: ReasoningConfig): string {
   if (r.kind === "reasoningObject") return r.effort;
   if (r.kind === "qwenThinking") return r.enabled ? "on" : "off";
   return "";
+}
+
+function adapterLabel(adapter: CustomProviderAdapter | undefined): string {
+  return CUSTOM_PROVIDER_ADAPTERS.find((a) => a.id === (adapter ?? "openai-compat"))?.label ?? "OpenAI-compatible";
 }
 
 // ====================================================================

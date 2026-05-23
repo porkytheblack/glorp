@@ -71,7 +71,7 @@ export const askChoiceTool: GloveFoldArgs<{
 }> = {
   name: "ask_choice",
   description:
-    "Ask the user to pick ONE option from a list. Use when several distinct routes are possible and the user's preference can't be inferred. Returns the chosen option's `value` (or `label` if value was omitted).",
+    "Ask the user to pick ONE option from a list. The UI always also accepts a free-form answer, so users can provide something outside the listed options. Use when several distinct routes are possible and the user's preference can't be inferred. Returns the chosen option's `value` (or `label` if value was omitted), or the user's free-form text.",
   inputSchema: z.object({
     question: z.string().min(1).describe("Prompt shown above the list"),
     options: z

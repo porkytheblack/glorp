@@ -6,6 +6,7 @@ import { theme } from "./theme.ts";
 interface Props {
   request: PermissionRequest;
   onResolve: (allow: boolean) => void;
+  onReject?: (reason?: string) => void;
 }
 
 /**
@@ -16,14 +17,15 @@ interface Props {
  *
  *   y / a   — allow (remembers)
  *   n / d   — deny (remembers)
- *   esc     — deny (same as n)
+ *   esc     — cancel
  */
-export function PermissionPrompt({ request, onResolve }: Props) {
+export function PermissionPrompt({ request, onResolve, onReject }: Props) {
   const { width, height } = useTerminalDimensions();
 
   useKeyboard((key) => {
     if (key.name === "y" || key.name === "a" || key.name === "return") onResolve(true);
-    else if (key.name === "n" || key.name === "d" || key.name === "escape") onResolve(false);
+    else if (key.name === "n" || key.name === "d") onResolve(false);
+    else if (key.name === "escape") onReject?.("cancelled");
   });
 
   const panelW = Math.min(96, Math.max(60, width - 8));
@@ -65,7 +67,7 @@ export function PermissionPrompt({ request, onResolve }: Props) {
         </box>
         <box marginTop={1} flexDirection="row">
           <text fg={theme.textMuted}>
-            <span fg={theme.success}>y/a/enter</span> allow always   <span fg={theme.error}>n/d/esc</span> deny always
+            <span fg={theme.success}>y/a/enter</span> allow always   <span fg={theme.error}>n/d</span> deny always   <span fg={theme.error}>esc</span> cancel
           </text>
         </box>
         <text fg={theme.textDim}>your choice is remembered. revoke later with Ctrl+P.</text>
