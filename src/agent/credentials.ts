@@ -196,6 +196,12 @@ export interface ModelProfile {
   reasoning?: ReasoningConfig | ReasoningEffort;
   /** Timestamp of last use — drives default sort order. */
   lastUsedAt?: string;
+  /**
+   * Override the context window size (in tokens) for this profile. Wins over
+   * whatever the model catalog reports. Useful for custom endpoints whose
+   * model name doesn't match any cataloged entry.
+   */
+  contextLimit?: number;
 }
 
 /** Upgrade old bare-effort strings on disk to the discriminated union. */

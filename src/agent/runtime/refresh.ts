@@ -9,8 +9,9 @@ interface Bridge {
 export function createRefreshers(
   store: GlorpStore,
   bridge: Bridge,
-  contextLimit: number,
+  contextLimit: number | (() => number),
 ) {
+  const limitOf = typeof contextLimit === "function" ? contextLimit : () => contextLimit;
   async function stats() {
     try {
       const tokens = await store.getTokenCount();
@@ -21,7 +22,7 @@ export function createRefreshers(
           turns,
           tokens_in: tokens,
           tokens_out: 0,
-          contextPct: Math.min(100, Math.round((tokens / contextLimit) * 100)),
+          contextPct: Math.min(100, Math.round((tokens / limitOf()) * 100)),
         },
       });
     } catch {}

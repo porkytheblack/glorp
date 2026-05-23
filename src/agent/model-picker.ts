@@ -11,6 +11,7 @@ import {
   normaliseReasoning,
   reasoningLabel,
 } from "./credentials.ts";
+import { DEFAULT_FALLBACK_CONTEXT_LIMIT, ModelCatalog } from "./model-catalog.ts";
 
 export interface PickModelOptions {
   /** Explicit provider id from CLI flags. Takes precedence over everything else. */
@@ -21,6 +22,8 @@ export interface PickModelOptions {
   credentials?: CredentialsStore;
   /** Profile id to use from the credentials store (overrides activeProfileId). */
   profileId?: string;
+  /** Model catalog used to resolve `contextLimit`. Optional; falls back to default when absent. */
+  catalog?: ModelCatalog;
 }
 
 export interface PickedModel {
@@ -33,6 +36,13 @@ export interface PickedModel {
   model: string;
   /** The profile that drove this pick, if any. */
   profile?: ModelProfile;
+  /**
+   * Resolved input-context window in tokens. Resolution order:
+   *   1. `profile.contextLimit` override
+   *   2. `catalog.getContextLimit(providerId, model)`
+   *   3. {@link DEFAULT_FALLBACK_CONTEXT_LIMIT}
+   */
+  contextLimit: number;
 }
 
 /**
@@ -48,15 +58,14 @@ export interface PickedModel {
 export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
   // 1. Explicit CLI flags.
   if (opts.provider) {
-    const adapter = await buildAdapter({
-      providerId: opts.provider,
-      model: opts.model,
-    });
+    const model = opts.model ?? defaultModelFor(opts.provider);
+    const adapter = await buildAdapter({ providerId: opts.provider, model });
     return {
       adapter,
-      label: labelFor(opts.provider, opts.model ?? defaultModelFor(opts.provider)),
+      label: labelFor(opts.provider, model),
       providerId: opts.provider,
-      model: opts.model ?? defaultModelFor(opts.provider),
+      model,
+      contextLimit: resolveContextLimit({ providerId: opts.provider, model, catalog: opts.catalog }),
     };
   }
 
@@ -80,6 +89,12 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
         providerId: profile.providerId,
         model: profile.model,
         profile,
+        contextLimit: resolveContextLimit({
+          providerId: profile.providerId,
+          model: profile.model,
+          profile,
+          catalog: opts.catalog,
+        }),
       };
     }
   }
@@ -87,18 +102,32 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
   // 3. Env-var fallback.
   const envProvider = envDetectedProvider();
   if (envProvider) {
+    const model = defaultModelFor(envProvider);
     const adapter = await buildAdapter({ providerId: envProvider });
     return {
       adapter,
-      label: labelFor(envProvider, defaultModelFor(envProvider)),
+      label: labelFor(envProvider, model),
       providerId: envProvider,
-      model: defaultModelFor(envProvider),
+      model,
+      contextLimit: resolveContextLimit({ providerId: envProvider, model, catalog: opts.catalog }),
     };
   }
 
   throw new Error(
     "No model configured. Run `glorp` interactively to onboard, set an API key env var, or pass --provider/--model.",
   );
+}
+
+function resolveContextLimit(args: {
+  providerId: string;
+  model: string;
+  profile?: ModelProfile;
+  catalog?: ModelCatalog;
+}): number {
+  if (args.profile?.contextLimit && args.profile.contextLimit > 0) return args.profile.contextLimit;
+  const fromCatalog = args.catalog?.getContextLimit(args.providerId, args.model);
+  if (fromCatalog && fromCatalog > 0) return fromCatalog;
+  return DEFAULT_FALLBACK_CONTEXT_LIMIT;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { Glove } from "glove-core/glove";
 import { Displaymanager } from "glove-core/display-manager";
-import { pickModel } from "./model-picker.ts";
+import { pickModel, type PickedModel } from "./model-picker.ts";
 import { GlorpStore } from "./store.ts";
 import { buildGlorpSystemPrompt, COMPACTION_INSTRUCTIONS } from "./persona.ts";
 import { MAIN_AGENT_TOOLS, createToolRegistry, registerTools } from "./tools/registry.ts";
@@ -9,7 +9,8 @@ import { makeDiskSubAgent } from "./agents/disk-subagent.ts";
 import { getBridge } from "../shared/bridge.ts";
 import { createFleet } from "./station-bridge.ts";
 import { CredentialsStore } from "./credentials.ts";
-import { discoverExtensions } from "./extensions-loader.ts";
+import { ModelCatalog } from "./model-catalog.ts";
+import { discoverExtensions, type ExtensionsBundle } from "./extensions-loader.ts";
 import { bridgeDisplaySlots } from "./runtime/display-bridge.ts";
 import { createRefreshers } from "./runtime/refresh.ts";
 import { createGlorpSubscriber } from "./runtime/subscriber.ts";
@@ -25,6 +26,9 @@ import { generateSessionTitle, cleanSessionTitle } from "./runtime/title.ts";
 import { createTitleScheduler } from "./runtime/title-scheduler.ts";
 import { wrapGlorpModel } from "./runtime/model-guards.ts";
 import type { BuildGlorpOptions, GlorpHandle } from "./glorp-types.ts";
+import type { ModelAdapter } from "glove-core/core";
+import type { IGloveRunnable } from "glove-core/glove";
+import type { Context } from "glove-core/core";
 import * as path from "node:path";
 import * as os from "node:os";
 
@@ -40,7 +44,6 @@ export {
   withTaskUpdateContinuation,
 } from "./runtime/model-guards.ts";
 
-const CONTEXT_LIMIT = 180_000;
 const TITLE_MODEL_TIMEOUT_MS = 15_000;
 
 export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> {
@@ -48,8 +51,9 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const store = new GlorpStore(opts.sessionId, dataDir);
   const resources = createSessionResources(dataDir, opts.sessionId);
   const credentials = opts.credentials ?? new CredentialsStore(dataDir);
-  const picked = await pickModel({ provider: opts.provider, model: opts.model, credentials });
-  let model = wrapGlorpModel(picked.adapter);
+  const catalog = new ModelCatalog(dataDir);
+  const picked = await pickModel({ provider: opts.provider, model: opts.model, credentials, catalog });
+  let contextLimit = picked.contextLimit;
   let modelLabel = picked.label;
   const bridge = getBridge();
   const titleScheduler = createTitleScheduler({
@@ -64,10 +68,10 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const diskExtensions = discoverExtensions(opts.workspace);
 
   bridgeDisplaySlots(displayManager, bridge);
-  const refresh = createRefreshers(store, bridge, CONTEXT_LIMIT);
+  const refresh = createRefreshers(store, bridge, () => contextLimit);
   const fleet = await createFleet({
     workspace: opts.workspace,
-    model,
+    model: wrapGlorpModel(picked.adapter),
     dataDir,
     provider: opts.provider,
     selectedModel: opts.provider ? picked.model : undefined,
@@ -76,47 +80,10 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   });
   await fleet.start();
 
-  const ctxRef = { current: null as import("glove-core/core").Context | null };
-  let abortController: AbortController | null = null;
-  const builder = new Glove({
-    store,
-    model,
-    displayManager,
-    serverMode: true,
-    systemPrompt: buildGlorpSystemPrompt({
-      workspace: opts.workspace,
-      contextLimit: CONTEXT_LIMIT,
-      extensions: diskExtensions,
-    }),
-    compaction_config: {
-      compaction_instructions: COMPACTION_INSTRUCTIONS,
-      compaction_context_limit: CONTEXT_LIMIT,
-      max_turns: 200,
-    },
-  });
-
-  builder.addSubscriber(createGlorpSubscriber(bridge, refresh));
-  registerTools(
-    builder,
-    createToolRegistry({ workspace: opts.workspace, dataDir, store, resources, fleet, contextRef: ctxRef }),
-    MAIN_AGENT_TOOLS,
-  );
-  foldResourceTools(builder, resources);
-  builder
-    .defineSubAgent(plannerSubAgent({ workspace: opts.workspace, dataDir }))
-    .defineSubAgent(researcherSubAgent({ workspace: opts.workspace, dataDir }))
-    .defineSubAgent(reviewerSubAgent({ workspace: opts.workspace, dataDir }));
-  for (const sub of diskExtensions.subagents) builder.defineSubAgent(makeDiskSubAgent(sub, { workspace: opts.workspace, dataDir }));
-  registerHooks(builder);
-  registerBuiltInSkills(builder);
-  registerDiskSkills(builder, diskExtensions.skills);
-
-  const agent = builder.build();
-  (agent as any).promptMachine.enableToolResultSummary = true;
+  const ctxRef = { current: null as Context | null };
   const inboxContext = makeInboxContext(store);
   ctxRef.current = inboxContext;
   fleet.setContext(inboxContext);
-  foldContextTools(agent, inboxContext);
   fleet.setInboxResolver(async (itemId, response, status) => {
     await store.updateInboxItem(itemId, {
       status: "resolved",
@@ -125,20 +92,39 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     });
     void refresh.inbox();
   });
+
+  let abortController: AbortController | null = null;
+  let agent = assembleAgent({
+    picked,
+    contextLimit,
+    workspace: opts.workspace,
+    dataDir,
+    store,
+    resources,
+    fleet,
+    bridge,
+    displayManager,
+    diskExtensions,
+    refresh,
+    ctxRef,
+    inboxContext,
+  });
+
   void refresh.all();
+  void catalog.refresh();
 
   return {
-    agent,
+    get agent() { return agent; },
     fleet,
     store,
     credentials,
     sessionId: opts.sessionId,
     get title() { return titleScheduler.title; },
-    extensions: buildExtensionCatalogue(agent),
+    get extensions() { return buildExtensionCatalogue(agent); },
     get modelLabel() { return modelLabel; },
     onLabelChange(fn) { labelListeners.add(fn); return () => void labelListeners.delete(fn); },
     async hydrateUi() {
-      await hydrateUiSession(store, bridge, CONTEXT_LIMIT);
+      await hydrateUiSession(store, bridge, contextLimit);
       await titleScheduler.refreshTitle();
       titleScheduler.schedule();
     },
@@ -150,14 +136,32 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     resolvePermission(slotId, allow) { resolveDisplaySlot(displayManager, bridge, slotId, allow); },
     clearPermission(toolName) { return store.setPermission(toolName, "unset"); },
     async swapProfile(profileId) {
-      const next = await pickModel({ profileId, credentials });
+      const next = await pickModel({ profileId, credentials, catalog });
       abortController?.abort();
       await titleScheduler.cancel();
       titleScheduler.setModel(next.adapter);
-      model = wrapGlorpModel(next.adapter);
-      agent.setModel(model);
+      contextLimit = next.contextLimit;
       modelLabel = next.label;
-      fleet.setModelConfig({ profileId: next.profile?.id, provider: next.profile ? undefined : next.providerId, model: next.profile ? undefined : next.model });
+      agent = assembleAgent({
+        picked: next,
+        contextLimit,
+        workspace: opts.workspace,
+        dataDir,
+        store,
+        resources,
+        fleet,
+        bridge,
+        displayManager,
+        diskExtensions,
+        refresh,
+        ctxRef,
+        inboxContext,
+      });
+      fleet.setModelConfig({
+        profileId: next.profile?.id,
+        provider: next.profile ? undefined : next.providerId,
+        model: next.profile ? undefined : next.model,
+      });
       credentials.setActive(profileId);
       for (const fn of labelListeners) fn(modelLabel);
     },
@@ -184,6 +188,72 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     abort() { abortController?.abort(); void titleScheduler.cancel(); void fleet.cancelAll(); titleScheduler.setRequestInFlight(false); },
     async shutdown() { abortController?.abort(); await titleScheduler.cancel(); await fleet.stop(); },
   };
+}
+
+interface AssembleArgs {
+  picked: PickedModel;
+  contextLimit: number;
+  workspace: string;
+  dataDir: string;
+  store: GlorpStore;
+  resources: ReturnType<typeof createSessionResources>;
+  fleet: Awaited<ReturnType<typeof createFleet>>;
+  bridge: ReturnType<typeof getBridge>;
+  displayManager: Displaymanager;
+  diskExtensions: ExtensionsBundle;
+  refresh: ReturnType<typeof createRefreshers>;
+  ctxRef: { current: Context | null };
+  inboxContext: Context;
+}
+
+function assembleAgent(args: AssembleArgs): IGloveRunnable {
+  const model = wrapGlorpModel(args.picked.adapter);
+  const builder = new Glove({
+    store: args.store,
+    model,
+    displayManager: args.displayManager,
+    serverMode: true,
+    systemPrompt: buildGlorpSystemPrompt({
+      workspace: args.workspace,
+      contextLimit: args.contextLimit,
+      extensions: args.diskExtensions,
+    }),
+    compaction_config: {
+      compaction_instructions: COMPACTION_INSTRUCTIONS,
+      compaction_context_limit: args.contextLimit,
+      max_turns: 200,
+    },
+  });
+
+  builder.addSubscriber(createGlorpSubscriber(args.bridge, args.refresh));
+  registerTools(
+    builder,
+    createToolRegistry({
+      workspace: args.workspace,
+      dataDir: args.dataDir,
+      store: args.store,
+      resources: args.resources,
+      fleet: args.fleet,
+      contextRef: args.ctxRef,
+    }),
+    MAIN_AGENT_TOOLS,
+  );
+  foldResourceTools(builder, args.resources);
+  builder
+    .defineSubAgent(plannerSubAgent({ workspace: args.workspace, dataDir: args.dataDir }))
+    .defineSubAgent(researcherSubAgent({ workspace: args.workspace, dataDir: args.dataDir }))
+    .defineSubAgent(reviewerSubAgent({ workspace: args.workspace, dataDir: args.dataDir }));
+  for (const sub of args.diskExtensions.subagents) {
+    builder.defineSubAgent(makeDiskSubAgent(sub, { workspace: args.workspace, dataDir: args.dataDir }));
+  }
+  registerHooks(builder);
+  registerBuiltInSkills(builder);
+  registerDiskSkills(builder, args.diskExtensions.skills);
+
+  const agent = builder.build();
+  (agent as any).promptMachine.enableToolResultSummary = true;
+  foldContextTools(agent, args.inboxContext);
+  return agent;
 }
 
 function userTurn(text: string) {
