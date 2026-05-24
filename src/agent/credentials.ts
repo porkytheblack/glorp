@@ -135,9 +135,22 @@ export function findKnownProvider(id: string): KnownProviderMeta | undefined {
   return KNOWN_PROVIDERS.find((p) => p.id === id);
 }
 
-export function reasoningProviderId(providerId: string, provider?: ProviderConfig): string {
-  if (provider?.type === "custom" && provider.adapter === "mimo") return "mimo";
+/**
+ * The known-provider id whose adapter, defaults, and capabilities apply to
+ * this provider config. `basedOn` wins over `adapter` so users can pin a
+ * custom endpoint to a specific known provider explicitly; `adapter:
+ * "mimo"` remains as a back-compat shortcut for the MiMo case.
+ */
+export function effectiveProviderId(providerId: string, provider?: ProviderConfig): string {
+  if (!provider) return providerId;
+  if (provider.type === "known") return providerId;
+  if (provider.basedOn) return provider.basedOn;
+  if (provider.adapter === "mimo") return "mimo";
   return providerId;
+}
+
+export function reasoningProviderId(providerId: string, provider?: ProviderConfig): string {
+  return effectiveProviderId(providerId, provider);
 }
 
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
@@ -171,6 +184,15 @@ export interface ProviderConfig {
   type: "known" | "custom";
   /** Display name for custom providers; matches KnownProvider.id for known ones. */
   id: string;
+  /**
+   * For "custom" providers: inherit defaults (adapter selection, default
+   * model list, reasoning matchers) from this known provider. The custom
+   * provider's own baseURL and apiKey still take precedence. Lets users
+   * point at a self-hosted or proxied endpoint while reusing the right
+   * adapter and capabilities — e.g. a private MiMo proxy basedOn `mimo`
+   * uses MimoAdapter against a custom baseURL.
+   */
+  basedOn?: KnownProvider;
   /** Adapter implementation used for custom endpoints. Defaults to OpenAI-compatible. */
   adapter?: CustomProviderAdapter;
   /** Required for custom providers, optional for known (might use default URL). */
@@ -202,6 +224,14 @@ export interface ModelProfile {
    * model name doesn't match any cataloged entry.
    */
   contextLimit?: number;
+  /**
+   * Cheaper model name used for session title generation. Built against
+   * the same provider config (apiKey/baseURL/adapter) as the main model,
+   * so it only makes sense if the provider serves it. When unset, picks
+   * a per-provider default (see CHEAP_TITLE_MODELS in model-picker.ts),
+   * and ultimately falls back to the main model.
+   */
+  titleModel?: string;
 }
 
 /** Upgrade old bare-effort strings on disk to the discriminated union. */

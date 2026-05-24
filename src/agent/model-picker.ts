@@ -6,12 +6,28 @@ import type {
   ReasoningConfig,
 } from "./credentials.ts";
 import {
+  effectiveProviderId,
   findKnownProvider,
   modelAcceptsReasoning,
   normaliseReasoning,
   reasoningLabel,
 } from "./credentials.ts";
 import { DEFAULT_FALLBACK_CONTEXT_LIMIT, ModelCatalog } from "./model-catalog.ts";
+
+/**
+ * Per-provider default for the title-generation model. Picked to be cheap
+ * and fast — title gen is a single short prompt and doesn't need a
+ * reasoning model. Falls back to the main model when no entry matches or
+ * when the profile sets its own `titleModel`.
+ */
+const CHEAP_TITLE_MODELS: Record<string, string> = {
+  anthropic: "claude-haiku-4-5-20251001",
+  openai: "gpt-4.1-mini",
+  openrouter: "anthropic/claude-haiku-4-5",
+  gemini: "gemini-2.5-flash",
+  groq: "llama-3.3-70b-versatile",
+  mimo: "mimo-v2.5",
+};
 
 export interface PickModelOptions {
   /** Explicit provider id from CLI flags. Takes precedence over everything else. */
@@ -43,6 +59,15 @@ export interface PickedModel {
    *   3. {@link DEFAULT_FALLBACK_CONTEXT_LIMIT}
    */
   contextLimit: number;
+  /**
+   * Cheap adapter used by the title scheduler. Same provider config as the
+   * main adapter; only the model name differs. Falls back to `adapter`
+   * when no cheap alternative applies. Resolution order:
+   *   1. `profile.titleModel` override
+   *   2. {@link CHEAP_TITLE_MODELS} for the effective provider
+   *   3. main adapter (no separate title model)
+   */
+  titleAdapter: ModelAdapter;
 }
 
 /**
@@ -60,8 +85,13 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
   if (opts.provider) {
     const model = opts.model ?? defaultModelFor(opts.provider);
     const adapter = await buildAdapter({ providerId: opts.provider, model });
+    const titleAdapter = await buildTitleAdapter({
+      providerId: opts.provider,
+      mainAdapter: adapter,
+    });
     return {
       adapter,
+      titleAdapter,
       label: labelFor(opts.provider, model),
       providerId: opts.provider,
       model,
@@ -83,8 +113,15 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
         reasoning,
         provider,
       });
+      const titleAdapter = await buildTitleAdapter({
+        providerId: profile.providerId,
+        provider,
+        profile,
+        mainAdapter: adapter,
+      });
       return {
         adapter,
+        titleAdapter,
         label: labelFor(profile.providerId, profile.model, reasoning),
         providerId: profile.providerId,
         model: profile.model,
@@ -104,8 +141,13 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
   if (envProvider) {
     const model = defaultModelFor(envProvider);
     const adapter = await buildAdapter({ providerId: envProvider });
+    const titleAdapter = await buildTitleAdapter({
+      providerId: envProvider,
+      mainAdapter: adapter,
+    });
     return {
       adapter,
+      titleAdapter,
       label: labelFor(envProvider, model),
       providerId: envProvider,
       model,
@@ -116,6 +158,31 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
   throw new Error(
     "No model configured. Run `glorp` interactively to onboard, set an API key env var, or pass --provider/--model.",
   );
+}
+
+/**
+ * Build the title-generation adapter. Picks (in order) `profile.titleModel`,
+ * a per-provider cheap default from {@link CHEAP_TITLE_MODELS}, and finally
+ * the main adapter itself when no cheaper alternative is available.
+ */
+async function buildTitleAdapter(args: {
+  providerId: string;
+  provider?: ProviderConfig;
+  profile?: ModelProfile;
+  mainAdapter: ModelAdapter;
+}): Promise<ModelAdapter> {
+  const effectiveId = effectiveProviderId(args.providerId, args.provider);
+  const titleModel = args.profile?.titleModel ?? CHEAP_TITLE_MODELS[effectiveId];
+  if (!titleModel) return args.mainAdapter;
+  try {
+    return await buildAdapter({
+      providerId: args.providerId,
+      model: titleModel,
+      provider: args.provider,
+    });
+  } catch {
+    return args.mainAdapter;
+  }
 }
 
 function resolveContextLimit(args: {
@@ -144,13 +211,14 @@ async function buildAdapter(args: {
   provider?: ProviderConfig;
 }): Promise<ModelAdapter> {
   const { providerId, model: modelArg, reasoning, provider } = args;
-  const known = findKnownProvider(providerId);
+  const effectiveId = effectiveProviderId(providerId, provider);
+  const known = findKnownProvider(effectiveId);
   const apiKey = provider?.apiKey ?? (known ? process.env[known.envVar] : undefined);
   const baseURL = provider?.baseURL;
-  const model = modelArg ?? defaultModelFor(providerId);
+  const model = modelArg ?? defaultModelFor(effectiveId);
 
-  // Anthropic
-  if (providerId === "anthropic") {
+  // Anthropic — native and custom `basedOn: "anthropic"` endpoints.
+  if (effectiveId === "anthropic") {
     const { AnthropicAdapter } = await import("glove-core/models/anthropic");
     return new AnthropicAdapter({
       apiKey,
@@ -160,15 +228,15 @@ async function buildAdapter(args: {
     });
   }
 
-  // Xiaomi MiMo has a dedicated adapter in glove-core. It uses the
-  // OpenAI-compatible wire shape but handles MiMo's reasoning_content
-  // round-trip and larger default completion budget.
-  const isCustomMimo =
+  // Xiaomi MiMo: dedicated adapter handles reasoning_content + larger
+  // default completion budget. Fires for native `mimo`, `basedOn: "mimo"`,
+  // explicit `adapter: "mimo"`, or a heuristic on the URL/model name.
+  const isCustomMimoHeuristic =
     provider?.type === "custom" &&
-    (provider.adapter === "mimo" ||
-      (provider.adapter == null &&
-        (/xiaomimimo\.com/i.test(baseURL ?? "") || /^mimo(?:-|$)/i.test(model))));
-  if (providerId === "mimo" || isCustomMimo) {
+    provider.basedOn == null &&
+    provider.adapter == null &&
+    (/xiaomimimo\.com/i.test(baseURL ?? "") || /^mimo(?:-|$)/i.test(model));
+  if (effectiveId === "mimo" || isCustomMimoHeuristic) {
     const { MimoAdapter } = await import("glove-core/models/mimo");
     const effort =
       reasoning?.kind === "effort" && reasoning.effort !== "minimal"
@@ -184,15 +252,15 @@ async function buildAdapter(args: {
     });
   }
 
-  // OpenAI-compat (used by openai, openrouter, gemini, groq, ollama, and custom).
+  // OpenAI-compat (openai, openrouter, gemini, groq, ollama, custom).
   const { OpenAICompatAdapter } = await import("glove-core/models/openai-compat");
   const compatOpts: any = {
-    apiKey: apiKey ?? (providerId === "ollama" ? "ollama" : ""),
-    baseURL: baseURL ?? defaultBaseURLFor(providerId),
+    apiKey: apiKey ?? (effectiveId === "ollama" ? "ollama" : ""),
+    baseURL: baseURL ?? defaultBaseURLFor(effectiveId),
     model,
     stream: true,
   };
-  if (reasoning && reasoning.kind !== "off" && modelAcceptsReasoning(providerId, model)) {
+  if (reasoning && reasoning.kind !== "off" && modelAcceptsReasoning(effectiveId, model)) {
     compatOpts.reasoning = translateReasoning(reasoning);
   }
   return new OpenAICompatAdapter(compatOpts);

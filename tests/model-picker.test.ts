@@ -282,3 +282,191 @@ describe("pickModel", () => {
     expect(picked.adapter).toBeDefined();
   });
 });
+
+describe("pickModel + basedOn (custom providers inheriting known defaults)", () => {
+  test("custom basedOn 'mimo' routes through the MiMo adapter against a custom baseURL", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-my-mimo",
+      basedOn: "mimo",
+      baseURL: "https://my-mimo-proxy.example/v1",
+      apiKey: "sk-proxy",
+    });
+    credentials.upsertProfile({
+      id: "custom-my-mimo__pro",
+      label: "my mimo · pro",
+      providerId: "custom-my-mimo",
+      model: "mimo-v2.5-pro",
+    });
+    credentials.setActive("custom-my-mimo__pro");
+
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("custom-my-mimo");
+    expect(picked.adapter.name).toBe("mimo:mimo-v2.5-pro");
+    expect(picked.label).toContain("custom-my-mimo");
+  });
+
+  test("custom basedOn 'anthropic' routes through the Anthropic adapter against a custom baseURL", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-anth-proxy",
+      basedOn: "anthropic",
+      baseURL: "https://anth-proxy.example/v1",
+      apiKey: "sk-anth-proxy",
+    });
+    credentials.upsertProfile({
+      id: "custom-anth-proxy__opus",
+      label: "proxy · opus",
+      providerId: "custom-anth-proxy",
+      model: "claude-opus-4-7",
+    });
+    credentials.setActive("custom-anth-proxy__opus");
+
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("custom-anth-proxy");
+    expect(picked.adapter.name).toMatch(/anthropic/);
+  });
+
+  test("custom basedOn 'openai' uses OpenAI-compat with the custom URL", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-oai-mirror",
+      basedOn: "openai",
+      baseURL: "https://openai-mirror.example/v1",
+      apiKey: "sk-mirror",
+    });
+    credentials.upsertProfile({
+      id: "custom-oai-mirror__gpt5",
+      label: "mirror · gpt-5",
+      providerId: "custom-oai-mirror",
+      model: "gpt-5",
+    });
+    credentials.setActive("custom-oai-mirror__gpt5");
+
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("custom-oai-mirror");
+    expect(picked.adapter.name).toBe("openai-compat:gpt-5");
+  });
+
+  test("basedOn falls back to the known provider's env var when apiKey is absent", async () => {
+    process.env.MIMO_API_KEY = "sk-env-mimo";
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-my-mimo",
+      basedOn: "mimo",
+      baseURL: "https://my-mimo-proxy.example/v1",
+      // no apiKey — should pull MIMO_API_KEY
+    });
+    credentials.upsertProfile({
+      id: "custom-my-mimo__pro",
+      label: "my mimo",
+      providerId: "custom-my-mimo",
+      model: "mimo-v2.5-pro",
+    });
+    credentials.setActive("custom-my-mimo__pro");
+
+    // If env fallback worked, adapter construction succeeds.
+    const picked = await pickModel({ credentials });
+    expect(picked.adapter.name).toBe("mimo:mimo-v2.5-pro");
+  });
+
+  test("basedOn inherits reasoning capability matchers from the known provider", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-openai-mirror",
+      basedOn: "openai",
+      baseURL: "https://oai-mirror.example/v1",
+      apiKey: "k",
+    });
+    credentials.upsertProfile({
+      id: "custom-openai-mirror__gpt5-high",
+      label: "mirror · gpt-5 high",
+      providerId: "custom-openai-mirror",
+      model: "gpt-5",
+      reasoning: { kind: "effort", effort: "high" },
+    });
+    credentials.setActive("custom-openai-mirror__gpt5-high");
+
+    const picked = await pickModel({ credentials });
+    // gpt-5 is OpenAI's reasoning-capable matcher; basedOn must inherit it
+    // for the reasoning hint to be applied. Adapter constructed = success.
+    expect(picked.adapter.name).toBe("openai-compat:gpt-5");
+    expect(picked.label).toContain("high");
+  });
+});
+
+describe("pickModel + titleAdapter (cheap model for session titles)", () => {
+  test("uses per-provider cheap default when no override is set", async () => {
+    process.env.ANTHROPIC_API_KEY = "k";
+    const credentials = new CredentialsStore(dataDir);
+    const picked = await pickModel({
+      provider: "anthropic",
+      model: "claude-opus-4-7",
+      credentials,
+    });
+    expect(picked.adapter.name).toMatch(/anthropic.*opus/);
+    expect(picked.titleAdapter.name).toMatch(/anthropic.*haiku/);
+    expect(picked.titleAdapter).not.toBe(picked.adapter);
+  });
+
+  test("profile.titleModel overrides the per-provider default", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({ type: "known", id: "openai", apiKey: "k" });
+    credentials.upsertProfile({
+      id: "openai__gpt5",
+      label: "openai · gpt-5",
+      providerId: "openai",
+      model: "gpt-5",
+      titleModel: "gpt-4.1-nano",
+    });
+    credentials.setActive("openai__gpt5");
+    const picked = await pickModel({ credentials });
+    expect(picked.titleAdapter.name).toBe("openai-compat:gpt-4.1-nano");
+  });
+
+  test("titleAdapter inherits the same custom baseURL as the main adapter", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-my-mimo",
+      basedOn: "mimo",
+      baseURL: "https://my-mimo-proxy.example/v1",
+      apiKey: "k",
+    });
+    credentials.upsertProfile({
+      id: "custom-my-mimo__pro",
+      label: "my mimo",
+      providerId: "custom-my-mimo",
+      model: "mimo-v2.5-pro",
+    });
+    credentials.setActive("custom-my-mimo__pro");
+    const picked = await pickModel({ credentials });
+    // basedOn=mimo => cheap title default is "mimo-v2.5" via MimoAdapter
+    expect(picked.titleAdapter.name).toBe("mimo:mimo-v2.5");
+  });
+
+  test("falls back to main adapter when no cheap default exists for the provider", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-standalone",
+      baseURL: "https://standalone.example/v1",
+      apiKey: "k",
+      adapter: "openai-compat",
+    });
+    credentials.upsertProfile({
+      id: "custom-standalone__model",
+      label: "standalone",
+      providerId: "custom-standalone",
+      model: "my-bespoke-model",
+    });
+    credentials.setActive("custom-standalone__model");
+    const picked = await pickModel({ credentials });
+    expect(picked.titleAdapter).toBe(picked.adapter);
+  });
+});

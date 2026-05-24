@@ -59,7 +59,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const titleScheduler = createTitleScheduler({
     store,
     bridge,
-    model: picked.adapter,
+    model: picked.titleAdapter,
     initialTitle: await store.getTitle(),
     timeoutMs: TITLE_MODEL_TIMEOUT_MS,
   });
@@ -139,7 +139,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       const next = await pickModel({ profileId, credentials, catalog });
       abortController?.abort();
       await titleScheduler.cancel();
-      titleScheduler.setModel(next.adapter);
+      titleScheduler.setModel(next.titleAdapter);
       contextLimit = next.contextLimit;
       modelLabel = next.label;
       agent = assembleAgent({
