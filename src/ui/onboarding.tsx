@@ -4,6 +4,7 @@ import {
   CredentialsStore,
   CUSTOM_PROVIDER_ADAPTERS,
   KNOWN_PROVIDERS,
+  effectiveProviderId,
   findKnownProvider,
   modelAcceptsReasoning,
   reasoningKindFor,
@@ -12,6 +13,7 @@ import {
 } from "../agent/credentials.ts";
 import type {
   CustomProviderAdapter,
+  KnownProvider,
   ModelProfile,
   ProviderConfig,
   ReasoningConfig,
@@ -22,9 +24,16 @@ type Step =
   | { kind: "pick-provider" }
   | { kind: "enter-key"; providerId: string }
   | { kind: "custom-name" }
-  | { kind: "custom-baseurl"; name: string }
-  | { kind: "custom-adapter"; name: string; baseURL: string }
-  | { kind: "custom-apikey"; name: string; baseURL: string; adapter: CustomProviderAdapter }
+  | { kind: "custom-basedon"; name: string }
+  | { kind: "custom-baseurl"; name: string; basedOn?: KnownProvider }
+  | { kind: "custom-adapter"; name: string; baseURL: string; basedOn?: KnownProvider }
+  | {
+      kind: "custom-apikey";
+      name: string;
+      baseURL: string;
+      adapter: CustomProviderAdapter;
+      basedOn?: KnownProvider;
+    }
   | { kind: "pick-model"; providerId: string }
   | { kind: "pick-reasoning"; providerId: string; model: string }
   | { kind: "done" };
@@ -93,7 +102,7 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
             onChange={setInput}
             onSubmit={(name) => {
               setInput("");
-              setStep({ kind: "custom-baseurl", name });
+              setStep({ kind: "custom-basedon", name });
             }}
             onBack={() => {
               setInput("");
@@ -101,18 +110,42 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
             }}
           />
         )}
-        {step.kind === "custom-baseurl" && (
-          <CustomBaseURL
+        {step.kind === "custom-basedon" && (
+          <CustomBasedOn
             name={step.name}
-            value={input}
-            onChange={setInput}
-            onSubmit={(baseURL) => {
-              setInput("");
-              setStep({ kind: "custom-adapter", name: step.name, baseURL });
+            onPick={(basedOn) => {
+              setStep({ kind: "custom-baseurl", name: step.name, basedOn });
             }}
             onBack={() => {
               setInput("");
               setStep({ kind: "custom-name" });
+            }}
+          />
+        )}
+        {step.kind === "custom-baseurl" && (
+          <CustomBaseURL
+            name={step.name}
+            basedOn={step.basedOn}
+            value={input}
+            onChange={setInput}
+            onSubmit={(baseURL) => {
+              setInput("");
+              if (step.basedOn) {
+                // basedOn already pins the adapter — skip the adapter step.
+                setStep({
+                  kind: "custom-apikey",
+                  name: step.name,
+                  baseURL,
+                  basedOn: step.basedOn,
+                  adapter: "openai-compat",
+                });
+              } else {
+                setStep({ kind: "custom-adapter", name: step.name, baseURL });
+              }
+            }}
+            onBack={() => {
+              setInput("");
+              setStep({ kind: "custom-basedon", name: step.name });
             }}
           />
         )}
@@ -121,11 +154,17 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
             name={step.name}
             baseURL={step.baseURL}
             onPick={(adapter) => {
-              setStep({ kind: "custom-apikey", name: step.name, baseURL: step.baseURL, adapter });
+              setStep({
+                kind: "custom-apikey",
+                name: step.name,
+                baseURL: step.baseURL,
+                adapter,
+                basedOn: step.basedOn,
+              });
             }}
             onBack={() => {
               setInput("");
-              setStep({ kind: "custom-baseurl", name: step.name });
+              setStep({ kind: "custom-baseurl", name: step.name, basedOn: step.basedOn });
             }}
           />
         )}
@@ -134,6 +173,7 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
             name={step.name}
             baseURL={step.baseURL}
             adapter={step.adapter}
+            basedOn={step.basedOn}
             value={input}
             onChange={setInput}
             onSubmit={(apiKey) => {
@@ -141,7 +181,7 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
               const cfg: ProviderConfig = {
                 type: "custom",
                 id: providerId,
-                adapter: step.adapter,
+                ...(step.basedOn ? { basedOn: step.basedOn } : { adapter: step.adapter }),
                 baseURL: step.baseURL,
                 apiKey: apiKey.trim() || undefined,
               };
@@ -151,7 +191,11 @@ export function Onboarding({ credentials, onComplete, onCancel }: Props) {
             }}
             onBack={() => {
               setInput("");
-              setStep({ kind: "custom-adapter", name: step.name, baseURL: step.baseURL });
+              if (step.basedOn) {
+                setStep({ kind: "custom-baseurl", name: step.name, basedOn: step.basedOn });
+              } else {
+                setStep({ kind: "custom-adapter", name: step.name, baseURL: step.baseURL });
+              }
             }}
           />
         )}
@@ -330,19 +374,68 @@ function CustomName(props: {
   );
 }
 
+function CustomBasedOn(props: {
+  name: string;
+  onPick: (basedOn: KnownProvider | undefined) => void;
+  onBack: () => void;
+}) {
+  const options = useMemo(
+    () => [
+      {
+        name: "Standalone (OpenAI-compatible)",
+        description: "Generic /v1/chat/completions endpoint — pick your own adapter",
+        value: "__none__",
+      },
+      ...KNOWN_PROVIDERS.map((p) => ({
+        name: `Based on ${p.label}`,
+        description: `Reuse ${p.id}'s adapter, default models, and reasoning capabilities`,
+        value: p.id,
+      })),
+    ],
+    [],
+  );
+  return (
+    <box flexDirection="column">
+      <text fg={theme.accent}>
+        <strong>3. {props.name} — based on</strong>
+      </text>
+      <text fg={theme.textMuted}>
+        Inherit adapter + defaults from a known provider, or stay standalone. Use this to point at a
+        proxy or self-hosted endpoint that speaks the same protocol as one of the bundled providers.
+      </text>
+      <box marginTop={1}>
+        <select
+          options={options}
+          focused
+          height={Math.min(12, options.length + 2)}
+          onSelect={(_i: number, opt: any) => {
+            if (!opt) return;
+            props.onPick(opt.value === "__none__" ? undefined : (opt.value as KnownProvider));
+          }}
+        />
+      </box>
+    </box>
+  );
+}
+
 function CustomBaseURL(props: {
   name: string;
+  basedOn?: KnownProvider;
   value: string;
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
   onBack: () => void;
 }) {
+  const basedOnLabel = props.basedOn ? findKnownProvider(props.basedOn)?.label : null;
   return (
     <box flexDirection="column">
       <text fg={theme.accent}>
-        <strong>3. {props.name} — base URL</strong>
+        <strong>4. {props.name} — base URL</strong>
       </text>
-      <text fg={theme.textMuted}>Endpoint URL (e.g. https://api.example.com/v1).</text>
+      <text fg={theme.textMuted}>
+        Endpoint URL (e.g. https://api.example.com/v1).
+        {basedOnLabel ? ` Inheriting defaults from ${basedOnLabel}.` : ""}
+      </text>
       <box marginTop={1} border borderColor={theme.borderActive} padding={0} paddingX={1} height={3}>
         <text fg={theme.accent}>
           <strong>›</strong>
@@ -396,18 +489,22 @@ function CustomApiKey(props: {
   name: string;
   baseURL: string;
   adapter: CustomProviderAdapter;
+  basedOn?: KnownProvider;
   value: string;
   onChange: (v: string) => void;
   onSubmit: (v: string) => void;
   onBack: () => void;
 }) {
+  const sourceLabel = props.basedOn
+    ? `basedOn: ${findKnownProvider(props.basedOn)?.label ?? props.basedOn}`
+    : `adapter: ${adapterLabel(props.adapter)}`;
   return (
     <box flexDirection="column">
       <text fg={theme.accent}>
         <strong>5. {props.name} — API key (optional)</strong>
       </text>
       <text fg={theme.textMuted}>
-        Leave empty for unauthenticated endpoints. Adapter: {adapterLabel(props.adapter)} · Endpoint: {props.baseURL}
+        Leave empty for unauthenticated endpoints. {sourceLabel} · Endpoint: {props.baseURL}
       </text>
       <box marginTop={1} border borderColor={theme.borderActive} padding={0} paddingX={1} height={3}>
         <text fg={theme.accent}>
@@ -436,24 +533,30 @@ function PickModel(props: {
   onBack: () => void;
 }) {
   const meta = findKnownProvider(props.providerId);
-  const customDefaults = useMemo(
-    () =>
-      props.provider?.type === "custom" && props.provider.adapter === "mimo"
-        ? (findKnownProvider("mimo")?.defaultModels ?? [])
-        : [],
-    [props.provider?.adapter, props.provider?.type],
-  );
+  // Custom providers can inherit a default model list either via `basedOn`
+  // (preferred, explicit) or via the legacy `adapter: "mimo"` shortcut.
+  const inheritedDefaults = useMemo(() => {
+    if (props.provider?.type !== "custom") return [];
+    const inheritFrom = props.provider.basedOn ?? (props.provider.adapter === "mimo" ? "mimo" : null);
+    return inheritFrom ? findKnownProvider(inheritFrom)?.defaultModels ?? [] : [];
+  }, [props.provider?.basedOn, props.provider?.adapter, props.provider?.type]);
   const [typed, setTyped] = useState("");
-  const [mode, setMode] = useState<"pick" | "type">(meta || customDefaults.length > 0 ? "pick" : "type");
+  const [mode, setMode] = useState<"pick" | "type">(meta || inheritedDefaults.length > 0 ? "pick" : "type");
   const options = useMemo(() => {
     const base =
       meta?.defaultModels.map((m) => ({ name: m, value: m, description: "" })) ??
-      customDefaults.map((m) => ({ name: m, value: m, description: "" }));
-    if (meta || customDefaults.length > 0) {
+      inheritedDefaults.map((m) => ({ name: m, value: m, description: "" }));
+    if (meta || inheritedDefaults.length > 0) {
       base.push({ name: "(type a custom model name)", value: "__type__", description: "" });
     }
     return base;
-  }, [customDefaults, meta]);
+  }, [inheritedDefaults, meta]);
+
+  const providerDescription = props.provider?.type === "custom"
+    ? props.provider.basedOn
+      ? ` · basedOn: ${findKnownProvider(props.provider.basedOn)?.label ?? props.provider.basedOn}`
+      : ` · adapter: ${adapterLabel(props.provider.adapter)}`
+    : "";
 
   return (
     <box flexDirection="column">
@@ -462,7 +565,7 @@ function PickModel(props: {
       </text>
       <text fg={theme.textMuted}>
         Provider: {meta?.label ?? props.providerId}
-        {props.provider?.type === "custom" ? ` · adapter: ${adapterLabel(props.provider.adapter)}` : ""}
+        {providerDescription}
       </text>
       {mode === "pick" && (
         <box marginTop={1}>
@@ -567,12 +670,15 @@ function finalize(
 ): void {
   const known = findKnownProvider(providerId);
   const provider = credentials.getProvider(providerId);
-  const customDefaultModels =
-    provider?.type === "custom" && provider.adapter === "mimo"
-      ? (findKnownProvider("mimo")?.defaultModels ?? [])
-      : [];
+  // Inherit default model list from `basedOn` (preferred) or the legacy
+  // `adapter: "mimo"` shortcut, so custom proxies show the same model
+  // picker as their upstream.
+  const inheritFrom = provider?.type === "custom"
+    ? provider.basedOn ?? (provider.adapter === "mimo" ? "mimo" : null)
+    : null;
+  const inheritedDefaultModels = inheritFrom ? findKnownProvider(inheritFrom)?.defaultModels ?? [] : [];
   const effectiveReasoningProviderId = reasoningProviderId(providerId, provider);
-  const allModels = new Set<string>([model, ...(known?.defaultModels ?? []), ...customDefaultModels]);
+  const allModels = new Set<string>([model, ...(known?.defaultModels ?? []), ...inheritedDefaultModels]);
   let activeProfile: ModelProfile | null = null;
   const now = new Date().toISOString();
 

@@ -9,19 +9,21 @@ interface Bridge {
 export function createRefreshers(
   store: GlorpStore,
   bridge: Bridge,
-  contextLimit: number,
+  contextLimit: number | (() => number),
 ) {
+  const limitOf = typeof contextLimit === "function" ? contextLimit : () => contextLimit;
   async function stats() {
     try {
-      const tokens = await store.getTokenCount();
+      const counts = await store.getTokenCounts();
       const turns = await store.getTurnCount();
+      const total = counts.in + counts.out;
       bridge.emit({
         type: "stats",
         stats: {
           turns,
-          tokens_in: tokens,
-          tokens_out: 0,
-          contextPct: Math.min(100, Math.round((tokens / contextLimit) * 100)),
+          tokens_in: counts.in,
+          tokens_out: counts.out,
+          contextPct: Math.min(100, Math.round((total / limitOf()) * 100)),
         },
       });
     } catch {}

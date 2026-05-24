@@ -56,4 +56,18 @@ describe("hydrateUiSession", () => {
     expect(tool?.renderData).toEqual({ lines: 3 });
     await new Promise((resolve) => setTimeout(resolve, 120));
   });
+
+  test("hydrate emits tokens_in and tokens_out separately, contextPct uses the sum", async () => {
+    const store = new GlorpStore("resume-2", dataDir);
+    await store.addTokens({ tokens_in: 30_000, tokens_out: 10_000 });
+    const events: BridgeEvent[] = [];
+    await hydrateUiSession(store, { emit: (event) => events.push(event) }, 100_000);
+    const hydrated = events.find((event) => event.type === "session_hydrate");
+    expect(hydrated?.type).toBe("session_hydrate");
+    if (hydrated?.type !== "session_hydrate") return;
+    expect(hydrated.stats.tokens_in).toBe(30_000);
+    expect(hydrated.stats.tokens_out).toBe(10_000);
+    expect(hydrated.stats.contextPct).toBe(40); // (30k + 10k) / 100k
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
 });

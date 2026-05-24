@@ -58,9 +58,11 @@ export function editTool(workspace: string): GloveFoldArgs<{
           message: `old_string appears ${occurrences} times. Either expand it to be unique or set replace_all: true.`,
         };
       }
-      const next = input.replace_all
-        ? original.split(input.old_string).join(input.new_string)
-        : original.replace(input.old_string, input.new_string);
+      // Split/join (never `String.prototype.replace`) — passing a literal
+      // new_string to `replace` would treat `$&`, `$1`, `$\``, `$$` etc. as
+      // backreferences and silently corrupt template literals, regex code,
+      // and shell snippets in the replacement text.
+      const next = original.split(input.old_string).join(input.new_string);
       await fs.promises.writeFile(abs, next, "utf-8");
       const removed = input.old_string.split("\n").length;
       const added = input.new_string.split("\n").length;

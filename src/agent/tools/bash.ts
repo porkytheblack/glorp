@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { spawn } from "node:child_process";
+import type { DisplayManagerAdapter } from "glove-core/display-manager";
 import type { SummaryTool } from "./summaries.ts";
 import { compactText, lineCount } from "./summaries.ts";
 
@@ -20,19 +21,77 @@ interface BashSummaryArgs {
   stderrTruncated: boolean;
 }
 
-const DANGEROUS_PATTERNS = [
-  /\brm\s+-rf\s+\/(\s|$)/,
-  /:\(\)\{.*\}\s*;:/, // fork bomb
-  /\bmkfs\b/,
-  /\bdd\s+if=/,
+/**
+ * Catastrophic shapes — refused outright, no override. These are commands
+ * with no legitimate use inside a workspace shell.
+ */
+const HARD_BLOCK_PATTERNS = [
+  // rm -rf / and variants (rm -rf /, rm -rf /*, rm -fr /, rm -Rf /, etc.)
+  /\brm\s+(?:-[a-zA-Z]*[rRfF][a-zA-Z]*\s+)+\/(\s|$|\*)/,
+  /:\(\)\s*\{[^}]*\}\s*;\s*:/, // classic fork bomb
+  /\bmkfs(\.[a-z0-9]+)?\b/,
+  /\bdd\s+[^|;&]*\bof=\/dev\/(sd[a-z]|nvme\d+n\d+|vd[a-z]|xvd[a-z])/,
   />+\s*\/dev\/(sd[a-z]|nvme\d+n\d+|vd[a-z]|xvd[a-z])/,
 ];
 
-function dangerousReason(cmd: string): string | null {
-  for (const p of DANGEROUS_PATTERNS) {
+/**
+ * Risky shapes — the tool prompts the user every time. Never cached, even
+ * after a general "always allow bash" grant. The reason string surfaces in
+ * the confirmation modal so the user sees why we're asking.
+ */
+const CONFIRM_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /\brm\s+(?:-[a-zA-Z]*[rRfF][a-zA-Z]*\s+)/, reason: "recursive/force delete" },
+  { pattern: /\brm\s+[^\n]*\s\.(\s|$)/, reason: "deletes current directory" },
+  { pattern: /\brm\s+[^\n]*\s~(\s|\/|$)/, reason: "deletes home directory" },
+  { pattern: /\bsudo\b/, reason: "elevates privileges with sudo" },
+  { pattern: /\bchmod\s+-R\b/, reason: "recursive chmod" },
+  { pattern: /\bchown\s+-R\b/, reason: "recursive chown" },
+  { pattern: /\bgit\s+reset\s+--hard\b/, reason: "git reset --hard discards uncommitted work" },
+  { pattern: /\bgit\s+clean\s+-[a-zA-Z]*[fFxXdD]/, reason: "git clean removes untracked files" },
+  { pattern: /\bgit\s+push\b[^|;&]*\s(?:--force\b|-f\b)/, reason: "git force push rewrites remote history" },
+  { pattern: /\bgit\s+branch\s+-D\b/, reason: "force-deletes a branch" },
+  { pattern: /\b(curl|wget)\b[^|;&]*\|\s*(bash|sh|zsh|fish)\b/, reason: "executes downloaded script" },
+];
+
+function hardBlockReason(cmd: string): string | null {
+  for (const p of HARD_BLOCK_PATTERNS) {
     if (p.test(cmd)) return `Command matches a destructive pattern (${p}). Refusing.`;
   }
   return null;
+}
+
+function confirmReason(cmd: string): string | null {
+  for (const { pattern, reason } of CONFIRM_PATTERNS) {
+    if (pattern.test(cmd)) return reason;
+  }
+  return null;
+}
+
+/**
+ * Push a one-shot confirmation slot for a destructive bash command. The
+ * decision is intentionally not cached: every matching command re-prompts,
+ * regardless of any prior "always allow bash" grant. Falsy `display` (test
+ * harnesses with stub objects) is treated as no consent — fail closed.
+ */
+async function askDestructiveConfirm(
+  display: DisplayManagerAdapter | undefined,
+  command: string,
+  reason: string,
+): Promise<boolean> {
+  if (!display?.pushAndWait) return false;
+  const message =
+    `Glorp wants to run a destructive shell command (${reason}):\n\n` +
+    `  ${command}\n\n` +
+    `Allow this one time? (not remembered)`;
+  try {
+    const result = await display.pushAndWait<unknown, unknown>({
+      renderer: "confirm",
+      input: { message, yesLabel: "run once", noLabel: "abort", danger: true },
+    });
+    return Boolean(result);
+  } catch {
+    return false;
+  }
 }
 
 function cleanTerminalOutput(text: string): string {
@@ -131,10 +190,21 @@ export function bashTool(workspace: string): SummaryTool<{
         .optional()
         .describe("Timeout in ms (default 120000)"),
     }),
-    async do(input, _display, _glove, signal) {
-      const reason = dangerousReason(input.command);
-      if (reason) {
-        return { status: "error", data: null, message: reason };
+    async do(input, display, _glove, signal) {
+      const hard = hardBlockReason(input.command);
+      if (hard) {
+        return { status: "error", data: null, message: hard };
+      }
+      const needsConfirm = confirmReason(input.command);
+      if (needsConfirm) {
+        const allowed = await askDestructiveConfirm(display, input.command, needsConfirm);
+        if (!allowed) {
+          return {
+            status: "error",
+            data: null,
+            message: `User declined destructive command (${needsConfirm}).`,
+          };
+        }
       }
       const timeout = input.timeout_ms ?? 120_000;
       const result = await new Promise<{
