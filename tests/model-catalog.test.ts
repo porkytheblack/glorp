@@ -40,10 +40,26 @@ afterEach(() => {
   } catch {}
 });
 
+/**
+ * Seed the on-disk cache with ModelInfo entries. The legacy LiteLLM
+ * shape (max_input_tokens / max_tokens) is translated here so existing
+ * tests keep their original intent while exercising the new schema.
+ */
 function seedCache(entries: Record<string, { max_input_tokens?: number; max_tokens?: number }>) {
+  const flat: Record<string, any> = {};
+  for (const [key, raw] of Object.entries(entries)) {
+    const ctx = raw.max_input_tokens ?? raw.max_tokens;
+    const providerId = key.includes("/") ? key.slice(0, key.indexOf("/")) : "unknown";
+    const id = key.includes("/") ? key.slice(key.lastIndexOf("/") + 1) : key;
+    flat[key] = {
+      providerId,
+      id,
+      context: ctx && ctx > 0 ? ctx : undefined,
+    };
+  }
   fs.writeFileSync(
     path.join(dataDir, "model-catalog.json"),
-    JSON.stringify({ fetched_at: Date.now(), source: "test", entries }),
+    JSON.stringify({ fetched_at: Date.now(), source: "test", entries: flat }),
   );
 }
 
@@ -107,15 +123,34 @@ describe("ModelCatalog.getContextLimit", () => {
 
 describe("ModelCatalog.refresh", () => {
   test("populates cache and writes to disk", async () => {
+    // models.dev shape: provider-keyed, each carrying a `models` map.
     const fetchImpl = (async () =>
       new Response(JSON.stringify({
-        sample_spec: { foo: "bar" },
-        "mimo-pro-v2": { max_input_tokens: 1_000_000 },
+        mimo: {
+          id: "mimo",
+          name: "MiMo",
+          models: {
+            "mimo-pro-v2": {
+              id: "mimo-pro-v2",
+              name: "MiMo Pro v2",
+              limit: { context: 1_000_000, output: 8192 },
+              tool_call: true,
+              attachment: false,
+              reasoning: true,
+              cost: { input: 0.5, output: 1.5 },
+            },
+          },
+        },
       }))) as unknown as typeof fetch;
     const cat = new ModelCatalog(dataDir, { fetchImpl });
     delete process.env.GLORP_DISABLE_CATALOG_REFRESH;
     await cat.refresh();
     expect(cat.getContextLimit("mimo", "mimo-pro-v2")).toBe(1_000_000);
+    const info = cat.getModelInfo("mimo", "mimo-pro-v2");
+    expect(info?.tool_call).toBe(true);
+    expect(info?.reasoning).toBe(true);
+    expect(info?.cost?.input).toBe(0.5);
+    expect(info?.output).toBe(8192);
     expect(fs.existsSync(path.join(dataDir, "model-catalog.json"))).toBe(true);
   });
 

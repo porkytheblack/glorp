@@ -167,11 +167,19 @@ async function runTui(args: Args): Promise<void> {
   // picker if there are saved sessions; otherwise mint a fresh id silently.
   let sessionId = args.sessionId;
   if (!sessionId) {
-    const sessions = await listSessions(dataDir);
+    // Scope the launch picker to this workspace by default. If the user is
+    // in a folder they've never used glorp in, the picker is empty and we
+    // mint a fresh session silently. The picker itself exposes `a` to
+    // broaden to all projects if the user wants to fish out an older
+    // session from elsewhere.
+    const sessions = await listSessions(dataDir, {
+      kind: "project",
+      workspace: args.workspace,
+    });
     if (sessions.length === 0) {
       sessionId = newSessionId();
     } else {
-      sessionId = await runSessionPicker(renderer, dataDir, undefined);
+      sessionId = await runSessionPicker(renderer, dataDir, args.workspace, undefined);
     }
   }
 
@@ -263,6 +271,7 @@ async function runTui(args: Args): Promise<void> {
 async function runSessionPicker(
   renderer: any,
   dataDir: string,
+  workspace: string,
   activeSessionId: string | undefined,
 ): Promise<string> {
   return new Promise<string>((resolve) => {
@@ -274,6 +283,7 @@ async function runSessionPicker(
     root.render(
       React.createElement(SessionPicker, {
         dataDir,
+        workspace,
         variant: "launch",
         activeSessionId,
         onPick: (id: string) => finish(id),

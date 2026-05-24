@@ -1,16 +1,25 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import * as path from "node:path";
 import {
   deleteSession,
   listSessions,
   newSessionId,
   relativeTime,
 } from "../agent/sessions.ts";
-import type { SessionInfo } from "../agent/sessions.ts";
+import type { SessionInfo, SessionScope } from "../agent/sessions.ts";
 import { theme, BANNER } from "./theme.ts";
 
 interface Props {
   dataDir: string;
+  /**
+   * Workspace the user is currently in. When supplied, the picker defaults
+   * to showing only sessions that belong to this project (matched by
+   * `projectId`). The user can press `a` to broaden to every session in
+   * the data dir, which also surfaces legacy snapshots that pre-date
+   * workspace scoping.
+   */
+  workspace?: string;
   /**
    * Variant of the picker. "launch" shows the full ASCII banner and a
    * welcome line; "overlay" shows a compact rounded-border panel for
@@ -27,6 +36,7 @@ const LIST_LIMIT = 20;
 
 export function SessionPicker({
   dataDir,
+  workspace,
   variant = "launch",
   activeSessionId,
   onPick,
@@ -38,9 +48,13 @@ export function SessionPicker({
   const [cursor, setCursor] = useState(0);
   const [tick, setTick] = useState(0);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  // Default to project scope when we know the workspace; otherwise show all.
+  const [showAll, setShowAll] = useState(!workspace);
 
   useEffect(() => {
-    listSessions(dataDir)
+    const scope: SessionScope =
+      showAll || !workspace ? { kind: "all" } : { kind: "project", workspace };
+    listSessions(dataDir, scope)
       .then((s) => {
         setSessions(s);
         setCursor(0);
@@ -49,7 +63,7 @@ export function SessionPicker({
         // Picker just shows empty state on read failure — the next render
         // covers it. No need to crash.
       });
-  }, [dataDir, tick]);
+  }, [dataDir, tick, showAll, workspace]);
 
   const shown = useMemo(() => sessions.slice(0, LIST_LIMIT), [sessions]);
   const clamped = Math.min(cursor, Math.max(0, shown.length - 1));
@@ -89,6 +103,10 @@ export function SessionPicker({
       if (s && s.id !== activeSessionId) setConfirmingDelete(s.id);
       return;
     }
+    if (key.name === "a" && workspace) {
+      setShowAll((v) => !v);
+      return;
+    }
   });
 
   const showBanner = variant === "launch" && width >= 60;
@@ -107,9 +125,18 @@ export function SessionPicker({
         <text fg={theme.accent}>
           <strong>{variant === "launch" ? "resume a session" : "switch session"}</strong>
         </text>
-        <text fg={theme.textMuted}> · {sessions.length} found</text>
+        <text fg={theme.textMuted}>
+          {" · "}{sessions.length} found{" · "}
+          {workspace
+            ? showAll
+              ? "all projects"
+              : `this project (${shortPath(workspace)})`
+            : "all sessions"}
+        </text>
       </box>
-      <text fg={theme.textDim}>↑↓ pick · enter resume · n new · d delete · esc {variant === "launch" ? "quit" : "close"}</text>
+      <text fg={theme.textDim}>
+        ↑↓ pick · enter resume · n new · d delete{workspace ? " · a toggle all/this project" : ""} · esc {variant === "launch" ? "quit" : "close"}
+      </text>
       <box marginTop={1} flexDirection="column">
         {shown.length === 0 && (
           <text fg={theme.textMuted}>
@@ -126,9 +153,19 @@ export function SessionPicker({
             .replace(/\s+/g, " ")
             .slice(0, 60);
           const meta = `${s.totalMessages}m · ${s.turnCount}t · ${formatTokens(s.tokenCount)}tk · ${relativeTime(s.lastActivity)}`;
+          // When showing across projects, surface the workspace so the user
+          // can tell two sessions with the same title apart.
+          const wsTag = showAll
+            ? s.workspace
+              ? ` · ${shortPath(s.workspace)}`
+              : " · (legacy)"
+            : "";
           return (
             <box key={s.id} flexDirection="column">
               <text fg={fg} bg={bg}>{` ${star} ${preview.padEnd(60, " ")}  ${meta.padStart(30, " ")} `}</text>
+              {wsTag && (
+                <text fg={highlighted ? theme.bg : theme.textDim} bg={bg}>{`     ${wsTag}`}</text>
+              )}
             </box>
           );
         })}
@@ -190,6 +227,16 @@ function formatTokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
   return `${(n / 1_000_000).toFixed(1)}m`;
+}
+
+/** Trim a path so it fits in the picker row without dominating it. */
+function shortPath(p: string): string {
+  const home = process.env.HOME || "";
+  let s = home && p.startsWith(home) ? `~${p.slice(home.length)}` : p;
+  // Final two segments are usually enough to identify the project.
+  const parts = s.split(path.sep);
+  if (parts.length > 3) s = `…${path.sep}${parts.slice(-2).join(path.sep)}`;
+  return s;
 }
 
 export { newSessionId };

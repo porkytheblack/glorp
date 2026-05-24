@@ -2,10 +2,11 @@ import type { Message, StoreAdapter, Task, PermissionStatus, InboxItem, TokenCon
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { PlanDocument } from "../shared/events.ts";
-import type { Snapshot, SnapshotMeta, StoreOptions } from "./store-snapshot.ts";
-import { latestTriggerMessage, safeFilePart } from "./store-snapshot.ts";
+import type { OriginalRequest, Snapshot, SnapshotMeta, StoreOptions } from "./store-snapshot.ts";
+import { firstUserRequest, latestTriggerMessage, safeFilePart } from "./store-snapshot.ts";
 import { withSessionState } from "./session-state.ts";
 import { canonicalPermissionKey } from "./permission-key.ts";
+import { deriveProjectId } from "./workspace-id.ts";
 
 export class GlorpStore implements StoreAdapter {
   identifier: string;
@@ -22,6 +23,7 @@ export class GlorpStore implements StoreAdapter {
   private tasks: Task[] = [];
   private permissions = new Map<string, PermissionStatus>();
   private inboxItems: InboxItem[] = [];
+  private originalRequest: OriginalRequest | null = null;
   private dirty = false;
   private writePromise: Promise<void> | null = null;
   private subStoreSeq = 0;
@@ -31,9 +33,19 @@ export class GlorpStore implements StoreAdapter {
     this.identifier = identifier;
     this.dataDir = dataDir;
     this.filePath = opts.filePath ?? path.join(dataDir, "sessions", `${identifier}.json`);
-    this.metadata = opts.metadata ?? { kind: "session", createdAt: new Date().toISOString() };
+    this.metadata = opts.metadata ?? buildDefaultMetadata(opts);
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     this.loadFromDisk();
+    // If this is a fresh session for an explicit workspace, stamp the
+    // metadata now so the first persisted snapshot is already scoped.
+    if (opts.workspace && !this.metadata.workspace) {
+      this.metadata = {
+        ...this.metadata,
+        workspace: opts.workspace,
+        projectId: opts.projectId ?? deriveProjectId(opts.workspace),
+      };
+      this.dirty = true;
+    }
   }
 
   private loadFromDisk(): void {
@@ -51,6 +63,20 @@ export class GlorpStore implements StoreAdapter {
       this.tasks = snap.tasks ?? [];
       this.permissions = new Map(Object.entries(snap.permissions ?? {}));
       this.inboxItems = snap.inboxItems ?? [];
+      this.originalRequest = snap.originalRequest ?? null;
+      // Back-fill for sessions persisted before originalRequest existed.
+      // Only works if compaction hasn't already wiped the first user message.
+      if (!this.originalRequest) {
+        const first = firstUserRequest(this.messages);
+        if (first) {
+          this.originalRequest = {
+            id: first.id,
+            text: first.text,
+            capturedAt: new Date().toISOString(),
+          };
+          this.dirty = true;
+        }
+      }
     } catch (err) {
       console.error(`[glorp-store] failed to load ${this.filePath}:`, err);
     }
@@ -90,6 +116,7 @@ export class GlorpStore implements StoreAdapter {
       tasks: this.tasks,
       permissions: Object.fromEntries(this.permissions),
       inboxItems: this.inboxItems,
+      originalRequest: this.originalRequest,
     };
   }
 
@@ -102,10 +129,19 @@ export class GlorpStore implements StoreAdapter {
   }
 
   async getMessages(): Promise<Message[]> {
-    return withSessionState(this.messages, { plan: this.plan, tasks: this.tasks, inboxItems: this.inboxItems });
+    return withSessionState(this.messages, {
+      plan: this.plan,
+      tasks: this.tasks,
+      inboxItems: this.inboxItems,
+      originalRequest: this.originalRequest,
+    });
   }
   async getDisplayMessages(): Promise<Message[]> { return [...this.messages]; }
   async getTitle(): Promise<string | null> { return this.title; }
+  getOriginalRequest(): OriginalRequest | null { return this.originalRequest; }
+  getMetadata(): SnapshotMeta { return { ...this.metadata }; }
+  getWorkspace(): string | undefined { return this.metadata.workspace; }
+  getProjectId(): string | undefined { return this.metadata.projectId; }
 
   async setTitle(title: string | null): Promise<void> {
     this.title = cleanTitle(title);
@@ -113,7 +149,20 @@ export class GlorpStore implements StoreAdapter {
     this.scheduleFlush();
   }
 
-  async appendMessages(msgs: Message[]): Promise<void> { this.messages.push(...msgs); this.scheduleFlush(); }
+  async appendMessages(msgs: Message[]): Promise<void> {
+    this.messages.push(...msgs);
+    if (!this.originalRequest) {
+      const first = firstUserRequest(msgs);
+      if (first) {
+        this.originalRequest = {
+          id: first.id,
+          text: first.text,
+          capturedAt: new Date().toISOString(),
+        };
+      }
+    }
+    this.scheduleFlush();
+  }
   async getTokenCount(): Promise<number> { return this.tokensIn + this.tokensOut; }
   async getTokenCounts(): Promise<{ in: number; out: number }> {
     return { in: this.tokensIn, out: this.tokensOut };
@@ -217,4 +266,13 @@ export class GlorpStore implements StoreAdapter {
 
 function cleanTitle(title: unknown): string | null {
   return typeof title === "string" && title.trim() ? title.replace(/\s+/g, " ").trim() : null;
+}
+
+function buildDefaultMetadata(opts: StoreOptions): SnapshotMeta {
+  const meta: SnapshotMeta = { kind: "session", createdAt: new Date().toISOString() };
+  if (opts.workspace) {
+    meta.workspace = opts.workspace;
+    meta.projectId = opts.projectId ?? deriveProjectId(opts.workspace);
+  }
+  return meta;
 }

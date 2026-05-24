@@ -277,6 +277,33 @@ describe("writeTool", () => {
       /outside the workspace/,
     );
   });
+
+  test("refuses text payload to .docx and similar binary extensions", async () => {
+    const tool = writeTool(workspace);
+    const cases = [
+      "report.docx",
+      "deck.pptx",
+      "sheet.xlsx",
+      "out.pdf",
+      "logo.PNG", // case-insensitive
+      "bundle.zip",
+      "audio.mp3",
+    ];
+    for (const p of cases) {
+      const r = await tool.do({ path: p, content: "PLACEHOLDER" }, display, glove);
+      expect(r.status).toBe("error");
+      expect(r.message ?? "").toMatch(/Refusing to write text content/i);
+      expect(fs.existsSync(path.join(workspace, p))).toBe(false);
+    }
+  });
+
+  test("still allows neighboring text-ish extensions (.md, .txt, .json)", async () => {
+    const tool = writeTool(workspace);
+    for (const p of ["notes.md", "out.txt", "data.json"]) {
+      const r = await tool.do({ path: p, content: "ok" }, display, glove);
+      expect(r.status).toBe("success");
+    }
+  });
 });
 
 // =====================================================================

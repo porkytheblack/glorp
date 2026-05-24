@@ -10,6 +10,7 @@ import { getBridge } from "../shared/bridge.ts";
 import { createFleet } from "./station-bridge.ts";
 import { CredentialsStore } from "./credentials.ts";
 import { ModelCatalog } from "./model-catalog.ts";
+import { loadProjectConfig } from "./project-config.ts";
 import { discoverExtensions, type ExtensionsBundle } from "./extensions-loader.ts";
 import { bridgeDisplaySlots } from "./runtime/display-bridge.ts";
 import { createRefreshers } from "./runtime/refresh.ts";
@@ -48,11 +49,18 @@ const TITLE_MODEL_TIMEOUT_MS = 15_000;
 
 export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> {
   const dataDir = opts.dataDir ?? path.join(os.homedir(), ".glorp");
-  const store = new GlorpStore(opts.sessionId, dataDir);
+  const store = new GlorpStore(opts.sessionId, dataDir, { workspace: opts.workspace });
   const resources = createSessionResources(dataDir, opts.sessionId);
   const credentials = opts.credentials ?? new CredentialsStore(dataDir);
   const catalog = new ModelCatalog(dataDir);
-  const picked = await pickModel({ provider: opts.provider, model: opts.model, credentials, catalog });
+  const projectConfig = loadProjectConfig(opts.workspace);
+  const picked = await pickModel({
+    provider: opts.provider,
+    model: opts.model,
+    credentials,
+    catalog,
+    projectConfig,
+  });
   let contextLimit = picked.contextLimit;
   let modelLabel = picked.label;
   const bridge = getBridge();
@@ -118,6 +126,8 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     fleet,
     store,
     credentials,
+    catalog,
+    projectConfig,
     sessionId: opts.sessionId,
     get title() { return titleScheduler.title; },
     get extensions() { return buildExtensionCatalogue(agent); },
@@ -138,7 +148,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     clearPermissionKey(key) { return store.clearPermissionKey(key); },
     listPermissions() { return store.listPermissions(); },
     async swapProfile(profileId) {
-      const next = await pickModel({ profileId, credentials, catalog });
+      const next = await pickModel({ profileId, credentials, catalog, projectConfig });
       abortController?.abort();
       await titleScheduler.cancel();
       titleScheduler.setModel(next.titleAdapter);
@@ -249,8 +259,10 @@ function assembleAgent(args: AssembleArgs): IGloveRunnable {
     builder.defineSubAgent(makeDiskSubAgent(sub, { workspace: args.workspace, dataDir: args.dataDir }));
   }
   registerHooks(builder);
-  registerBuiltInSkills(builder);
+  // Disk skills first so workspace-local and home-installed skills win on
+  // a name collision; built-ins fill any name a disk skill did not claim.
   registerDiskSkills(builder, args.diskExtensions.skills);
+  registerBuiltInSkills(builder, args.diskExtensions.skills);
 
   const agent = builder.build();
   (agent as any).promptMachine.enableToolResultSummary = true;

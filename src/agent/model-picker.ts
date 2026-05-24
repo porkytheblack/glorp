@@ -12,7 +12,14 @@ import {
   normaliseReasoning,
   reasoningLabel,
 } from "./credentials.ts";
-import { DEFAULT_FALLBACK_CONTEXT_LIMIT, ModelCatalog } from "./model-catalog.ts";
+import { DEFAULT_FALLBACK_CONTEXT_LIMIT, ModelCatalog, type ModelInfo } from "./model-catalog.ts";
+import {
+  applyOverrides,
+  variantsFor,
+  type ModelVariant,
+  type ProjectConfig,
+  type ProviderOverride,
+} from "./project-config.ts";
 
 /**
  * Per-provider default for the title-generation model. Picked to be cheap
@@ -40,6 +47,8 @@ export interface PickModelOptions {
   profileId?: string;
   /** Model catalog used to resolve `contextLimit`. Optional; falls back to default when absent. */
   catalog?: ModelCatalog;
+  /** Project config (glorp.json) overrides. Optional; merged on top of catalog. */
+  projectConfig?: ProjectConfig;
 }
 
 export interface PickedModel {
@@ -55,10 +64,14 @@ export interface PickedModel {
   /**
    * Resolved input-context window in tokens. Resolution order:
    *   1. `profile.contextLimit` override
-   *   2. `catalog.getContextLimit(providerId, model)`
-   *   3. {@link DEFAULT_FALLBACK_CONTEXT_LIMIT}
+   *   2. `provider.contextLimit` (credentials.json)
+   *   3. `projectConfig` overrides (glorp.json model.contextLimit / provider.contextLimit)
+   *   4. `catalog.getContextLimit(providerId, model)`
+   *   5. {@link DEFAULT_FALLBACK_CONTEXT_LIMIT}
    */
   contextLimit: number;
+  /** Resolved capability / pricing record. Used by the rich-column picker UI. */
+  modelInfo?: ModelInfo;
   /**
    * Cheap adapter used by the title scheduler. Same provider config as the
    * main adapter; only the model name differs. Falls back to `adapter`
@@ -89,13 +102,20 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
       providerId: opts.provider,
       mainAdapter: adapter,
     });
+    const info = resolveModelInfo({
+      providerId: opts.provider,
+      model,
+      catalog: opts.catalog,
+      projectConfig: opts.projectConfig,
+    });
     return {
       adapter,
       titleAdapter,
       label: labelFor(opts.provider, model),
       providerId: opts.provider,
       model,
-      contextLimit: resolveContextLimit({ providerId: opts.provider, model, catalog: opts.catalog }),
+      modelInfo: info,
+      contextLimit: resolveContextLimit({ info }),
     };
   }
 
@@ -106,7 +126,11 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
     else profile = opts.credentials.getActiveProfile();
     if (profile) {
       const provider = opts.credentials.getProvider(profile.providerId);
-      const reasoning = normaliseReasoning(profile.reasoning);
+      const activeVariant = pickActiveVariant(opts.projectConfig, profile);
+      const reasoning =
+        activeVariant?.variant.reasoning
+          ? normaliseReasoning(activeVariant.variant.reasoning as ReasoningConfig)
+          : normaliseReasoning(profile.reasoning);
       const adapter = await buildAdapter({
         providerId: profile.providerId,
         model: profile.model,
@@ -119,19 +143,25 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
         profile,
         mainAdapter: adapter,
       });
+      let info = resolveModelInfo({
+        providerId: profile.providerId,
+        model: profile.model,
+        provider,
+        catalog: opts.catalog,
+        projectConfig: opts.projectConfig,
+      });
+      if (activeVariant?.variant.outputLimit) {
+        info = { ...info, output: activeVariant.variant.outputLimit };
+      }
       return {
         adapter,
         titleAdapter,
-        label: labelFor(profile.providerId, profile.model, reasoning),
+        label: labelFor(profile.providerId, profile.model, reasoning, activeVariant?.name),
         providerId: profile.providerId,
         model: profile.model,
         profile,
-        contextLimit: resolveContextLimit({
-          providerId: profile.providerId,
-          model: profile.model,
-          profile,
-          catalog: opts.catalog,
-        }),
+        modelInfo: info,
+        contextLimit: resolveContextLimit({ profile, provider, info }),
       };
     }
   }
@@ -145,13 +175,17 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
       providerId: envProvider,
       mainAdapter: adapter,
     });
+    const info = resolveModelInfo({
+      providerId: envProvider, model, catalog: opts.catalog, projectConfig: opts.projectConfig,
+    });
     return {
       adapter,
       titleAdapter,
       label: labelFor(envProvider, model),
       providerId: envProvider,
       model,
-      contextLimit: resolveContextLimit({ providerId: envProvider, model, catalog: opts.catalog }),
+      modelInfo: info,
+      contextLimit: resolveContextLimit({ info }),
     };
   }
 
@@ -185,16 +219,53 @@ async function buildTitleAdapter(args: {
   }
 }
 
+/**
+ * Resolution order, most specific first:
+ *   1. `profile.contextLimit`           — per-model override (credentials.json)
+ *   2. `provider.contextLimit`          — per-endpoint override (credentials.json)
+ *   3. `info.context` from project config + catalog (glorp.json model.contextLimit,
+ *                                          glorp.json provider.contextLimit, or the
+ *                                          catalog entry — `applyOverrides` already
+ *                                          consumed both layers)
+ *   4. {@link DEFAULT_FALLBACK_CONTEXT_LIMIT} — last-resort 128k
+ */
 function resolveContextLimit(args: {
-  providerId: string;
-  model: string;
   profile?: ModelProfile;
-  catalog?: ModelCatalog;
+  provider?: ProviderConfig;
+  info?: ModelInfo;
 }): number {
   if (args.profile?.contextLimit && args.profile.contextLimit > 0) return args.profile.contextLimit;
-  const fromCatalog = args.catalog?.getContextLimit(args.providerId, args.model);
-  if (fromCatalog && fromCatalog > 0) return fromCatalog;
+  if (args.provider?.contextLimit && args.provider.contextLimit > 0) return args.provider.contextLimit;
+  if (args.info?.context && args.info.context > 0) return args.info.context;
   return DEFAULT_FALLBACK_CONTEXT_LIMIT;
+}
+
+/**
+ * Build the merged ModelInfo the picker (and the UI) should use:
+ *   start from the catalog entry → overlay glorp.json provider/model overrides.
+ * Returns at least a stub `{ providerId, id }` so the picker has somewhere
+ * to attach values even when the catalog is empty.
+ *
+ * Catalog lookups go through `effectiveProviderId(...)` so a custom
+ * provider whose `adapter: "mimo"` / `basedOn: "mimo"` (or the MiMo URL
+ * heuristic) actually finds the MiMo entries — without this, the catalog
+ * is queried with the raw `custom-xiaomi-mimo` id and silently misses.
+ * Project-config overrides still key on the raw provider id so users
+ * declare overrides against the name they actually have in credentials.
+ */
+function resolveModelInfo(args: {
+  providerId: string;
+  model: string;
+  provider?: ProviderConfig;
+  catalog?: ModelCatalog;
+  projectConfig?: ProjectConfig;
+}): ModelInfo {
+  const effective = effectiveProviderId(args.providerId, args.provider, args.model);
+  const fromCatalog = args.catalog?.getModelInfo(effective, args.model);
+  const providerOverride: ProviderOverride | undefined =
+    args.projectConfig?.provider?.[args.providerId] ??
+    args.projectConfig?.provider?.[effective];
+  return applyOverrides(fromCatalog, providerOverride, args.providerId, args.model);
 }
 
 /**
@@ -332,11 +403,33 @@ function envDetectedProvider(): string | undefined {
   return undefined;
 }
 
-function labelFor(providerId: string, model: string, reasoning?: ReasoningConfig): string {
+function labelFor(
+  providerId: string,
+  model: string,
+  reasoning?: ReasoningConfig,
+  variantName?: string,
+): string {
   const known = findKnownProvider(providerId);
   const prefix = known?.id ?? providerId;
   const r = reasoning && reasoning.kind !== "off" ? ` · ${reasoningLabel(reasoning)}` : "";
-  return `${prefix} · ${shortModel(model)}${r}`;
+  const v = variantName ? ` · ${variantName}` : "";
+  return `${prefix} · ${shortModel(model)}${v}${r}`;
+}
+
+/**
+ * Resolve `profile.variantName` against the variants declared for the
+ * (providerId, model) in `projectConfig`. Returns `null` when the profile
+ * has no active variant, or when the named variant has been removed
+ * since the user last switched (falls back to the profile's own reasoning).
+ */
+function pickActiveVariant(
+  projectConfig: ProjectConfig | undefined,
+  profile: ModelProfile,
+): { name: string; variant: ModelVariant } | null {
+  if (!projectConfig || !profile.variantName) return null;
+  const variants = variantsFor(projectConfig, profile.providerId, profile.model);
+  const hit = variants.find((v) => v.name === profile.variantName);
+  return hit ?? null;
 }
 
 function shortModel(model: string): string {

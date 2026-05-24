@@ -3,6 +3,8 @@ import type { PermissionStatus } from "glove-core/core";
 import type { GlorpFleet } from "./station-bridge.ts";
 import type { GlorpStore } from "./store.ts";
 import type { CredentialsStore } from "./credentials.ts";
+import type { ModelCatalog } from "./model-catalog.ts";
+import type { ProjectConfig } from "./project-config.ts";
 
 export interface ExtensionCatalogue {
   slash: Array<{ name: string; description: string }>;
@@ -34,6 +36,10 @@ export interface GlorpHandle {
   listPermissions(): Array<{ key: string; status: PermissionStatus }>;
   onLabelChange(fn: (label: string) => void): () => void;
   hydrateUi(): Promise<void>;
+  /** Catalog of model metadata (context, cost, capabilities) for the UI. */
+  catalog: ModelCatalog;
+  /** Active project config merged from glorp.json layers. */
+  projectConfig: ProjectConfig;
 }
 
 export interface BuildGlorpOptions {

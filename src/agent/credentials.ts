@@ -141,11 +141,28 @@ export function findKnownProvider(id: string): KnownProviderMeta | undefined {
  * custom endpoint to a specific known provider explicitly; `adapter:
  * "mimo"` remains as a back-compat shortcut for the MiMo case.
  */
-export function effectiveProviderId(providerId: string, provider?: ProviderConfig): string {
+export function effectiveProviderId(
+  providerId: string,
+  provider?: ProviderConfig,
+  model?: string,
+): string {
   if (!provider) return providerId;
   if (provider.type === "known") return providerId;
   if (provider.basedOn) return provider.basedOn;
   if (provider.adapter === "mimo") return "mimo";
+  // Same heuristic the adapter builder uses: an untagged custom provider
+  // pointing at xiaomimimo.com or naming a `mimo*` model is MiMo. Mirroring
+  // it here means the catalog and reasoning paths route the same way as
+  // the adapter — no more "the adapter is MimoAdapter but catalog lookups
+  // miss because they used the raw provider id" mismatch.
+  if (
+    provider.basedOn == null &&
+    provider.adapter == null &&
+    (/xiaomimimo\.com/i.test(provider.baseURL ?? "") ||
+      (model != null && /^mimo(?:-|$)/i.test(model)))
+  ) {
+    return "mimo";
+  }
   return providerId;
 }
 
@@ -199,6 +216,16 @@ export interface ProviderConfig {
   baseURL?: string;
   /** API key. Optional for ollama and unauthenticated custom endpoints. */
   apiKey?: string;
+  /**
+   * Override the context window (in tokens) for every model served by this
+   * provider. Wins over the model catalog, loses to any per-profile
+   * `contextLimit` override. Useful when a custom endpoint serves a model
+   * whose name doesn't match anything in the catalog and whose real context
+   * window is bigger than `DEFAULT_FALLBACK_CONTEXT_LIMIT` (128k). Set this
+   * once on the provider instead of duplicating across every profile that
+   * uses it.
+   */
+  contextLimit?: number;
 }
 
 export interface ModelProfile {
@@ -232,6 +259,14 @@ export interface ModelProfile {
    * and ultimately falls back to the main model.
    */
   titleModel?: string;
+  /**
+   * Name of the active variant declared in glorp.json for this
+   * (providerId, model) pair. When set and the variant exists, its
+   * `reasoning` overlay replaces `profile.reasoning` at pick time, and
+   * its `outputLimit` is surfaced to the UI. Cycled in the picker via
+   * the `t` key; persisted so the choice survives a restart.
+   */
+  variantName?: string;
 }
 
 /** Upgrade old bare-effort strings on disk to the discriminated union. */

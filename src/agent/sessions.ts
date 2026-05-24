@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { deriveProjectId } from "./workspace-id.ts";
 
 /**
  * Lightweight metadata view of a saved session — read directly from the
@@ -19,16 +20,41 @@ export interface SessionInfo {
   tokenCount: number;
   turnCount: number;
   lastActivity: Date;
+  /** Workspace this session was created in. Undefined for legacy snapshots. */
+  workspace: string | null;
+  /** Stable project id (git root-commit hash, falling back to a path hash). */
+  projectId: string | null;
 }
+
+export type SessionScope =
+  /** Only sessions whose `projectId` matches the current workspace. Legacy
+   *  snapshots without a projectId are hidden in this mode. */
+  | { kind: "project"; workspace: string }
+  /** Only sessions whose `workspace` path is exactly this one. Tighter than
+   *  `project` — useful when a single repo has multiple worktrees and you
+   *  only care about the current checkout. */
+  | { kind: "workspace"; workspace: string }
+  /** Show everything in the data dir, including legacy unscoped snapshots. */
+  | { kind: "all" };
 
 /**
  * Scan `<dataDir>/sessions/*.json` and return the metadata for each.
  * Sorted most-recently-modified first. Malformed files are skipped.
+ *
+ * Pass a `scope` to filter; defaults to `{ kind: "all" }` for backwards
+ * compatibility with callers that don't care about workspace scoping.
  */
-export async function listSessions(dataDir: string): Promise<SessionInfo[]> {
+export async function listSessions(
+  dataDir: string,
+  scope: SessionScope = { kind: "all" },
+): Promise<SessionInfo[]> {
   const sessionsDir = path.join(dataDir, "sessions");
   if (!fs.existsSync(sessionsDir)) return [];
   const files = await fs.promises.readdir(sessionsDir);
+  const targetProjectId =
+    scope.kind === "project" ? deriveProjectId(scope.workspace) : null;
+  const targetWorkspace =
+    scope.kind === "workspace" ? path.resolve(scope.workspace) : null;
   const results: SessionInfo[] = [];
   for (const file of files) {
     if (!file.endsWith(".json") || file.endsWith(".tmp")) continue;
@@ -44,7 +70,15 @@ export async function listSessions(dataDir: string): Promise<SessionInfo[]> {
         tokensIn?: number;
         tokensOut?: number;
         turnCount?: number;
+        metadata?: { workspace?: string; projectId?: string };
       };
+      const snapWorkspace = snap.metadata?.workspace ?? null;
+      const snapProjectId = snap.metadata?.projectId ?? null;
+
+      if (targetProjectId && snapProjectId !== targetProjectId) continue;
+      if (targetWorkspace && snapWorkspace && path.resolve(snapWorkspace) !== targetWorkspace) continue;
+      if (targetWorkspace && !snapWorkspace) continue;
+
       const msgs = snap.messages ?? [];
       const firstUser = msgs.find((m) => m.sender === "user")?.text ?? null;
       const agentCount = msgs.filter((m) => m.sender === "agent").length;
@@ -61,6 +95,8 @@ export async function listSessions(dataDir: string): Promise<SessionInfo[]> {
         tokenCount: (snap.tokensIn ?? 0) + (snap.tokensOut ?? 0),
         turnCount: snap.turnCount ?? 0,
         lastActivity: stat.mtime,
+        workspace: snapWorkspace,
+        projectId: snapProjectId,
       });
     } catch {
       // Skip malformed sessions — recovery isn't this module's job.

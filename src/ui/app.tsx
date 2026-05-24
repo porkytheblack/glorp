@@ -82,6 +82,8 @@ export function App({
     return (
       <ModelSwitcher
         credentials={glorp.credentials}
+        catalog={glorp.catalog}
+        projectConfig={glorp.projectConfig}
         activeProfileId={glorp.credentials.getActiveProfile()?.id}
         onPick={async (profileId) => {
           setOverlay(null);
@@ -98,6 +100,7 @@ export function App({
     return (
       <SessionPicker
         dataDir={dataDir}
+        workspace={workspace}
         variant="overlay"
         activeSessionId={glorp.sessionId}
         onPick={(sessionId) => {
