@@ -116,6 +116,10 @@ export function InputBar({
   const [menuIndex, setMenuIndex] = useState(0);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState<number | null>(null);
+  // Post-wrap line count read from the textarea ref. Authoritative source
+  // for input height — paste, word-wrap, CJK widths all factor in here,
+  // unlike a char-count/width estimate done from the React side.
+  const [virtualLines, setVirtualLines] = useState(MIN_LINES);
   // Ref to the underlying TextareaRenderable so we can call setText("")
   // to actually clear the buffer after submit.
   const textareaRef = useRef<TextareaRenderable | null>(null);
@@ -133,6 +137,25 @@ export function InputBar({
   const readTextareaCursorOffset = useCallback((text: string) => {
     return clampCursorOffset(text, textareaRef.current?.cursorOffset ?? text.length);
   }, []);
+
+  /** Read the textarea's post-wrap line count, clamped to [MIN_LINES, MAX_LINES].
+   *  This is the authoritative size — the textarea's editor view recomputes
+   *  it after every mutation (insert/delete/paste), accounting for word-wrap,
+   *  CJK widths, and explicit newlines. */
+  const readVirtualLineCount = useCallback(() => {
+    const node = textareaRef.current;
+    if (!node) return MIN_LINES;
+    const raw = node.virtualLineCount;
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 1) return MIN_LINES;
+    return Math.min(MAX_LINES, Math.max(MIN_LINES, Math.floor(raw)));
+  }, []);
+
+  const syncVirtualLineCount = useCallback(() => {
+    setVirtualLines((current) => {
+      const next = readVirtualLineCount();
+      return current === next ? current : next;
+    });
+  }, [readVirtualLineCount]);
 
   const enforceTextareaCursorOffset = useCallback((text: string, cursor: number) => {
     const nextCursor = clampCursorOffset(text, cursor);
@@ -178,7 +201,8 @@ export function InputBar({
         setCursorOffset(clampCursorOffset(next, node?.cursorOffset ?? next.length));
       }
     }
-  }, [setTextareaCursorOffset]);
+    syncVirtualLineCount();
+  }, [setTextareaCursorOffset, syncVirtualLineCount]);
 
   const activeToken = useMemo(
     () => findActiveHintToken(value, cursorOffset),
@@ -200,18 +224,12 @@ export function InputBar({
   const menuMatches = activeToken ? menuPool.filter((c) => c.name.startsWith(activeQuery)) : [];
   const showingMenu = activeToken !== null;
 
-  // Reserve 6 cols of chrome (border + prompt glyph + spaces) when
-  // estimating wrapped lines.
-  const innerWidth = Math.max(20, width - 6);
-  const visibleLines = useMemo(() => {
-    if (!value) return MIN_LINES;
-    let lines = 0;
-    for (const segment of value.split("\n")) {
-      const w = Math.max(1, segment.length);
-      lines += Math.max(1, Math.ceil(w / innerWidth));
-    }
-    return Math.min(MAX_LINES, Math.max(MIN_LINES, lines));
-  }, [value, innerWidth]);
+  // `virtualLines` is sourced from the textarea's editorView via
+  // `syncVirtualLineCount` and reflects the actual post-wrap row count,
+  // including paste, word-wrap, and CJK widths. The old char/width estimate
+  // under-counted pasted content (word-wrap produces more rows than
+  // char-wrap for prose) and let the parent layout squeeze the input.
+  const visibleLines = virtualLines;
 
   const menuHeight = showingMenu ? Math.min(SLASH_MENU_VISIBLE_ROWS, menuMatches.length) + 5 : 0;
   const renderedHeight = menuHeight + visibleLines + (variant === "hero" ? 5 : 3);
@@ -248,36 +266,31 @@ export function InputBar({
 
   const handleTextareaContentChange = useCallback(() => {
     syncTextareaText();
-    queueMicrotask(syncTextareaText);
-    setTimeout(syncTextareaText, 0);
-  }, [syncTextareaText]);
+    syncVirtualLineCount();
+    queueMicrotask(() => {
+      syncTextareaText();
+      syncVirtualLineCount();
+    });
+    setTimeout(() => {
+      syncTextareaText();
+      syncVirtualLineCount();
+    }, 0);
+  }, [syncTextareaText, syncVirtualLineCount]);
 
   const handleTextareaCursorChange = useCallback(() => {
     const next = readTextareaText();
     setCursorOffset(readTextareaCursorOffset(next));
   }, [readTextareaCursorOffset, readTextareaText]);
 
+  // The textarea owns its edit buffer — every key mutates it directly and
+  // fires onContentChange, which is where we re-read plainText + cursor +
+  // virtualLines. The only thing we need from this handler is the side
+  // effect of exiting "history scrub" mode the moment the user starts
+  // typing fresh content. Don't mirror state updates here — racing against
+  // onContentChange caused cursor jumps and stale height computation.
   const handleTextareaKeyDown = useCallback((key: KeyEvent) => {
-    if (key.name === "backspace") {
-      setValue((current) => current.slice(0, -1));
-      setCursorOffset((current) => Math.max(0, current - 1));
-      return;
-    }
-    if (
-      (key.name === "return" || key.name === "kpenter" || key.name === "linefeed") &&
-      (key.shift || key.name === "linefeed") &&
-      !key.ctrl &&
-      !key.meta
-    ) {
-      setValue((current) => `${current}\n`);
-      setCursorOffset((current) => current + 1);
-      return;
-    }
-    const typed = printableKeyText(key);
-    if (typed !== undefined) {
+    if (printableKeyText(key) !== undefined) {
       setHistoryIdx(null);
-      setValue((current) => `${current}${typed}`);
-      setCursorOffset((current) => current + typed.length);
     }
   }, []);
 

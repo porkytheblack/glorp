@@ -15,10 +15,10 @@ async function settle() {
   await setup?.renderOnce();
 }
 
-async function interact(fn: () => void | Promise<void>) {
+async function interact(fn: () => void | Promise<void>, settles = 3) {
   await act(async () => {
     await fn();
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < settles; i++) {
       await Promise.resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
@@ -223,4 +223,31 @@ describe("InputBar", () => {
     expect(frame).toContain("line two");
     expect(Math.max(...heights)).toBeGreaterThanOrEqual(5);
   });
+
+  test("typing multi-line content grows the height monotonically as rows fill", async () => {
+    // Regression for the paste-doesn't-grow-the-input bug. The old height
+    // was a char/width estimate against the React `value`, which lagged
+    // the textarea on multi-line input. Now `virtualLines` is sourced
+    // from the textarea ref and grows with each appended row, regardless
+    // of whether content arrived via typing, paste, or shift-enter.
+    const heights: number[] = [];
+    const t = await renderInputBar({ onHeightChange: (height) => heights.push(height) });
+    const baseline = Math.max(...heights, 0);
+
+    await interact(() => typeText("alpha"));
+    await interact(() => t.mockInput.pressEnter({ shift: true }));
+    await interact(() => typeText("beta"));
+    await interact(() => t.mockInput.pressEnter({ shift: true }));
+    await interact(() => typeText("gamma"));
+    await interact(() => t.mockInput.pressEnter({ shift: true }));
+    await interact(() => typeText("delta"));
+
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("alpha");
+    expect(frame).toContain("delta");
+    // 4 visible rows in the textarea → renderedHeight at least
+    // 4 (rows) + 3 (chrome lines) = 7 once virtualLineCount catches up.
+    expect(Math.max(...heights)).toBeGreaterThanOrEqual(baseline + 3);
+  });
+
 });
