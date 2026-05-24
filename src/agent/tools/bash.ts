@@ -4,6 +4,7 @@ import type { DisplayManagerAdapter } from "glove-core/display-manager";
 import type { SummaryTool } from "./summaries.ts";
 import { compactText, lineCount } from "./summaries.ts";
 import { looksLikeMutation } from "../permission-key.ts";
+import { commandEscapesWorkspace } from "./fs-shared.ts";
 
 const MAX_OUTPUT_BYTES_PER_STREAM = 64 * 1024;
 const OUTPUT_HEAD_BYTES = 48 * 1024;
@@ -110,6 +111,19 @@ function confirmReason(cmd: string): string | null {
     if (pattern.test(cmd)) return reason;
   }
   return null;
+}
+
+/**
+ * Layered gate for a bash command:
+ *   1. Static CONFIRM_PATTERNS (destructive shapes, global installs)
+ *   2. Cwd-escape detector — anything that references absolute or
+ *      home-rooted paths outside the workspace, or `cd`s to an outside
+ *      directory. Catches the common-cases that happen by accident
+ *      (`cat /etc/passwd`, `cd ~/.config`, `> ~/Desktop/foo`).
+ * Returns the first matching reason or null.
+ */
+function gateReason(cmd: string, workspace: string): string | null {
+  return confirmReason(cmd) ?? commandEscapesWorkspace(cmd, workspace);
 }
 
 /**
@@ -245,7 +259,7 @@ export function bashTool(workspace: string): SummaryTool<{
       if (hard) {
         return { status: "error", data: null, message: hard };
       }
-      const needsConfirm = confirmReason(input.command);
+      const needsConfirm = gateReason(input.command, workspace);
       if (needsConfirm) {
         const allowed = await askDestructiveConfirm(display, input.command, needsConfirm);
         if (!allowed) {

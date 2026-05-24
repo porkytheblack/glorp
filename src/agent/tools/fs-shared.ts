@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
+import * as os from "node:os";
 
 /** Shared directory blocklist for tree-walking tools (glob, grep). */
 export const IGNORED_DIRS: ReadonlySet<string> = new Set([
@@ -39,6 +40,119 @@ export function resolveSafePath(workspace: string, p: string): string {
 
 export function relPath(workspace: string, p: string): string {
   return path.relative(workspace, p) || ".";
+}
+
+/**
+ * Path-like tokens we explicitly permit even though they aren't under the
+ * workspace. `/dev/null` etc. are routine bash idioms (e.g. `cmd > /dev/null
+ * 2>&1`) and have no read/write side-effect that could leak workspace
+ * contents or import outside data.
+ */
+const OUTSIDE_TOKEN_ALLOWLIST: ReadonlySet<string> = new Set([
+  "/dev/null",
+  "/dev/stdin",
+  "/dev/stdout",
+  "/dev/stderr",
+  "/dev/zero",
+  "/dev/random",
+  "/dev/urandom",
+  "/dev/tty",
+  "/dev/fd",
+]);
+
+/**
+ * Does a shell command reference any filesystem path outside the workspace?
+ *
+ * Returns a one-line reason string when escape is detected, suitable for the
+ * bash tool's confirmation modal; returns null when the command is workspace-
+ * scoped or only references the small allowlist of generic /dev/* tokens.
+ *
+ * Detects two shapes:
+ *   1. `cd <path>` / `pushd <path>` where the resolved target lies outside
+ *      the workspace.
+ *   2. Any whitespace-or-shell-operator-delimited token that begins with
+ *      `/`, `~/`, `$HOME/`, or `${HOME}/` and whose expanded absolute form
+ *      does not resolve under the workspace.
+ *
+ * This is a heuristic, not a sandbox — bash is a shell and can hide paths
+ * inside command substitutions, eval, $( ), backticks, env vars, etc. The
+ * goal is to catch the common-cases that happen *by accident* (the model
+ * asked to read `/etc/passwd` or `~/.ssh/id_rsa`, redirected output to
+ * `~/Desktop/foo`, or `cd ~/.config`) and force a one-shot confirm.
+ * Determined misuse needs a real sandbox; that's a different layer.
+ */
+export function commandEscapesWorkspace(
+  command: string,
+  workspace: string,
+  homeDir: string = os.homedir(),
+): string | null {
+  const cdReason = cdArgEscapes(command, workspace, homeDir);
+  if (cdReason) return cdReason;
+  return absoluteTokenEscapes(command, workspace, homeDir);
+}
+
+function cdArgEscapes(command: string, workspace: string, homeDir: string): string | null {
+  // Match `cd <arg>` and `pushd <arg>` (not popd — it takes no path).
+  // The arg ends at whitespace or a shell separator.
+  const re = /\b(?:cd|pushd)\s+(--\s+)?([^\s|;&<>"'`)]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(command)) !== null) {
+    const arg = m[2]!;
+    if (!arg || arg === "-" || arg === ".") continue;
+    if (arg === "~" || arg === "$HOME" || arg === "${HOME}") {
+      return `\`cd ${arg}\` leaves the workspace`;
+    }
+    const abs = expandToAbsolute(arg, workspace, homeDir);
+    if (abs == null) continue;
+    if (!isUnder(abs, workspace)) {
+      return `\`cd\` to a path outside the workspace: ${arg}`;
+    }
+  }
+  return null;
+}
+
+function absoluteTokenEscapes(command: string, workspace: string, homeDir: string): string | null {
+  // Look for tokens starting with /, ~/, $HOME/, ${HOME}/. The lookbehind
+  // avoids matching mid-token slashes — word chars, dots, hyphens, and
+  // colons cover identifiers and url schemes; the extra `/` exclusion
+  // covers the second slash in `https://`, `git://`, etc. Stops at
+  // whitespace or shell separators.
+  const re = /(?<![\w\-.:/])(\/[^\s|;&<>"'`)]+|~\/[^\s|;&<>"'`)]+|\$(?:\{HOME\}|HOME)\/[^\s|;&<>"'`)]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(command)) !== null) {
+    let tok = m[1]!.replace(/[)>;&|]+$/, "");
+    if (!tok) continue;
+    if (OUTSIDE_TOKEN_ALLOWLIST.has(tok)) continue;
+    // Allowlist any /dev/fd/N subpath as well — process file descriptors.
+    if (tok.startsWith("/dev/fd/")) continue;
+    const abs = expandToAbsolute(tok, workspace, homeDir);
+    if (abs == null) continue;
+    if (!isUnder(abs, workspace)) {
+      return `references path outside the workspace: ${tok}`;
+    }
+  }
+  return null;
+}
+
+function expandToAbsolute(token: string, workspace: string, homeDir: string): string | null {
+  let raw: string;
+  if (token === "~" || token === "$HOME" || token === "${HOME}") raw = homeDir;
+  else if (token.startsWith("~/")) raw = path.join(homeDir, token.slice(2));
+  else if (token.startsWith("$HOME/")) raw = path.join(homeDir, token.slice(6));
+  else if (token.startsWith("${HOME}/")) raw = path.join(homeDir, token.slice(8));
+  else if (path.isAbsolute(token)) raw = token;
+  else raw = path.resolve(workspace, token);
+  try {
+    return path.resolve(raw);
+  } catch {
+    return null;
+  }
+}
+
+function isUnder(abs: string, workspace: string): boolean {
+  const rel = path.relative(workspace, abs);
+  if (rel === "") return true;
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
 export async function isDir(p: string): Promise<boolean> {
