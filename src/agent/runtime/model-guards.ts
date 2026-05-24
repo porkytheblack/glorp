@@ -7,6 +7,8 @@ const INTENT_ONLY_CONTINUATION_PROMPT =
   "[internal continuation] Your previous completion only stated an intention to continue. Continue now with the concrete next tool call. If a blocking inbox item is obsolete, first call glove_update_inbox.";
 const TASK_UPDATE_CONTINUATION_PROMPT =
   "[internal continuation] You just updated the task list and at least one task is still pending or in_progress. Continue now with the next concrete tool call or, if blocked, state the blocker.";
+const TRAILING_TOOL_RESULT_PROMPT =
+  "[internal continuation] You produced no follow-up after the last tool result. Ending a turn on a tool result is an anti-pattern — the user is left without a closing message and the TUI shows the agent as still working. Write a short text response now that (a) summarises what the tool result tells you, and (b) either kicks off the next concrete step or states the work is complete with a one-line outcome.";
 
 export function visibleMessageText(message: Message): string {
   const text = message.pre_modified_text ?? message.text ?? "";
@@ -66,6 +68,72 @@ export function withEmptyResponseRetry(model: ModelAdapter): ModelAdapter {
   });
 }
 
+/**
+ * Block the "agent ends on a tool result" anti-pattern. When the most
+ * recent message in the prompt is a tool result (the loop just executed
+ * tools), the model MUST emit at least one user-visible text run — either
+ * a summary of what the tool said or a clear handoff to the next step.
+ *
+ * Without this, the UI sees the tool result land and the agent go silent
+ * — looks like a freeze, and reading the transcript later there's no
+ * narrative tying the tool outputs to a decision. We buffer the first
+ * attempt's events; if the model produced ONLY tool calls (no text) AND
+ * there is no further tool work pending, ask for the text wrap-up and
+ * use whatever the model returns on the retry.
+ */
+export function withTrailingToolResultGuard(model: ModelAdapter): ModelAdapter {
+  return wrap(model, async (request, notify, signal) => {
+    if (!latestMessageHasToolResults(request.messages)) {
+      return model.prompt(request, notify, signal);
+    }
+    const events: Array<{ eventType: string; data: unknown }> = [];
+    const buffered: SubscriberAdapter["record"] = async (eventType, data) => {
+      events.push({ eventType: eventType as string, data });
+    };
+    const first = await model.prompt(request, buffered, signal);
+    if (signal?.aborted) {
+      await replay(notify, events);
+      return first;
+    }
+    // If the first response includes ANY visible text, we're good — replay
+    // the buffered events and return. If it only contains tool calls, that
+    // is fine too: the loop will execute those and we'll get a chance to
+    // wrap up later on the resulting prompt.
+    if (modelResponseHasVisibleText(first) || modelResponseIsToolOnly(first)) {
+      await replay(notify, events);
+      return first;
+    }
+    // Empty response after a tool result — actively ask for a wrap-up.
+    return model.prompt(
+      { ...request, messages: [...request.messages, internalUser(TRAILING_TOOL_RESULT_PROMPT)] },
+      notify,
+      signal,
+    );
+  });
+}
+
+function latestMessageHasToolResults(messages: Message[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.is_compaction || m.is_compaction_request || m.is_skill_injection) continue;
+    return (m.tool_results?.length ?? 0) > 0;
+  }
+  return false;
+}
+
+function modelResponseHasVisibleText(result: ModelPromptResult): boolean {
+  return result.messages.some((m) => m.sender === "agent" && visibleMessageText(m).trim().length > 0);
+}
+
+function modelResponseIsToolOnly(result: ModelPromptResult): boolean {
+  const agent = result.messages.filter((m) => m.sender === "agent");
+  if (agent.length === 0) return false;
+  return agent.every(
+    (m) => (m.tool_calls?.length ?? 0) > 0 && visibleMessageText(m).trim().length === 0,
+  );
+}
+
 export function withIntentOnlyContinuation(model: ModelAdapter): ModelAdapter {
   return wrap(model, async (request, notify, signal) => {
     const events: Array<{ eventType: string; data: unknown }> = [];
@@ -98,7 +166,11 @@ export function withTaskUpdateContinuation(model: ModelAdapter): ModelAdapter {
 }
 
 export function wrapGlorpModel(model: ModelAdapter): ModelAdapter {
-  return withIntentOnlyContinuation(withTaskUpdateContinuation(withEmptyResponseRetry(model)));
+  return withIntentOnlyContinuation(
+    withTaskUpdateContinuation(
+      withTrailingToolResultGuard(withEmptyResponseRetry(model)),
+    ),
+  );
 }
 
 function wrap(model: ModelAdapter, prompt: ModelAdapter["prompt"]): ModelAdapter {

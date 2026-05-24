@@ -39,19 +39,63 @@ const HARD_BLOCK_PATTERNS = [
  * Risky shapes — the tool prompts the user every time. Never cached, even
  * after a general "always allow bash" grant. The reason string surfaces in
  * the confirmation modal so the user sees why we're asking.
+ *
+ * "Global" patterns (install/uninstall/update of system-wide packages,
+ * homebrew, system config changes) are in here on purpose: they mutate
+ * state outside the workspace and a coding agent should never run them
+ * autonomously. The user can still approve with a single click — we just
+ * never assume.
  */
 const CONFIRM_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  // Destructive filesystem / privilege
   { pattern: /\brm\s+(?:-[a-zA-Z]*[rRfF][a-zA-Z]*\s+)/, reason: "recursive/force delete" },
   { pattern: /\brm\s+[^\n]*\s\.(\s|$)/, reason: "deletes current directory" },
   { pattern: /\brm\s+[^\n]*\s~(\s|\/|$)/, reason: "deletes home directory" },
   { pattern: /\bsudo\b/, reason: "elevates privileges with sudo" },
   { pattern: /\bchmod\s+-R\b/, reason: "recursive chmod" },
   { pattern: /\bchown\s+-R\b/, reason: "recursive chown" },
+
+  // Destructive git
   { pattern: /\bgit\s+reset\s+--hard\b/, reason: "git reset --hard discards uncommitted work" },
   { pattern: /\bgit\s+clean\s+-[a-zA-Z]*[fFxXdD]/, reason: "git clean removes untracked files" },
   { pattern: /\bgit\s+push\b[^|;&]*\s(?:--force\b|-f\b)/, reason: "git force push rewrites remote history" },
   { pattern: /\bgit\s+branch\s+-D\b/, reason: "force-deletes a branch" },
+
+  // Pipe-to-shell installers
   { pattern: /\b(curl|wget)\b[^|;&]*\|\s*(bash|sh|zsh|fish)\b/, reason: "executes downloaded script" },
+
+  // Node/JS global installs — npm, pnpm, yarn, bun
+  { pattern: /\bnpm\s+(?:i|install|add)\b[^|;&]*\s(?:-g\b|--global\b)/, reason: "installs an npm package globally" },
+  { pattern: /\bnpm\s+(?:uninstall|remove|rm|un|unlink)\b[^|;&]*\s(?:-g\b|--global\b)/, reason: "removes a global npm package" },
+  { pattern: /\bpnpm\s+(?:add|i|install)\b[^|;&]*\s(?:-g\b|--global\b)/, reason: "installs a pnpm package globally" },
+  { pattern: /\byarn\s+global\b/, reason: "yarn global install/remove (system-wide)" },
+  { pattern: /\bbun\s+(?:add|install|i)\b[^|;&]*\s(?:-g\b|--global\b)/, reason: "installs a bun package globally" },
+
+  // Python global installs
+  { pattern: /\bpip3?\s+install\b[^|;&]*\s--user\b/, reason: "pip install --user (writes to your home, not the workspace)" },
+  { pattern: /\bpipx\s+install\b/, reason: "pipx install (system-wide CLI install)" },
+  { pattern: /\buv\s+(?:tool\s+)?install\b/, reason: "uv tool install (system-wide CLI install)" },
+
+  // Other language ecosystems
+  { pattern: /\bcargo\s+install\b/, reason: "cargo install (writes a binary to ~/.cargo/bin)" },
+  { pattern: /\bgo\s+install\b/, reason: "go install (writes a binary to $GOBIN)" },
+  { pattern: /\bgem\s+install\b(?![^|;&]*\s--user-install\b)/, reason: "gem install (system-wide)" },
+
+  // macOS / Linux package managers
+  { pattern: /\bbrew\s+(?:install|uninstall|update|upgrade|reinstall|tap|untap|cask)\b/, reason: "homebrew package management" },
+  { pattern: /\b(?:apt|apt-get|aptitude)\s+(?:install|remove|purge|update|upgrade|full-upgrade)\b/, reason: "apt package management" },
+  { pattern: /\bdnf\s+(?:install|remove|update|upgrade)\b/, reason: "dnf package management" },
+  { pattern: /\byum\s+(?:install|remove|update|upgrade)\b/, reason: "yum package management" },
+  { pattern: /\bpacman\s+-S/, reason: "pacman package management" },
+  { pattern: /\bzypper\s+(?:install|remove|update|upgrade)\b/, reason: "zypper package management" },
+  { pattern: /\bsnap\s+(?:install|remove|refresh)\b/, reason: "snap package management" },
+  { pattern: /\bport\s+(?:install|uninstall|upgrade)\b/, reason: "MacPorts package management" },
+  { pattern: /\bsoftwareupdate\b/, reason: "macOS system update tool" },
+
+  // Global config / process control
+  { pattern: /\bgit\s+config\s+--(?:global|system)\b/, reason: "modifies your global/system git config" },
+  { pattern: /\bnpm\s+config\s+set\b[^|;&]*\s(?:-g\b|--global\b)/, reason: "modifies your global npm config" },
+  { pattern: /\b(?:systemctl|launchctl|service)\s+(?:start|stop|restart|enable|disable|load|unload)\b/, reason: "starts/stops a system service" },
 ];
 
 function hardBlockReason(cmd: string): string | null {

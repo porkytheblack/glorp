@@ -1,12 +1,14 @@
 import type { InboxItem, Message, Task } from "glove-core/core";
 import type { PlanDocument } from "../shared/events.ts";
 import type { OriginalRequest } from "./store-snapshot.ts";
+import type { VerificationStatus } from "./runtime/verification-tracker.ts";
 
 export interface SessionState {
   plan: PlanDocument | null;
   tasks: Task[];
   inboxItems: InboxItem[];
   originalRequest?: OriginalRequest | null;
+  verification?: VerificationStatus | null;
 }
 
 const MAX_ORIGINAL_REQUEST_CHARS = 4000;
@@ -58,7 +60,8 @@ function buildOriginalRequestAnchor(
 
 function buildSessionStateMessage(state: SessionState): Message | null {
   const openInbox = state.inboxItems.filter((item) => item.status === "pending");
-  if (!state.plan && state.tasks.length === 0 && openInbox.length === 0) return null;
+  const verification = renderVerification(state.verification);
+  if (!state.plan && state.tasks.length === 0 && openInbox.length === 0 && !verification) return null;
   return {
     sender: "user",
     is_skill_injection: true,
@@ -67,11 +70,30 @@ function buildSessionStateMessage(state: SessionState): Message | null {
       renderPlan(state.plan),
       renderTasks(state.tasks),
       renderInbox(openInbox),
+      verification,
       "Task rule: before claiming the requested work is complete, call glove_update_tasks with the full corrected task list and no applicable task left pending or in_progress.",
       "Resource rule: for glove_resources_write, use body objects like {\"type\":\"markdown\",\"text\":\"...\"}; for edits use exact oldStr/newStr on an existing resource path.",
+      "Verification rule: do not declare the work complete until every file modified since the last verification has been covered by a test/build/typecheck run, or you have explicitly explained why verification cannot apply (e.g. UI feature you cannot test headlessly — say so).",
       "[End current Glorp session state]",
     ].filter(Boolean).join("\n"),
   };
+}
+
+function renderVerification(status: VerificationStatus | null | undefined): string {
+  if (!status || status.pendingFiles.length === 0) return "";
+  const lines = ["Unverified mutations (run a test/build/typecheck before claiming completion):"];
+  for (const file of status.pendingFiles.slice(0, 20)) {
+    lines.push(`- ${file}`);
+  }
+  if (status.pendingFiles.length > 20) {
+    lines.push(`- ...and ${status.pendingFiles.length - 20} more`);
+  }
+  if (status.lastVerificationKind) {
+    lines.push(`Last verification observed: ${status.lastVerificationKind} — but it predates the changes above.`);
+  } else {
+    lines.push("No verification command has run in this session yet.");
+  }
+  return lines.join("\n");
 }
 
 function renderPlan(plan: PlanDocument | null): string {

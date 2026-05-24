@@ -26,6 +26,7 @@ import { buildExtensionCatalogue } from "./runtime/catalogue.ts";
 import { generateSessionTitle, cleanSessionTitle } from "./runtime/title.ts";
 import { createTitleScheduler } from "./runtime/title-scheduler.ts";
 import { wrapGlorpModel } from "./runtime/model-guards.ts";
+import { VerificationTracker } from "./runtime/verification-tracker.ts";
 import type { BuildGlorpOptions, GlorpHandle } from "./glorp-types.ts";
 import type { ModelAdapter } from "glove-core/core";
 import type { IGloveRunnable } from "glove-core/glove";
@@ -76,6 +77,8 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const diskExtensions = discoverExtensions(opts.workspace);
 
   bridgeDisplaySlots(displayManager, bridge);
+  const verification = new VerificationTracker();
+  store.setVerificationTracker(verification);
   const refresh = createRefreshers(store, bridge, () => contextLimit);
   const fleet = await createFleet({
     workspace: opts.workspace,
@@ -116,6 +119,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     refresh,
     ctxRef,
     inboxContext,
+    verification,
   });
 
   void refresh.all();
@@ -168,6 +172,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         refresh,
         ctxRef,
         inboxContext,
+        verification,
       });
       fleet.setModelConfig({
         profileId: next.profile?.id,
@@ -184,6 +189,21 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       titleScheduler.setRequestInFlight(true);
       bridge.emit({ type: "busy", busy: true });
       bridge.emit({ type: "turn", turn: userTurn(text) });
+      // Watchdog: if processRequest hangs (network stall, unhandled
+      // rejection deeper in the stack), the input lockup is permanent
+      // because `busy: false` only fires in the finally. Belt-and-braces:
+      // schedule a hard timeout that forces the UI back to interactive
+      // and aborts the in-flight request. Long-running tasks are common
+      // for reasoning models so we set this generously (30 minutes).
+      const watchdog = setTimeout(() => {
+        try {
+          bridge.emit({
+            type: "error",
+            message: "Agent watchdog: no progress in 30 minutes — forcibly cleared the busy state. The agent may still be working in the background; press Ctrl-C if you want to fully cancel.",
+          });
+          bridge.emit({ type: "busy", busy: false });
+        } catch {}
+      }, 30 * 60 * 1000);
       try {
         await agent.processRequest(text, abortController.signal);
         await continueOpenTasks({ agent, store, signal: abortController.signal });
@@ -191,6 +211,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         if (err?.name === "AbortError") bridge.emit({ type: "turn", turn: systemTurn("aborted") });
         else bridge.emit({ type: "error", message: err?.message ?? String(err) });
       } finally {
+        clearTimeout(watchdog);
         titleScheduler.setRequestInFlight(false);
         bridge.emit({ type: "busy", busy: false });
         void refresh.all();
@@ -216,6 +237,7 @@ interface AssembleArgs {
   refresh: ReturnType<typeof createRefreshers>;
   ctxRef: { current: Context | null };
   inboxContext: Context;
+  verification: VerificationTracker;
 }
 
 function assembleAgent(args: AssembleArgs): IGloveRunnable {
@@ -237,7 +259,7 @@ function assembleAgent(args: AssembleArgs): IGloveRunnable {
     },
   });
 
-  builder.addSubscriber(createGlorpSubscriber(args.bridge, args.refresh));
+  builder.addSubscriber(createGlorpSubscriber(args.bridge, args.refresh, args.verification));
   registerTools(
     builder,
     createToolRegistry({

@@ -10,7 +10,8 @@ Preserve:
 - Current plan document status and current execution tasks with statuses.
 - Resource memory writes or important resource paths, especially `/plans/current.md`, `/notes`, `/research`, `/artifacts`, and `/subagents`.
 - Files read, written, or edited, each with a one-line reason or state. Mark anything still un-validated or un-tested.
-- Commands run, test/build results, and any failure output needed for debugging.
+- A "Verification pending:" list of every file written/edited/patched since the last test/build/typecheck — taken verbatim from the session-state injection. Do NOT silently mark these as verified.
+- Commands run, test/build results, and any failure output needed for debugging. Note the most recent verification command and whether the modifications listed above occurred after it.
 - Active or completed subagent and fleet results.
 - Outstanding inbox items, approvals, blockers, or unresolved questions.
 - The most recent error or blocker verbatim if short.

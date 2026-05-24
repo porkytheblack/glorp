@@ -1,6 +1,7 @@
 import type { SubscriberAdapter, ToolResultData } from "glove-core/core";
 import type { BridgeEvent } from "../../shared/events.ts";
 import type { ToolEvent } from "../../shared/events.ts";
+import type { VerificationTracker } from "./verification-tracker.ts";
 
 interface Bridge {
   emit(event: BridgeEvent): void;
@@ -16,6 +17,7 @@ interface Refreshers {
 export function createGlorpSubscriber(
   bridge: Bridge,
   refresh: Refreshers,
+  verification?: VerificationTracker,
 ): SubscriberAdapter {
   const activeTools = new Map<string, ToolEvent>();
   let streamingTextBuffer = "";
@@ -39,6 +41,23 @@ export function createGlorpSubscriber(
 
   return {
     async record(event_type, data) {
+      // glove-core's loop fires this for every tool result. Some call sites
+      // do `await this.notifySubscribers(...)`, others fire-and-forget. A
+      // thrown record handler in the fire-and-forget path becomes an
+      // unhandled rejection that can lock the runtime — the UI's `busy`
+      // never clears because `agent.processRequest` never returns cleanly.
+      //
+      // Belt-and-braces: nothing inside this function is allowed to throw.
+      // Errors get logged and swallowed; the loop continues.
+      try {
+        await dispatch(event_type, data);
+      } catch (err) {
+        console.error(`[glorp-subscriber] record threw for "${String(event_type)}":`, err);
+      }
+    },
+  };
+
+  async function dispatch(event_type: any, data: any): Promise<void> {
       switch (event_type) {
         case "text_delta": {
           const { text } = data as { text: string };
@@ -115,6 +134,7 @@ export function createGlorpSubscriber(
           };
           activeTools.delete(id);
           bridge.emit({ type: "tool_finished", tool: ev });
+          verification?.observe(d.tool_name, prior?.input, d.result);
           if (d.tool_name === "glorp_update_plan") void refresh.plan();
           void refresh.tasks();
           void refresh.inbox();
@@ -151,12 +171,17 @@ export function createGlorpSubscriber(
           void refresh.stats();
           break;
       }
-    },
-  };
+  }
 }
 
 function resultText(result: ToolResultData): string | undefined {
   if (typeof result.data === "string") return result.data;
   if (result.data == null) return result.message;
-  return JSON.stringify(result.data);
+  // Defensive: a tool that returns a circular-reference data payload would
+  // crash JSON.stringify and propagate up the subscriber chain.
+  try {
+    return JSON.stringify(result.data);
+  } catch (err) {
+    return `[unserialisable tool result: ${(err as Error).message}]`;
+  }
 }

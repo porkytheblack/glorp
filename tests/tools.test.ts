@@ -579,6 +579,88 @@ describe("bashTool", () => {
     expect(r.message).toMatch(/destructive pattern/);
   });
 
+  // Global-action guard: each of these matches a CONFIRM pattern and
+  // requires interactive consent. Tests use a stub display whose
+  // `pushAndWait` is undefined → `askDestructiveConfirm` returns false →
+  // the tool refuses. That's the desired fail-closed behavior.
+  test.each([
+    ["npm install -g typescript", /declined.+npm.+globally/i],
+    ["npm i -g eslint prettier", /declined.+npm.+globally/i],
+    ["npm install --global yarn", /declined.+npm.+globally/i],
+    ["pnpm add -g pm2", /declined.+pnpm.+globally/i],
+    ["yarn global add typescript", /declined.+yarn global/i],
+    ["bun add -g typescript", /declined.+bun.+globally/i],
+    ["pip install --user requests", /declined.+pip.+--user/i],
+    ["pipx install black", /declined.+pipx/i],
+    ["uv tool install ruff", /declined.+uv tool/i],
+    ["cargo install ripgrep", /declined.+cargo install/i],
+    ["go install golang.org/x/tools/cmd/godoc@latest", /declined.+go install/i],
+    ["gem install rails", /declined.+gem install/i],
+    ["brew install jq", /declined.+homebrew/i],
+    ["brew upgrade", /declined.+homebrew/i],
+    ["apt install ripgrep", /declined.+apt/i],
+    ["apt-get update", /declined.+apt/i],
+    ["dnf install vim", /declined.+dnf/i],
+    ["pacman -S neovim", /declined.+pacman/i],
+    ["snap install code", /declined.+snap/i],
+    ["softwareupdate -i -a", /declined.+macOS system update/i],
+    ["git config --global user.email a@b.com", /declined.+global.+git config/i],
+    ["npm config set registry https://example.com -g", /declined.+global npm config/i],
+    ["systemctl restart nginx", /declined.+system service/i],
+    ["launchctl start com.example.foo", /declined.+system service/i],
+  ])("global guard refuses '%s'", async (command, reasonRegex) => {
+    const tool = bashTool(workspace);
+    const r = await tool.do({ command, description: "g" }, display, glove);
+    expect(r.status).toBe("error");
+    expect(r.message).toMatch(reasonRegex);
+  });
+
+  test("workspace-local installs still pass through (npm install without -g)", async () => {
+    // We can't actually run npm in this test (no package.json, no network).
+    // Instead verify it's NOT classified as a confirm-required command —
+    // a pure misclassification would be the `npm install` being refused
+    // with the global-install message. We catch the error message to
+    // confirm only "command exited with code" type failures, not "declined".
+    const tool = bashTool(workspace);
+    const r = await tool.do(
+      { command: "npm install some-nonexistent-pkg-xyz", description: "local install" },
+      display,
+      glove,
+    );
+    // It may error from the missing package, but NOT from our guard.
+    if (r.status === "error") {
+      expect(r.message ?? "").not.toMatch(/declined/i);
+    }
+  });
+
+  test("workspace-local pip install (no --user) is not refused by the guard", async () => {
+    const tool = bashTool(workspace);
+    const r = await tool.do(
+      { command: "pip install requests==999.999.999", description: "pip in venv" },
+      display,
+      glove,
+    );
+    if (r.status === "error") {
+      expect(r.message ?? "").not.toMatch(/declined/i);
+    }
+  });
+
+  test("git config (non-global) is not refused", async () => {
+    const tool = bashTool(workspace);
+    // Local git config requires a git repo, so we just verify the guard
+    // doesn't catch it. Init a tiny repo first.
+    fs.writeFileSync(path.join(workspace, "README.md"), "x");
+    await tool.do({ command: "git init -q", description: "init repo" }, display, glove);
+    const r = await tool.do(
+      { command: "git config user.email test@example.com", description: "local cfg" },
+      display,
+      glove,
+    );
+    if (r.status === "error") {
+      expect(r.message ?? "").not.toMatch(/declined/i);
+    }
+  });
+
   test("stdout > 256KB is truncated", async () => {
     const tool = bashTool(workspace);
     const r = await tool.do(

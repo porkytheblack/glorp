@@ -7,6 +7,7 @@ import { firstUserRequest, latestTriggerMessage, safeFilePart } from "./store-sn
 import { withSessionState } from "./session-state.ts";
 import { canonicalPermissionKey } from "./permission-key.ts";
 import { deriveProjectId } from "./workspace-id.ts";
+import type { VerificationTracker } from "./runtime/verification-tracker.ts";
 
 export class GlorpStore implements StoreAdapter {
   identifier: string;
@@ -24,6 +25,7 @@ export class GlorpStore implements StoreAdapter {
   private permissions = new Map<string, PermissionStatus>();
   private inboxItems: InboxItem[] = [];
   private originalRequest: OriginalRequest | null = null;
+  private verification: VerificationTracker | null = null;
   private dirty = false;
   private writePromise: Promise<void> | null = null;
   private subStoreSeq = 0;
@@ -134,6 +136,7 @@ export class GlorpStore implements StoreAdapter {
       tasks: this.tasks,
       inboxItems: this.inboxItems,
       originalRequest: this.originalRequest,
+      verification: this.verification?.status() ?? null,
     });
   }
   async getDisplayMessages(): Promise<Message[]> { return [...this.messages]; }
@@ -142,6 +145,8 @@ export class GlorpStore implements StoreAdapter {
   getMetadata(): SnapshotMeta { return { ...this.metadata }; }
   getWorkspace(): string | undefined { return this.metadata.workspace; }
   getProjectId(): string | undefined { return this.metadata.projectId; }
+  setVerificationTracker(tracker: VerificationTracker | null): void { this.verification = tracker; }
+  getVerificationTracker(): VerificationTracker | null { return this.verification; }
 
   async setTitle(title: string | null): Promise<void> {
     this.title = cleanTitle(title);
