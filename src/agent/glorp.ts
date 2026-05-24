@@ -185,6 +185,9 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     async send(text) {
       abortController?.abort();
       await titleScheduler.cancel();
+      // A new user message resets the "failed verification" context — the
+      // user has implicitly closed out the previous deliberation.
+      verification.onUserTurn();
       abortController = new AbortController();
       titleScheduler.setRequestInFlight(true);
       bridge.emit({ type: "busy", busy: true });

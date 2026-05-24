@@ -73,16 +73,60 @@ describe("VerificationTracker.observe", () => {
     expect(t.status().lastVerificationKind).toContain("test");
   });
 
-  test("a verification failure still clears the list (agent has the signal)", () => {
+  test("a failed verification keeps pending files AND records the failure", () => {
     const t = new VerificationTracker();
     t.observe("write", { path: "src/a.ts" }, { status: "success", data: "ok" });
-    // A failed test run is still a verification — the agent now knows.
-    // Status of the bash *call* doesn't really go "failed" for a normal
-    // bash exit code; status is set when the harness rejects, which is
-    // rare. We model verification as "the command ran and the agent saw
-    // the result," so success in tool-call terms is correct.
-    t.observe("bash", { command: "pytest" }, { status: "success", data: "1 failed" });
+    t.observe(
+      "bash",
+      { command: "python scripts/office/validate.py doc.docx" },
+      { status: "error", data: null, message: "Command exited with code 1" } as any,
+    );
+    // Pending list is NOT cleared — the verification did not pass.
+    expect(t.status().pendingFiles).toEqual(["src/a.ts"]);
+    expect(t.status().failedVerifications).toHaveLength(1);
+    expect(t.status().failedVerifications[0]?.kind).toContain("validate.py");
+    expect(t.status().failedVerifications[0]?.message).toContain("code 1");
+  });
+
+  test("a subsequent successful verification clears both pending list and failure ring", () => {
+    const t = new VerificationTracker();
+    t.observe("write", { path: "src/a.ts" }, { status: "success", data: "ok" });
+    t.observe(
+      "bash",
+      { command: "pytest tests/" },
+      { status: "error", data: null, message: "1 failed" } as any,
+    );
+    expect(t.status().failedVerifications).toHaveLength(1);
+    t.observe("bash", { command: "pytest tests/" }, { status: "success", data: "passed" });
     expect(t.status().pendingFiles).toEqual([]);
+    expect(t.status().failedVerifications).toEqual([]);
+  });
+
+  test("ring of failed verifications is bounded to 5", () => {
+    const t = new VerificationTracker();
+    for (let i = 0; i < 9; i++) {
+      t.observe(
+        "bash",
+        { command: `bun test attempt-${i}.ts` },
+        { status: "error", data: null, message: `try ${i}` } as any,
+      );
+    }
+    expect(t.status().failedVerifications).toHaveLength(5);
+    // Oldest entries fall off the front.
+    expect(t.status().failedVerifications[0]?.message).toBe("try 4");
+    expect(t.status().failedVerifications[4]?.message).toBe("try 8");
+  });
+
+  test("onUserTurn() clears failed verifications (user has moved on)", () => {
+    const t = new VerificationTracker();
+    t.observe(
+      "bash",
+      { command: "bun test" },
+      { status: "error", data: null, message: "failed" } as any,
+    );
+    expect(t.status().failedVerifications).toHaveLength(1);
+    t.onUserTurn();
+    expect(t.status().failedVerifications).toEqual([]);
   });
 
   test("non-verification bash leaves the list alone", () => {
@@ -109,6 +153,7 @@ describe("VerificationTracker.observe", () => {
       pendingFiles: [],
       lastVerifiedAt: null,
       lastVerificationKind: null,
+      failedVerifications: [],
     });
   });
 });
@@ -167,11 +212,55 @@ describe("withSessionState — verification block", () => {
         pendingFiles: ["src/x.ts"],
         lastVerifiedAt: 1000,
         lastVerificationKind: "bun test",
+        failedVerifications: [],
       },
     });
     const injection = out.find((m) => m.is_skill_injection)!;
     expect(injection.text).toContain("Last verification observed: bun test");
     expect(injection.text).toContain("predates");
+  });
+
+  test("renders the failed-verification block with the iterate-or-document language", () => {
+    const out = withSessionState([{ sender: "user", text: "hi" }], {
+      plan: null,
+      tasks: [],
+      inboxItems: [],
+      verification: {
+        pendingFiles: [],
+        lastVerifiedAt: null,
+        lastVerificationKind: null,
+        failedVerifications: [
+          { kind: "soffice.py", message: "Command exited with code 1", commandHead: "python scripts/office/soffice.py --headless --convert-to pdf x.docx", at: 1 },
+        ],
+      },
+    });
+    const injection = out.find((m) => m.is_skill_injection && m.text.includes("Failed verifications"))!;
+    expect(injection).toBeDefined();
+    expect(injection.text).toContain("soffice.py");
+    expect(injection.text).toContain("Command exited with code 1");
+    expect(injection.text).toContain("Plan → Implement → Verify → Iterate");
+    expect(injection.text).toContain("environmental");
+  });
+
+  test("both pending mutations AND failed verifications render side-by-side", () => {
+    const out = withSessionState([{ sender: "user", text: "hi" }], {
+      plan: null,
+      tasks: [],
+      inboxItems: [],
+      verification: {
+        pendingFiles: ["src/a.ts"],
+        lastVerifiedAt: null,
+        lastVerificationKind: null,
+        failedVerifications: [
+          { kind: "bun test", message: "1 failed", commandHead: "bun test", at: 1 },
+        ],
+      },
+    });
+    const injection = out.find((m) => m.is_skill_injection)!;
+    expect(injection.text).toContain("Unverified mutations");
+    expect(injection.text).toContain("Failed verifications");
+    expect(injection.text).toContain("src/a.ts");
+    expect(injection.text).toContain("bun test");
   });
 });
 

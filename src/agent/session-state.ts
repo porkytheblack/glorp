@@ -80,20 +80,39 @@ function buildSessionStateMessage(state: SessionState): Message | null {
 }
 
 function renderVerification(status: VerificationStatus | null | undefined): string {
-  if (!status || status.pendingFiles.length === 0) return "";
-  const lines = ["Unverified mutations (run a test/build/typecheck before claiming completion):"];
-  for (const file of status.pendingFiles.slice(0, 20)) {
-    lines.push(`- ${file}`);
+  if (!status) return "";
+  const failed = status.failedVerifications ?? [];
+  const blocks: string[] = [];
+  if (status.pendingFiles.length > 0) {
+    const lines = ["Unverified mutations (run a test/build/typecheck before claiming completion):"];
+    for (const file of status.pendingFiles.slice(0, 20)) lines.push(`- ${file}`);
+    if (status.pendingFiles.length > 20) {
+      lines.push(`- ...and ${status.pendingFiles.length - 20} more`);
+    }
+    if (status.lastVerificationKind) {
+      lines.push(`Last verification observed: ${status.lastVerificationKind} — but it predates the changes above.`);
+    } else {
+      lines.push("No verification command has run in this session yet.");
+    }
+    blocks.push(lines.join("\n"));
   }
-  if (status.pendingFiles.length > 20) {
-    lines.push(`- ...and ${status.pendingFiles.length - 20} more`);
+  if (failed.length > 0) {
+    const lines = [
+      "Failed verifications (the loop is NOT done — iterate, or explicitly document the constraint):",
+    ];
+    for (const f of failed.slice(-5)) {
+      lines.push(`- ${f.kind}: ${f.message} — \`${f.commandHead}\``);
+    }
+    lines.push(
+      "Plan → Implement → Verify → Iterate. A failed verification means at least one of:",
+      "  (a) the change is broken — diagnose from the failure output and fix.",
+      "  (b) the verification needs a different invocation — try the alternative.",
+      "  (c) the failure is environmental (missing tool, no network) — say so verbatim in your final response, and continue with whatever verification you CAN run.",
+      "Do not write a closing summary that ignores the failure.",
+    );
+    blocks.push(lines.join("\n"));
   }
-  if (status.lastVerificationKind) {
-    lines.push(`Last verification observed: ${status.lastVerificationKind} — but it predates the changes above.`);
-  } else {
-    lines.push("No verification command has run in this session yet.");
-  }
-  return lines.join("\n");
+  return blocks.join("\n\n");
 }
 
 function renderPlan(plan: PlanDocument | null): string {
