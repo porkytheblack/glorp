@@ -4,7 +4,7 @@ import * as os from "node:os";
 import { estimateTokens, xmlSection } from "./prompts/synthetic.ts";
 
 export interface ProjectInstructionFile {
-  kind: "agents" | "claude";
+  kind: "agents" | "claude" | "glorp" | "cursor";
   sourcePath: string;
   scope: "global" | "project";
   body: string;
@@ -12,6 +12,8 @@ export interface ProjectInstructionFile {
 
 const AGENTS_FILES = ["AGENTS.override.md", "AGENTS.md", "agents.md"];
 const CLAUDE_FILES = ["CLAUDE.md", "CLAUDE.local.md", "claude.md"];
+const GLORP_FILES = ["GLORP.override.md", "GLORP.md", "glorp.md"];
+const CURSOR_LEGACY_FILES = [".cursorrules"];
 
 export function buildProjectInstructionsContext(opts: {
   workspace: string;
@@ -40,11 +42,17 @@ export function discoverProjectInstructions(workspace: string, homeDir = os.home
   const out: ProjectInstructionFile[] = [];
   addFirst(out, seen, "agents", "global", codexHome(homeDir), AGENTS_FILES);
   add(out, seen, "claude", "global", path.join(homeDir, ".claude", "CLAUDE.md"));
+  addFirst(out, seen, "glorp", "global", path.join(homeDir, ".glorp"), GLORP_FILES);
   for (const dir of pathFromRoot(root, workspace)) {
     addFirst(out, seen, "agents", "project", dir, AGENTS_FILES);
     addAll(out, seen, "claude", "project", dir, CLAUDE_FILES);
     addAll(out, seen, "claude", "project", path.join(dir, ".claude"), CLAUDE_FILES);
+    addFirst(out, seen, "glorp", "project", dir, GLORP_FILES);
+    addAll(out, seen, "cursor", "project", dir, CURSOR_LEGACY_FILES);
   }
+  // Modern Cursor rules live in .cursor/rules/*.mdc at the project root.
+  // Cursor itself doesn't walk parents for these, so we only load the root.
+  addDirectoryEntries(out, seen, "cursor", "project", path.join(root, ".cursor", "rules"), /\.mdc$/);
   return out;
 }
 
@@ -92,6 +100,26 @@ function add(
   seen.add(real);
   out.push({ kind, scope, sourcePath: real, body: stripHtmlComments(body).trim() });
   return true;
+}
+
+function addDirectoryEntries(
+  out: ProjectInstructionFile[],
+  seen: Set<string>,
+  kind: ProjectInstructionFile["kind"],
+  scope: ProjectInstructionFile["scope"],
+  dir: string,
+  match: RegExp,
+): void {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of entries.sort()) {
+    if (!match.test(name)) continue;
+    add(out, seen, kind, scope, path.join(dir, name));
+  }
 }
 
 function findProjectRoot(start: string): string {
