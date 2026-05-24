@@ -121,7 +121,8 @@ export function App({
     return (
       <PermissionsList
         store={glorp.store}
-        onClearPermission={(name) => glorp.clearPermission(name)}
+        onClearAllForTool={(name) => glorp.clearPermission(name)}
+        onClearKey={(key) => glorp.clearPermissionKey(key)}
         onClose={() => setOverlay(null)}
       />
     );

@@ -20,7 +20,7 @@
   "dependencies": {
     "@opentui/core": "latest",
     "@opentui/react": "latest",
-    "glove-core": "latest",
+    "glove-core": "^3.0.6",
     "glove-mcp": "latest",
     "glove-memory": "^0.1.0",
     "react": "^19.0.0",

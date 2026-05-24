@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import type { DisplayManagerAdapter } from "glove-core/display-manager";
 import type { SummaryTool } from "./summaries.ts";
 import { compactText, lineCount } from "./summaries.ts";
+import { looksLikeMutation } from "../permission-key.ts";
 
 const MAX_OUTPUT_BYTES_PER_STREAM = 64 * 1024;
 const OUTPUT_HEAD_BYTES = 48 * 1024;
@@ -178,7 +179,12 @@ export function bashTool(workspace: string): SummaryTool<{
       "Run a shell command in the workspace via bash -c. Returns combined stdout+stderr + exit code. " +
       "Use dedicated tools (read/write/edit/grep/glob) when one applies. " +
       "Always include `description` so the user sees what you're doing.",
-    requiresPermission: true,
+    // Skip the permission prompt for commands we can confidently classify as
+    // observation-only (ls, cat, git status/log/diff, find without -exec, …).
+    // Everything else (or anything with a pipe, redirect, or substitution)
+    // still runs through the gate. The store keys grants by first command
+    // token, so "always allow bash:git" doesn't open the door to "rm".
+    requiresPermission: (input) => looksLikeMutation(input.command),
     inputSchema: z.object({
       command: z.string().describe("Shell command to run"),
       description: z.string().describe("One-sentence active-voice summary of what this command does"),

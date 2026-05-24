@@ -1,4 +1,5 @@
 import type { IGloveRunnable } from "glove-core/glove";
+import type { PermissionStatus } from "glove-core/core";
 import type { GlorpFleet } from "./station-bridge.ts";
 import type { GlorpStore } from "./store.ts";
 import type { CredentialsStore } from "./credentials.ts";
@@ -25,7 +26,12 @@ export interface GlorpHandle {
   resolveSlot(slotId: string, value: unknown): void;
   rejectSlot(slotId: string, reason?: string): void;
   resolvePermission(slotId: string, allow: boolean): void;
+  /** Sweep every persisted grant for a tool name (legacy "always allow X" UX). */
   clearPermission(toolName: string): Promise<void>;
+  /** Surgically clear a single canonical permission key (e.g. `bash:git`). */
+  clearPermissionKey(key: string): Promise<void>;
+  /** Live snapshot of persisted permission grants for the Ctrl+P overlay. */
+  listPermissions(): Array<{ key: string; status: PermissionStatus }>;
   onLabelChange(fn: (label: string) => void): () => void;
   hydrateUi(): Promise<void>;
 }

@@ -56,7 +56,7 @@ export function applyPatchTool(workspace: string): GloveFoldArgs<{ patch: string
   };
 }
 
-function extractPatchPaths(patch: string): string[] {
+export function extractPatchPaths(patch: string): string[] {
   const paths = new Set<string>();
   for (const line of patch.split("\n")) {
     if (line.startsWith("diff --git ")) {

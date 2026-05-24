@@ -134,7 +134,9 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       bridge.emit({ type: "display_slot_resolved", slotId });
     },
     resolvePermission(slotId, allow) { resolveDisplaySlot(displayManager, bridge, slotId, allow); },
-    clearPermission(toolName) { return store.setPermission(toolName, "unset"); },
+    clearPermission(toolName) { return store.clearAllPermissionsFor(toolName); },
+    clearPermissionKey(key) { return store.clearPermissionKey(key); },
+    listPermissions() { return store.listPermissions(); },
     async swapProfile(profileId) {
       const next = await pickModel({ profileId, credentials, catalog });
       abortController?.abort();

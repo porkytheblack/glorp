@@ -5,6 +5,7 @@ import type { PlanDocument } from "../shared/events.ts";
 import type { Snapshot, SnapshotMeta, StoreOptions } from "./store-snapshot.ts";
 import { latestTriggerMessage, safeFilePart } from "./store-snapshot.ts";
 import { withSessionState } from "./session-state.ts";
+import { canonicalPermissionKey } from "./permission-key.ts";
 
 export class GlorpStore implements StoreAdapter {
   identifier: string;
@@ -151,12 +152,44 @@ export class GlorpStore implements StoreAdapter {
     this.scheduleFlush();
   }
 
-  async getPermission(toolName: string): Promise<PermissionStatus> { return this.permissions.get(toolName) ?? "unset"; }
+  async getPermission(toolName: string, input?: unknown): Promise<PermissionStatus> {
+    return this.permissions.get(canonicalPermissionKey(toolName, input)) ?? "unset";
+  }
 
-  async setPermission(toolName: string, status: PermissionStatus): Promise<void> {
-    if (status === "unset") this.permissions.delete(toolName);
-    else this.permissions.set(toolName, status);
+  async setPermission(toolName: string, status: PermissionStatus, input?: unknown): Promise<void> {
+    const key = canonicalPermissionKey(toolName, input);
+    if (status === "unset") this.permissions.delete(key);
+    else this.permissions.set(key, status);
     this.scheduleFlush();
+  }
+
+  /** Snapshot of every persisted permission entry (canonical key → status).
+   *  Used by the Ctrl+P overlay to render the live grant list. */
+  listPermissions(): Array<{ key: string; status: PermissionStatus }> {
+    return [...this.permissions.entries()]
+      .map(([key, status]) => ({ key, status }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  /** Clear a single permission by its canonical key. The next call that
+   *  produces the same canonical key will re-prompt. */
+  async clearPermissionKey(key: string): Promise<void> {
+    if (this.permissions.delete(key)) this.scheduleFlush();
+  }
+
+  /** Sweep every persisted grant whose canonical key belongs to a given
+   *  tool. Used by the legacy `clearPermission(toolName)` API so revoking
+   *  "bash" wipes all of `bash:git`, `bash:rm`, `bash:*`, etc. in one go. */
+  async clearAllPermissionsFor(toolName: string): Promise<void> {
+    const prefix = `${toolName}:`;
+    let touched = false;
+    for (const key of [...this.permissions.keys()]) {
+      if (key === toolName || key.startsWith(prefix)) {
+        this.permissions.delete(key);
+        touched = true;
+      }
+    }
+    if (touched) this.scheduleFlush();
   }
 
   async getInboxItems(): Promise<InboxItem[]> { return [...this.inboxItems]; }
