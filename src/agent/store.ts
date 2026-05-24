@@ -114,6 +114,9 @@ export class GlorpStore implements StoreAdapter {
 
   async appendMessages(msgs: Message[]): Promise<void> { this.messages.push(...msgs); this.scheduleFlush(); }
   async getTokenCount(): Promise<number> { return this.tokensIn + this.tokensOut; }
+  async getTokenCounts(): Promise<{ in: number; out: number }> {
+    return { in: this.tokensIn, out: this.tokensOut };
+  }
 
   async addTokens(args: TokenConsumptionCounter): Promise<void> {
     this.tokensIn += args.tokens_in;

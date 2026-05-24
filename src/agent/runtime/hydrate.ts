@@ -11,15 +11,16 @@ export async function hydrateUiSession(
   bridge: Bridge,
   contextLimit: number,
 ): Promise<void> {
-  const [messages, title, plan, tasks, inboxItems, tokens, turns] = await Promise.all([
+  const [messages, title, plan, tasks, inboxItems, counts, turns] = await Promise.all([
     store.getDisplayMessages(),
     store.getTitle(),
     store.getPlan(),
     store.getTasks(),
     store.getInboxItems(),
-    store.getTokenCount(),
+    store.getTokenCounts(),
     store.getTurnCount(),
   ]);
+  const total = counts.in + counts.out;
   bridge.emit({
     type: "session_hydrate",
     turns: turnsFromMessages(messages),
@@ -43,9 +44,9 @@ export async function hydrateUiSession(
     })),
     stats: {
       turns,
-      tokens_in: tokens,
-      tokens_out: 0,
-      contextPct: Math.min(100, Math.round((tokens / contextLimit) * 100)),
+      tokens_in: counts.in,
+      tokens_out: counts.out,
+      contextPct: Math.min(100, Math.round((total / contextLimit) * 100)),
     },
   });
 }

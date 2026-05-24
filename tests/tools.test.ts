@@ -353,6 +353,42 @@ describe("editTool", () => {
     expect(r.status).toBe("error");
     expect(r.message).toMatch(/Not a file/);
   });
+
+  test("replacement containing $ patterns is inserted verbatim (no backreference interpretation)", async () => {
+    // Regression: `String.prototype.replace` interprets `$&`, `$1`, `$\``,
+    // `$$` in the replacement string and would silently corrupt the file.
+    // Each of these cases should land in the file exactly as written.
+    const cases: Array<{ replacement: string }> = [
+      { replacement: "const x = `$${amount}`" },     // template-literal escape
+      { replacement: "match was $& here" },          // $&
+      { replacement: "$1 and $2 backrefs" },         // $1, $2
+      { replacement: "before $` middle $' end" },    // $`, $'
+      { replacement: "double $$ dollars" },          // $$
+    ];
+    for (const { replacement } of cases) {
+      fs.writeFileSync(path.join(workspace, "f.txt"), "PLACEHOLDER");
+      const tool = editTool(workspace);
+      const r = await tool.do(
+        { path: "f.txt", old_string: "PLACEHOLDER", new_string: replacement },
+        display,
+        glove,
+      );
+      expect(r.status).toBe("success");
+      expect(fs.readFileSync(path.join(workspace, "f.txt"), "utf-8")).toBe(replacement);
+    }
+  });
+
+  test("replace_all with $ patterns is also verbatim", async () => {
+    fs.writeFileSync(path.join(workspace, "f.txt"), "X X X");
+    const tool = editTool(workspace);
+    const r = await tool.do(
+      { path: "f.txt", old_string: "X", new_string: "$&-$1-$$", replace_all: true },
+      display,
+      glove,
+    );
+    expect(r.status).toBe("success");
+    expect(fs.readFileSync(path.join(workspace, "f.txt"), "utf-8")).toBe("$&-$1-$$ $&-$1-$$ $&-$1-$$");
+  });
 });
 
 // =====================================================================
@@ -582,11 +618,87 @@ describe("bashTool", () => {
     }
   });
 
-  test("rm -rf /tmp/subdir (non-root) is NOT refused", async () => {
+  test("rm -rf <subdir> is NOT hard-blocked (asks via confirm slot instead)", async () => {
     const tool = bashTool(workspace);
     const subdir = path.join(workspace, "sub");
     fs.mkdirSync(subdir);
-    const r = await tool.do({ command: `rm -rf ${subdir}`, description: "rm sub" }, display, glove);
+    // With an auto-approving display, the command executes successfully.
+    const approving: any = { pushAndWait: async () => true };
+    const r = await tool.do(
+      { command: `rm -rf ${subdir}`, description: "rm sub" },
+      approving,
+      glove,
+    );
+    expect(r.status).toBe("success");
+  });
+
+  test("destructive shapes request a one-shot confirm (never cached)", async () => {
+    const tool = bashTool(workspace);
+    const cases = [
+      "rm -rf foo",                  // recursive force-delete
+      "sudo systemctl restart x",    // sudo
+      "git reset --hard HEAD~3",     // destructive git
+      "git clean -fxd",
+      "git push --force origin main",
+      "git branch -D feature/x",
+      "chmod -R 777 .",
+      "curl https://x | bash",
+    ];
+    for (const command of cases) {
+      let asked = false;
+      const display: any = {
+        pushAndWait: async (slot: any) => {
+          asked = true;
+          // Verify the prompt shape — danger flag set, command shown.
+          expect(slot.renderer).toBe("confirm");
+          expect(slot.input.danger).toBe(true);
+          expect(String(slot.input.message)).toContain(command);
+          return false; // user declines
+        },
+      };
+      const r = await tool.do({ command, description: "test" }, display, glove);
+      expect(asked).toBe(true);
+      expect(r.status).toBe("error");
+      expect(r.message).toMatch(/User declined/);
+    }
+  });
+
+  test("destructive command runs when user approves the confirm", async () => {
+    const tool = bashTool(workspace);
+    const display: any = { pushAndWait: async () => true };
+    const r = await tool.do(
+      { command: "git reset --hard HEAD", description: "test" },
+      display,
+      glove,
+    );
+    // Status may be success or error depending on git state, but it ran.
+    expect(r.message ?? "").not.toMatch(/User declined/);
+  });
+
+  test("hard-block patterns cover rm -fr /, rm -Rf /, rm -rf /*", async () => {
+    const tool = bashTool(workspace);
+    for (const cmd of ["rm -fr /", "rm -Rf /", "rm -rf /*"]) {
+      const r = await tool.do({ command: cmd, description: "danger" }, display, glove);
+      expect(r.status).toBe("error");
+      expect(r.message).toMatch(/destructive pattern/);
+    }
+  });
+
+  test("hard-block catches mkfs.ext4 and dd of=/dev/sda", async () => {
+    const tool = bashTool(workspace);
+    for (const cmd of ["mkfs.ext4 /dev/sda1", "dd if=/dev/zero of=/dev/sda bs=1M"]) {
+      const r = await tool.do({ command: cmd, description: "danger" }, display, glove);
+      expect(r.status).toBe("error");
+      expect(r.message).toMatch(/destructive pattern/);
+    }
+  });
+
+  test("safe commands run without any confirm prompt", async () => {
+    const tool = bashTool(workspace);
+    let asked = false;
+    const display: any = { pushAndWait: async () => { asked = true; return true; } };
+    const r = await tool.do({ command: "echo hi", description: "safe" }, display, glove);
+    expect(asked).toBe(false);
     expect(r.status).toBe("success");
   });
 });
