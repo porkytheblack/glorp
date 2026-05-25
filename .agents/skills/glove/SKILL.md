@@ -25,6 +25,8 @@ Glove is an open-source TypeScript framework for building AI-powered application
 | `glove-next` | One-line Next.js API route handler (`createChatHandler`) for streaming SSE | `pnpm add glove-next` |
 | `glove-mcp` | Bridge MCP servers into a Glove agent: `mountMcp`, `connectMcp`, `bridgeMcpTool`, `McpAdapter`, `discovermcp` discovery subagent. Opt-in OAuth helpers at `glove-mcp/oauth`. | `pnpm add glove-mcp` |
 | `glove-memory` | Schema-first memory layer with four sibling subsystems: entity graph, episodic timeline, resource filesystem, and ambient context. BYO storage via the adapter contracts; reference in-memory adapters ship for dev/test. Storage backends (`glove-memory-sqlite`, `glove-memory-postgres`) are companion packages — not yet released. Draft v0.1. | `pnpm add glove-memory` |
+| `glove-mesh` | Inter-agent communication on top of the inbox primitive: `mountMesh`, `MeshAdapter` (BYO transport), `MeshNetwork` + `InMemoryMeshAdapter` reference impl. Four tools — `glove_mesh_send_message`, `glove_mesh_broadcast`, `glove_mesh_list_agents`, `glove_mesh_acknowledge`. No auth (consumer's job). | `pnpm add glove-mesh` |
+| `glove-continuum-signal` | Subprocess-based runtime substrate for agent collaboration across time. Two modes: **triggered** (cold, spawn-per-wakeup) and **concurrent** (warm, long-lived subprocess notified inline). `agent()` builder, `ContinuumRunner` (discovery + supervision + IPC), `ContinuumAdapter` (BYO persistence; `MemoryAdapter` default), `ContinuumSubscriber` (lifecycle + forwarded Glove events). Pairs with `glove-mesh` for inter-agent talk — substrate provides the supervised subprocesses, mesh provides the messaging. | `pnpm add glove-continuum-signal` |
 | `glovebox-core` | Authoring + `glovebox` build CLI. `glovebox.wrap(runnable, config)` packages a built Glove agent into a deployable artifact (Dockerfile + nixpacks.toml + bundled server + manifest + auth key). Storage DSL (`rule.*`, `composite`) and wire protocol types live here too. The unscoped `glovebox` name is taken on npm — install as `glovebox-core`; the CLI binary is still `glovebox`. | `pnpm add glovebox-core` |
 | `glovebox-kit` | In-container runtime. `startGlovebox({ app, port, key, manifestPath, ... })` boots the WS server, auto-injects glovebox skills/hooks, and bridges Glove's display stack onto the wire. Storage adapters: `InlineStorage`, `UrlStorage`, `LocalServerStorage`, `S3Storage`. | (transitive — bundled by `glovebox build`) |
 | `glovebox-client` | Client SDK. `GloveboxClient.make({ endpoints })`, `client.box(name).prompt(text, { files })`, `result.read(name)`, `box.environment()`. Symmetric `ClientStorage` interface with a default inline+url implementation. | `pnpm add glovebox-client` |
@@ -40,6 +42,8 @@ Glove is an open-source TypeScript framework for building AI-powered application
 - **`glove-voice`** — full-duplex voice pipeline: STT/TTS/VAD adapters, `GloveVoice`, `useGloveVoice`, `useGlovePTT`, `<VoicePTTButton>`.
 - **`glove-mcp`** — MCP servers as first-class tools: `mountMcp`, `connectMcp`, `bridgeMcpTool`, `McpAdapter` (consumer-supplied per-conversation seam). `discovermcp` discovery subagent (registered via `glove.defineSubAgent(discoverySubAgent({...}))`). Opt-in OAuth helpers at `glove-mcp/oauth` (`runMcpOAuth`, `FsOAuthStore`, `MemoryOAuthStore`, `McpOAuthProvider`).
 - **`glove-memory`** — Memory layer with four sibling subsystems (entity graph / episodic timeline / resource filesystem / ambient context) and matching `useMemoryReader` / `useMemoryCurator`, `useEpisodicReader` / `useEpisodicCurator`, `useResourcesReader` / `useResourcesCurator`, and `useContext` helper families. Storage-agnostic adapter contracts plus reference `InMemory*` adapters for dev/test.
+- **`glove-mesh`** — Inter-agent messaging on top of the inbox primitive: `mountMesh(glove, { adapter, identity })` registers an agent and folds `glove_mesh_send_message` / `_broadcast` / `_list_agents` / `_acknowledge`. `MeshAdapter` is the consumer-supplied transport (BYO); ships `InMemoryMeshAdapter` + `MeshNetwork` for in-process dev/test. Each agent keeps its own inbox; incoming messages land as resolved `InboxItem`s so the existing inbox-injection path surfaces them on the next `ask()`. No authentication — sender ids are unverified.
+- **`glove-continuum-signal`** — Subprocess-based runtime substrate modeled on `station-signal` but agent-shaped. `agent("name").input(zod).triggered()|.concurrent()` builder produces branded agents; `ContinuumRunner` discovers them from a directory, pre-warms concurrent ones, dispatches triggered runs from an adapter queue (per-spawn isolation), and routes `notify` IPC envelopes to warm subprocesses inline. `ContinuumAdapter` is the persistence contract (`MemoryAdapter` ships; consumers BYO for SQLite/Postgres/etc.). Single fat `onAgentEvent(envelope)` subscriber forwards every Glove `SubscriberEvent` from any child upstream with the agent identity attached. Mesh integrates by being mounted per-agent inside the factory — no special IPC machinery.
 
 ## Architecture at a Glance
 
@@ -61,8 +65,10 @@ User message → Agent Loop → Model decides tool calls → Execute tools → F
 - **Adapter** — Pluggable interfaces for Model, Store, DisplayManager, and Subscriber. Swap providers without changing app code.
 - **Context Compaction** — Auto-summarizes long conversations to stay within context window limits. The store preserves full message history (so frontends can display the entire chat), while `Context.getMessages()` splits at the last compaction summary so the model only sees post-compaction context. Summary messages are marked with `is_compaction: true`.
 - **Inbox** — Persistent async mailbox for cross-instance communication. An agent posts a request (text) that can't be resolved now; an external service resolves it later (text response). Resolved items are automatically injected into the agent's context on the next `ask()` call. Items can be blocking (agent should wait) or non-blocking. Built-in `glove_post_to_inbox` tool auto-registered when store supports inbox methods.
-- **Extensions (hooks, skills, subagents)** — `/hookname` runs a builder-defined handler with full agent controls (force compaction, swap model, short-circuit a turn). `/skillname` materialises a synthetic user message before the real one (marked `is_skill_injection: true`). `defineSubAgent({ name, factory })` registers a subagent the main agent can route to via the auto-registered `glove_invoke_subagent` tool — the user's `@name` text is NOT parsed by glove, it reaches the model verbatim and acts as a routing signal (mirrors Codex's subagent convention). `/` tokens are replaced with non-triggerable placeholders (`[invoked_extension__hook_<name>]` / `[invoked_extension__skill_<name>]`) so the model sees that an extension fired without the placeholder re-binding on a future parse; unbound `/` tokens stay untouched (so `/usr/local` survives). Skills can be exposed to the agent (`exposeToAgent: true`) so the agent pulls them in via the auto-registered `glove_invoke_skill` tool.
+- **Extensions (hooks, skills, subagents)** — `/hookname` runs a builder-defined handler with full agent controls (force compaction, swap model, short-circuit a turn). `/skillname` materialises a synthetic user message before the real one (marked `is_skill_injection: true`). `defineSubAgent({ name, factory })` registers a subagent the main agent can route to via the auto-registered `glove_invoke_subagent` tool — the user's `@name` text is NOT parsed by glove, it reaches the model verbatim and acts as a routing signal (mirrors Claude Code's subagent convention). `/` tokens are replaced with non-triggerable placeholders (`[invoked_extension__hook_<name>]` / `[invoked_extension__skill_<name>]`) so the model sees that an extension fired without the placeholder re-binding on a future parse; unbound `/` tokens stay untouched (so `/usr/local` survives). Skills can be exposed to the agent (`exposeToAgent: true`) so the agent pulls them in via the auto-registered `glove_invoke_skill` tool.
 - **MCP catalogue + adapter** — `glove-mcp` introduces two pieces: a static `McpCatalogueEntry[]` describing servers the app supports, and a per-conversation `McpAdapter` holding active ids and resolving access tokens. `mountMcp` reloads previously active servers and registers a `discovermcp` discovery subagent (via `glove.defineSubAgent(discoverySubAgent({...}))`) — the model invokes it through `glove_invoke_subagent({ name: "discovermcp", prompt: "..." })` to find and activate servers mid-conversation.
+- **Mesh network** — `glove-mesh` lets Glove agents send each other messages via a consumer-supplied `MeshAdapter` (transport). Each agent keeps its own `StoreAdapter`+inbox; when A sends to B, the framework drops a `status: "resolved"` `InboxItem` into B's store so the existing inbox-injection path surfaces it on B's next `ask()`. Blocking sends insert a pending `blocking: true` item that resolves on ack or `in_reply_to` reply. No auth in v1.
+- **Continuum (subprocess runtime)** — `glove-continuum-signal` supervises Glove agents as Node subprocesses. **Triggered** agents are cold and spawn-per-wakeup (resume from a persistent `StoreAdapter` each time); **concurrent** agents are warm and notified inline. The `agent()` builder forks into mode-specific types after `.triggered()` / `.concurrent()` so mode-specific setters (`.retries()`, `.every()`) are type-level guarded. Persistent stores configured via `.store(name => StoreAdapter)` so the same store implementation can be injected across an agent fleet. Parent is single source of truth for run status (children only emit IPC). Mesh integration: mount in the factory — substrate stays out of inter-agent protocol.
 
 ## Quick Start (Next.js)
 
@@ -80,7 +86,7 @@ import { createChatHandler } from "glove-next";
 
 export const POST = createChatHandler({
   provider: "anthropic",     // or "openai", "openrouter", "gemini", etc.
-  model: "Codex-sonnet-4-20250514",
+  model: "claude-sonnet-4-20250514",
 });
 ```
 
@@ -353,7 +359,7 @@ gloveBuilder.addSubscriber(logger);
 ### Optional Store Features
 
 - **Tasks** (`getTasks`, `addTasks`, `updateTask`): Auto-registers `glove_update_tasks` tool
-- **Permissions** (`getPermission`, `setPermission`): Tools with `requiresPermission: true` check consent
+- **Permissions** (`getPermission(name, input?)`, `setPermission(name, status, input?)`): Tools with `requiresPermission: true` (or a `(input) => boolean` gate) check consent. The Executor passes the model-supplied input on every gated call so the store can scope decisions per-input. The default `MemoryStore` uses exact-match keying via the exported `permissionKey(name, input)` helper.
 - **Inbox** (`getInboxItems`, `addInboxItem`, `updateInboxItem`, `getResolvedInboxItems`): Auto-registers `glove_post_to_inbox` tool. Enables async cross-instance communication.
 
 If your store doesn't implement these, they're silently disabled.
@@ -460,7 +466,7 @@ const storeActions: RemoteStoreActions = {
 |-------|---------|----------------|
 | `/hookname` | Mutate agent state, force compaction, swap model, short-circuit a turn | `defineHook(name, handler)` |
 | `/skillname` | Inject context as a synthetic user message marked `is_skill_injection: true` | `defineSkill({ name, handler, description?, exposeToAgent? })` |
-| `glove_invoke_subagent({ name, prompt })` (model-side tool) | Register a child Glove the main agent can route a self-contained task to. The user's `@name` text reaches the model verbatim — it's a routing signal, not a parsed directive. Mirrors Codex's subagent convention. | `defineSubAgent({ name, factory, description? })` |
+| `glove_invoke_subagent({ name, prompt })` (model-side tool) | Register a child Glove the main agent can route a self-contained task to. The user's `@name` text reaches the model verbatim — it's a routing signal, not a parsed directive. Mirrors Claude Code's subagent convention. | `defineSubAgent({ name, factory, description? })` |
 
 `/` tokens only bind when the name matches a registered hook or skill — `/usr/local/bin` survives untouched. Bound `/` tokens are **replaced**, not stripped, with a non-triggerable placeholder of the form `[invoked_extension__hook_<name>]` or `[invoked_extension__skill_<name>]`. The placeholder doesn't re-bind on a future parse, but it keeps the persisted user message structurally honest — the model can see that an extension fired. `@` tokens are never parsed by glove at all, so emails like `a@b.com` reach the model unchanged.
 
@@ -614,7 +620,7 @@ The tool returns `{ status: "success", data: { skill, content } }` on success an
 
 ### Subagents
 
-Modelled on Codex's subagent convention. Defining one auto-registers a `glove_invoke_subagent` tool (constant `SUBAGENT_DISPATCH_TOOL_NAME` exported from core) the main agent calls with `{ name, prompt }`. The user's `@name` text in the original message is **not** parsed by glove — it reaches the model verbatim and acts as a routing signal. The factory builds a fresh child `Glove` for each invocation and the dispatcher runs it.
+Modelled on Claude Code's subagent convention. Defining one auto-registers a `glove_invoke_subagent` tool (constant `SUBAGENT_DISPATCH_TOOL_NAME` exported from core) the main agent calls with `{ name, prompt }`. The user's `@name` text in the original message is **not** parsed by glove — it reaches the model verbatim and acts as a routing signal. The factory builds a fresh child `Glove` for each invocation and the dispatcher runs it.
 
 ```typescript
 interface SubAgentFactoryContext {
@@ -1162,6 +1168,342 @@ Process-local — they lose data on restart. Production projects swap in a compa
 
 See [api-reference.md — `glove-memory`](api-reference.md) for full type signatures, and [examples.md — Memory](examples.md) for worked examples (schema definition, subagent-delegated reader, curator composition, context flow).
 
+## Mesh Network (`glove-mesh`)
+
+`glove-mesh` lets multiple Glove agents talk to each other — direct messages, broadcasts, acknowledgements — on top of the existing `glove-inbox` primitive. The package is behaviorally additive to `glove-core` except for one small runtime API addition: `IGloveRunnable.store` (a `readonly` accessor that `mountMesh` reads to write resolved inbox items directly). No agent-loop semantics change. The package itself ships no authentication; the consumer's `MeshAdapter` owns transport and any signing/verification.
+
+### When to use it
+
+- Two or more Glove agents running async or in parallel in the same process (or across processes/hosts) need to coordinate.
+- You want the agent loop to surface peer messages as plain context the model can read, without writing custom subscriber/store integration.
+
+If you just need one agent to delegate work to another sub-task in isolation, use `defineSubAgent` instead — subagents run nested under the parent. Mesh is for peers.
+
+### Mental model
+
+Each agent owns its own `StoreAdapter`+inbox. The `MeshAdapter` is a per-agent view of the network (matches `McpAdapter`'s per-conversation pattern). When agent A calls `glove_mesh_send_message({ to: "b", content: ... })`, the framework drops a `status: "resolved"` `InboxItem` with tag `mesh:from:a` into B's store. B's existing `Agent.injectResolvedInboxItems` path (glove-core) surfaces it as a synthetic user message on B's next `ask()` — exactly like an externally-resolved inbox item.
+
+The "shared inbox" is conceptual: the mesh is shared; the inbox stays per-agent.
+
+### `mountMesh` — the canonical entry point
+
+After `new Glove(...).build()`:
+
+```typescript
+import { mountMesh, MeshNetwork, InMemoryMeshAdapter } from "glove-mesh";
+
+const network = new MeshNetwork();          // in-process bus; for distributed, BYO
+
+await mountMesh(glove, {
+  adapter: new InMemoryMeshAdapter(network, "agent-a"),
+  identity: {
+    id: "agent-a",
+    name: "Agent A",
+    description: "Plans tasks for the team.",
+    capabilities: ["chat", "planning"],
+  },
+});
+```
+
+What it does:
+
+1. Validates `glove.store` implements the four inbox methods (`getInboxItems`, `addInboxItem`, `updateInboxItem`, `getResolvedInboxItems`) — throws `MeshStoreUnsupportedError` otherwise.
+2. Awaits `adapter.register(identity)` so peers can discover this agent.
+3. Calls `adapter.subscribe(handler)` once. The handler converts incoming messages into resolved inbox items (or resolves a pending blocking item on ack).
+4. Folds four tools onto the running Glove: `glove_mesh_send_message`, `glove_mesh_broadcast`, `glove_mesh_list_agents`, `glove_mesh_acknowledge`.
+
+Returns `Promise<void>` (not chainable). Mirrors `mountMcp`'s async-setup convention.
+
+### The four tools
+
+| Tool | Input | Behavior |
+|------|-------|----------|
+| `glove_mesh_send_message` | `{ to, content, in_reply_to?, blocking? }` | Calls `adapter.send`. Blocking inserts a pending blocking inbox item tagged `mesh:waiting:<msg_id>` that resolves on ack or reply. |
+| `glove_mesh_broadcast` | `{ content, blocking? }` | Calls `adapter.broadcast`. Blocking resolves on the FIRST ack received. |
+| `glove_mesh_list_agents` | `{ filter?: { capability?, name_contains? } }` | Calls `adapter.listAgents`; filters; excludes self. |
+| `glove_mesh_acknowledge` | `{ message_id, note? }` | Calls `adapter.acknowledge`. Lightweight confirmation; for substantive replies use `glove_mesh_send_message` with `in_reply_to` instead. |
+
+### `MeshAdapter` contract
+
+Implement one per agent. Consumer-supplied — the package never knows about your transport.
+
+```typescript
+interface MeshAdapter {
+  identifier: string;
+
+  // Identity / registration
+  register(identity: AgentIdentity): Promise<void>;
+  unregister(): Promise<void>;
+  listAgents(): Promise<AgentIdentity[]>;
+  getAgent(id: string): Promise<AgentIdentity | null>;
+
+  // Outbound
+  send(message: MeshMessage): Promise<void>;
+  broadcast(message: Omit<MeshMessage, "to">): Promise<void>;
+  acknowledge(messageId: string, note?: string): Promise<void>;
+
+  // Inbound — framework registers ONE handler per agent
+  subscribe(handler: (msg: IncomingMeshMessage) => Promise<void>): () => void;
+}
+```
+
+Adapter guarantees the framework relies on:
+
+- `send` resolves when the transport has accepted the message, not when the recipient handles it.
+- `broadcast` excludes the sender from fan-out.
+- Handler errors must NOT bubble — log and continue so fan-out to other agents stays intact.
+- `acknowledge` routes an `IncomingMeshMessage` with `kind: "ack"` back to the original sender of `messageId`.
+
+### Reference `InMemoryMeshAdapter`
+
+For dev, tests, and single-host setups. `MeshNetwork` is the shared bus; construct once, hand the same instance to every `InMemoryMeshAdapter` in the process.
+
+```typescript
+import { MeshNetwork, InMemoryMeshAdapter } from "glove-mesh";
+
+const net = new MeshNetwork();
+const a = new InMemoryMeshAdapter(net, "agent-a");
+const b = new InMemoryMeshAdapter(net, "agent-b");
+```
+
+`MeshNetwork` keeps a bounded LRU (default 1024) of `message_id → sender_id` so `acknowledge` can route back without the model threading sender on every ack.
+
+### Blocking sends
+
+| Tool call | Pending item? | Resolves on |
+|-----------|---------------|-------------|
+| `glove_mesh_send_message({ blocking: false })` | No | n/a |
+| `glove_mesh_send_message({ blocking: true })` | Yes — tag `mesh:waiting:<msg_id>` | ack with `ack_of === msg_id`, OR a reply (`glove_mesh_send_message` with `in_reply_to === msg_id`) |
+| `glove_mesh_broadcast({ blocking: true })` | Yes | first ack from any peer |
+| `glove_mesh_acknowledge` (this agent acking inbound) | No | n/a — itself |
+
+A pending blocking item synthesises a transient reminder each turn via `Agent.buildPendingBlockingMessage` until it resolves. When the ack/reply arrives, the resolved item shows up via the standard `[Inbox: N item(s) resolved]` injection.
+
+**Reply implies ack.** A direct incoming with `in_reply_to: X` does BOTH: inserts a new resolved inbox item with the reply body AND resolves the pending item for `X`. Saves the recipient one tool call.
+
+### Tag convention
+
+Mesh items use namespaced tags so consumers can filter mesh traffic out of inbox histories:
+
+| Tag prefix | Direction | Meaning |
+|------------|-----------|---------|
+| `mesh:from:<sender>` | inbound | direct message |
+| `mesh:broadcast:from:<sender>` | inbound | broadcast |
+| `mesh:waiting:<msg_id>` | local | pending blocking item for an outbound send |
+
+### Auth model — there isn't one
+
+`MeshMessage.from` is sender-claimed and unverified. If you need authenticated messaging, sign messages before calling `send`/`broadcast` and verify in your `subscribe` handler. Mirrors how `McpAdapter.getAccessToken` keeps auth a consumer concern.
+
+### Quick reference — where things live
+
+| Need | Symbol |
+|------|--------|
+| Mount mesh on an agent | `mountMesh(glove, { adapter, identity })` from `glove-mesh` |
+| Adapter contract | `MeshAdapter` from `glove-mesh/core` |
+| Message types | `AgentIdentity`, `MeshMessage`, `IncomingMeshMessage` from `glove-mesh/core` |
+| In-process bus | `MeshNetwork`, `InMemoryMeshAdapter` from `glove-mesh/in-memory` |
+| Individual tool builders | `buildMeshSendTool`, `buildMeshBroadcastTool`, `buildMeshListAgentsTool`, `buildMeshAcknowledgeTool` from `glove-mesh/tools` |
+| Error classes | `MeshError`, `MeshNotRegisteredError`, `MeshUnknownAgentError`, `MeshUnknownMessageError`, `MeshStoreUnsupportedError` from `glove-mesh/core` |
+
+### How it differs from `glove_post_to_inbox`
+
+- `glove_post_to_inbox` — "I will resolve this myself later from outside the conversation" (external service, webhook, cron).
+- `glove_mesh_send_message` — "I'm talking to another Glove agent on the mesh" (peer-to-peer).
+
+Both write to the same `StoreAdapter` inbox surface; the tag prefix tells them apart.
+
+### Limitations (v1)
+
+- `InMemoryMeshAdapter` is process-local; restarts wipe state. Real transports are the consumer's job.
+- Sender-table LRU caps at 1024 — acks for very old messages are best-effort.
+- Broadcast blocking resolves on the FIRST ack, not all peers.
+- No new `SubscriberEvent` types; observability rides on `tool_use_result` for the four tools and inbox-state writes.
+- No group/topic concept. Broadcast targets every registered agent.
+
+## Continuum (`glove-continuum-signal`)
+
+Subprocess-based runtime substrate that supervises Glove agents like `station-signal` supervises background jobs. Two execution modes:
+
+- **Triggered (asynchronous)** — agents are cold by default. An external force (`.trigger(input)`, a schedule fire, an inbound mesh message) wakes them. They resume their persistent store, run a turn, return, go cold. Each wakeup spawns a fresh subprocess.
+- **Concurrent (synchronous)** — agents are warm in long-lived subprocesses. The runner keeps them alive and pushes notifications inline via `runner.notify(name, input)`; mid-loop pickup is immediate, no spawn latency.
+
+The substrate is NOT an inter-agent protocol — that's `glove-mesh`. Continuum gives mesh a stable per-agent identity, an inbox-capable persistent store, and a long-lived subprocess for warm agents; mesh runs entirely inside that subprocess against whatever transport the consumer's `MeshAdapter` provides.
+
+### When to use
+
+- Multiple long-running agents in one deployment, each with isolated subprocesses but observed centrally.
+- Agents that keep state across many wakeups (continuity-of-context for triggered agents).
+- Firing agent work from an HTTP handler / cron / webhook and picking it up async — like a background job, but the job is a full Glove agent.
+- Mesh between agents on the same host without an external broker (pair with the example `FilesystemMeshAdapter`).
+
+For a single in-process agent in a Next.js handler, you don't need continuum — keep using `createChatHandler`.
+
+### The `agent()` builder — mode-as-fork
+
+```typescript
+import { agent, z } from "glove-continuum-signal";
+import { Glove, Displaymanager } from "glove-core";
+import { createAdapter } from "glove-core/models/providers";
+
+export const pizzaBaker = agent("pizza-baker")
+  .input(z.object({ orderId: z.string() }))
+  .output(z.object({ ready: z.boolean() }))
+  .triggered()                                                // forks into TriggeredAgentBuilder
+  .timeout(60_000)
+  .retries(2)
+  .every("5m").withInput({ orderId: "tick" })
+  .env({ OVEN: "hot" })
+  .store((name) => new MyPersistentStore(`./agents/${name}.db`))
+  .onComplete(async (out, in_) => audit(out, in_))
+  .factory(async (ctx) =>
+    new Glove({
+      store: ctx.store ?? undefined,
+      model: createAdapter({ provider: "anthropic" }),
+      displayManager: new Displaymanager(),
+      systemPrompt: "You bake pizzas.",
+      compaction_config: { compaction_instructions: "..." },
+    })
+      .fold(checkOrderTool)
+      .build(ctx.store ?? undefined),
+  );
+
+// Fire-and-forget. Returns a run id immediately.
+const runId = await pizzaBaker.trigger({ orderId: "abc-123" });
+```
+
+`.triggered()` returns `TriggeredAgentBuilder<TInput>` — `.retries()` / `.every()` / `.withInput()` are only available here. `.concurrent()` returns `ConcurrentAgentBuilder<TInput>` — its built agent gets a `.notify(input)` instance method on top of `.trigger(input)` (both enqueue `kind: "notify"` runs that route to the warm subprocess; `notify()` is the clearer name when you're sure the peer is warm). Calling `.notify()` on a triggered agent is a type error, not a runtime error.
+
+**Factory context** (`AgentFactoryContext`):
+- `name` — registered agent name
+- `runId` — per-wakeup for triggered; `"warmup"` during concurrent factory setup
+- `mode` — `"triggered" | "concurrent"`
+- `store` — the `StoreAdapter` the runtime built from `.store(factory)` (or `null` if `.store(...)` wasn't called)
+- `subscriber` — an IPC-forwarding `SubscriberAdapter` the bootstrap re-attaches defensively after the factory returns
+- `controls.emit({ type, data })` — emit a custom event back to the runner's subscribers, wrapped as an `agent:event` envelope
+- `controls.signal` — `AbortSignal` that fires on graceful stop / restart / terminal fail; use it to unmount mesh, close DB pools, etc.
+
+### The `ContinuumRunner`
+
+```typescript
+import {
+  ContinuumRunner,
+  MemoryAdapter,
+  ConsoleSubscriber,
+} from "glove-continuum-signal";
+
+const runner = new ContinuumRunner({
+  agentsDir: "./agents",                  // auto-discover branded agents (recursive)
+  adapter: new MemoryAdapter(),           // or your own ContinuumAdapter
+  subscribers: [new ConsoleSubscriber()],
+  pollIntervalMs: 1_000,
+  maxConcurrent: 5,                       // triggered-run budget
+  warmRestartPolicy: { maxRestarts: 5, backoffMs: 1_000 },
+});
+
+await runner.start();
+
+// Triggered: spawn-per-wakeup. Returns a run id immediately.
+const runId = await pizzaBaker.trigger({ orderId: "abc-123" });
+const final = await runner.waitForRun(runId);
+
+// Concurrent: routes to the warm subprocess inline.
+const notifyId = await runner.notify("pizza-watcher", { event: "oven_ready" });
+
+await runner.stop({ graceful: true, timeoutMs: 10_000 });
+```
+
+`runner.notify(name, input)` is the runner-bound equivalent of `concurrentAgent.notify(input)` — handy when you have the runner reference but not the agent reference (e.g. from a wrapper that holds the runner).
+
+### Persistent stores
+
+Triggered agents NEED a `StoreAdapter` that survives across wakeups, otherwise context resets every time. Configure via `.store(name => …)` — the runtime calls this on each spawn with the agent's name, and the resulting store is passed to the factory via `ctx.store`. Discovery emits a warning for triggered agents that omit `.store(...)`. Concurrent agents are usually fine with in-memory stores because their subprocess is long-lived (still want persistence if the runner can restart).
+
+### Mesh integration
+
+Mount mesh per-agent inside the factory:
+
+```typescript
+import { mountMesh } from "glove-mesh";
+import { makeRedisMeshAdapter } from "./infra/mesh.js";
+
+agent("pizza-watcher")
+  .input(z.object({ event: z.string() }))
+  .concurrent()
+  .store((name) => new MyInboxCapableStore(`./agents/${name}.db`))
+  .factory(async (ctx) => {
+    const glove = new Glove({ store: ctx.store ?? undefined, /* ... */ }).build();
+    await mountMesh(glove, {
+      adapter: makeRedisMeshAdapter(ctx.name),
+      identity: { id: ctx.name, name: ctx.name, description: "..." },
+    });
+    return glove;
+  });
+```
+
+`mountMesh` requires the store to implement inbox methods (`getInboxItems` / `addInboxItem` / `updateInboxItem` / `getResolvedInboxItems`). Glove's default `MemoryStore` implements them; custom stores must too. `InMemoryMeshAdapter` from `glove-mesh` is single-process; for cross-subprocess agent-to-agent transport pick a real adapter (Redis, NATS, HTTP webhooks, …) or use the example `FilesystemMeshAdapter` from `glove-continuum-signal/tests/fixtures/fs-mesh-adapter.ts` (atomic tmp+rename writes, ~100ms polling subscribe, per-msg sender lookup for cross-process `acknowledge()`).
+
+### Adapter contract (`ContinuumAdapter`)
+
+Mirrors `station-signal`'s `SignalQueueAdapter` with three deltas: `agentName` everywhere (not `signalName`), `RunKind` includes `"notify"`, and steps are dropped (the Glove turn IS the unit; fine-grained observability lives on the forwarded subscriber event stream, not as relational `Step` rows). `MemoryAdapter` ships as default; consumers BYO for SQLite/Postgres/etc. `HttpTriggerAdapter` powers remote `.trigger()` via `configure({ endpoint, apiKey })`.
+
+### Subscriber model
+
+`ContinuumSubscriber` exposes lifecycle callbacks (`onAgentDiscovered`, `onAgentSpawned`, `onAgentReady`, `onAgentTerminated`, `onAgentRestarted`, `onRunDispatched`, `onRunStarted`, `onRunCompleted`, `onRunFailed`, `onRunTimeout`, `onRunRetry`, `onRunCancelled`, `onRunSkipped`, `onRunRescheduled`, `onNotifyDelivered`, `onCompleteError`, `onLogOutput`) plus a single fat `onAgentEvent(envelope)` that forwards every Glove `SubscriberEvent` from any child subprocess upstream:
+
+```typescript
+interface AgentEventEnvelope<T extends SubscriberEvent["type"]> {
+  agentName: string;
+  runId: string | null;           // null for ambient warm-agent events between notifies
+  mode: AgentMode;
+  event_type: T;
+  data: SubscriberEventDataMap[T];
+  timestamp: string;
+}
+```
+
+Single envelope (rather than per-type callbacks) because the Glove `SubscriberEvent` union is 14+ types and grows independently. Wrappers fan out per-type trivially.
+
+### Trust model
+
+- A registered agent file is `await import()`-ed during discovery and runs in a subprocess with the parent's environment. `agentsDir` should never point at user-influenced content.
+- `NODE_OPTIONS`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, and `DYLD_INSERT_LIBRARIES` are stripped from the parent env before forwarding, and an agent's `.env({...})` cannot override them.
+- For warm subprocesses, the parent validates that `notify:*` envelope `runId`s belong to the sending subprocess (`pendingNotifies` ownership check) — a misbehaving warm child can't spoof another agent's run completion.
+- Warm subprocesses get a per-name restart budget (`warmRestartPolicy.maxRestarts`, default 5) that resets after 60s of post-`ready` stability, so a long-running deployment doesn't permanently lose its warm agents to occasional blips. Crash-loops still hit the budget and stop trying.
+
+### How it differs from station-signal
+
+| Aspect | station-signal | glove-continuum-signal |
+|--------|---------------|------------------------|
+| Unit of work | Stateless job (run handler or stepped pipeline) | Stateful Glove agent turn |
+| Builder terminal | `.run(fn)` / `.step().build()` | `.factory(ctx => Glove)` |
+| Modes | Spawn-per-run only | Triggered (spawn-per-wakeup) + Concurrent (warm subprocess + notify IPC) |
+| Persistence | Step records in the adapter | Per-agent `StoreAdapter` carried across wakeups via `.store(name => …)` |
+| Children touch adapter? | Yes (write `Step` rows) | No (parent is sole source of truth) |
+| Observability | Per-type subscriber callbacks | Lifecycle callbacks + one fat `onAgentEvent(envelope)` for forwarded Glove events |
+| Inter-unit messaging | N/A | Defers to `glove-mesh` (mounted in factory) |
+
+### Limitations (v1)
+
+- Single-runner only. Multi-runner warm-pool sharding and distributed claim leasing for recurring schedules are deferred to future wrapper packages.
+- `configure()` is a module-level singleton; multiple runners in one process race on it. Use `runner.notify()` when you need to address a specific runner's adapter.
+- A stuck notify in a warm subprocess fails its own run on timeout but doesn't kill the subprocess; subsequent notifies queue behind it on the bootstrap's promise chain. Restart the warm agent if you observe persistent starvation.
+- Notify cancellation is best-effort — the parent flips status to `cancelled`, but the warm subprocess's promise chain keeps running. Plan around it for mutation-critical work.
+
+### Quick reference — where things live
+
+| Need | Symbol |
+|------|--------|
+| Define an agent | `agent("name").input(zod).triggered()` or `.concurrent()`, then `.factory(ctx => glove)`, from `glove-continuum-signal` |
+| Run agents | `new ContinuumRunner({ agentsDir, adapter, subscribers, ... })` from `glove-continuum-signal` |
+| Push to a warm agent | `runner.notify(name, input)` or `concurrentAgent.notify(input)` |
+| Persistence contract | `ContinuumAdapter` from `glove-continuum-signal` |
+| Default in-process adapter | `MemoryAdapter` from `glove-continuum-signal` |
+| Remote trigger | `configure({ endpoint, apiKey })` + `HttpTriggerAdapter` from `glove-continuum-signal` |
+| Observability | `ContinuumSubscriber`, `ConsoleSubscriber`, `AgentEventEnvelope` from `glove-continuum-signal` |
+| Brand symbol | `AGENT_BRAND = Symbol.for("glove-continuum-agent")`, `isAgent(v)` from `glove-continuum-signal` |
+| Mount mesh inside factory | `mountMesh(glove, { adapter, identity })` from `glove-mesh` (see Mesh section) |
+
 ## Glovebox — Sandboxed Runtime
 
 Glovebox packages a built Glove agent as an isolated, network-addressable service. Developer writes a Glove agent normally, calls `glovebox.wrap(runnable, config)`, runs `glovebox build`, and gets a deployable artifact (Dockerfile + nixpacks.toml + esbuild server bundle + manifest + auth key). The deployed server exposes one authenticated WebSocket endpoint per session, with prompts multiplexed by `id` over that single socket.
@@ -1468,7 +1810,7 @@ const tool = defineTool({
   displayPropsSchema?: z.ZodType,      // Zod schema for display props (recommended for tools with UI)
   resolveSchema?: z.ZodType,           // Zod schema for resolve value (omit for pushAndForget-only)
   displayStrategy?: SlotDisplayStrategy,
-  requiresPermission?: boolean,
+  requiresPermission?: boolean | ((input: z.infer<I>) => boolean),  // function form gates per-input (e.g. only writes, not reads)
   unAbortable?: boolean,                 // Tool runs to completion even if abort signal fires (e.g. voice barge-in)
   do(input, display): Promise<ToolResultData>,  // display is TypedDisplay<D, R>
   render?({ props, resolve, reject }): ReactNode,
@@ -1494,7 +1836,7 @@ interface ToolConfig<I = any> {
   render?: (props: SlotRenderProps) => ReactNode;
   renderResult?: (props: ToolResultRenderProps) => ReactNode;
   displayStrategy?: SlotDisplayStrategy;
-  requiresPermission?: boolean;
+  requiresPermission?: boolean | ((input: I) => boolean);  // function form gates per-input
   unAbortable?: boolean;
 }
 ```
@@ -1520,13 +1862,61 @@ A tool's `do` function receives the running `IGloveRunnable` as a third argument
 ```typescript
 interface ToolResultData {
   status: "success" | "error";
-  data: unknown;          // Sent to the AI model
-  message?: string;       // Error message (for status: "error")
-  renderData?: unknown;   // Client-only — NOT sent to model, used by renderResult
+  data: unknown;                 // Sent to the AI model
+  message?: string;              // Error message (for status: "error")
+  renderData?: unknown;          // Client-only — NOT sent to model, used by renderResult
+  summary?: string;              // Populated by the Executor from tool.generateSummary; swapped in for data in older context when enableToolResultSummary is on
+  generateSummaryArgs?: unknown; // Opaque payload do() returns to drive the tool's generateSummary handler
 }
 ```
 
 **Important:** Model adapters explicitly strip `renderData` before sending to the AI. This makes it safe to store sensitive client-only data (e.g., email addresses, UI state) in `renderData`.
+
+### Tool result summaries (opt-in)
+
+Token-efficiency optimization for tools whose payloads bloat context (file reads, web fetches, large query results). Off by default; opt in with `enableToolResultSummary: true` on `GloveConfig`, and add `generateToolSummary` to each tool you want to compress.
+
+```typescript
+const agent = new Glove({
+  store,
+  model: createAdapter({ provider: "anthropic" }),
+  displayManager: new Displaymanager(),
+  systemPrompt: "...",
+  compaction_config: { compaction_instructions: "Summarize so far." },
+  enableToolResultSummary: true,            // turn on the pruner
+})
+  .fold({
+    name: "read_file",
+    description: "Read a slice of a file.",
+    inputSchema: z.object({ path: z.string(), from: z.number().optional(), to: z.number().optional() }),
+    async do(input) {
+      const slice = await readSlice(input);
+      return {
+        status: "success",
+        data: slice,
+        generateSummaryArgs: { path: input.path, from: input.from, to: input.to, lineCount: slice.split("\n").length },
+      };
+    },
+    async generateToolSummary(args) {
+      const { path, from, to, lineCount } = args as any;
+      const range = from != null || to != null ? ` lines ${from ?? 1}-${to ?? "EOF"}` : "";
+      return `Read ${path}${range} (${lineCount} lines).`;
+    },
+  })
+  .build();
+```
+
+How it works:
+
+1. **`do()` returns `generateSummaryArgs`** — whatever the summary handler needs (path + line range, URL, query, row count).
+2. **Executor calls `generateToolSummary(args)`** after `do()` resolves and stores the result on `ToolResultData.summary`. Both `data` and `summary` live on the result.
+3. **`PromptMachine.summarizeOlderToolResults`** runs before every model call (when `enableToolResultSummary: true`): finds the latest non-tool user message and, for every tool result at or before that index, swaps `data` → `summary`. Tool results from the current turn are untouched.
+
+The store always keeps both `data` and `summary`. Only the messages handed to the model adapter are rewritten — transcript renderers, history snapshots, and analytics still see the full record.
+
+Tools without `generateToolSummary`, or calls that omit `generateSummaryArgs`, leave `summary` unset and the pruner leaves them alone. Partially instrumented tool catalogues work fine.
+
+Composes with compaction: tool summaries delay the point at which the Observer needs to compact, and compaction still fires when the instrumented context grows past `CONTEXT_COMPACTION_LIMIT`.
 
 ## `<Render>` Component
 
@@ -1612,8 +2002,8 @@ type ToolEntry = Extract<TimelineEntry, { kind: "tool" }>;
 | Provider | Env Variable | Default Model | SDK Format |
 |----------|-------------|---------------|------------|
 | `openai` | `OPENAI_API_KEY` | `gpt-4.1` | openai |
-| `anthropic` | `ANTHROPIC_API_KEY` | `Codex-sonnet-4-20250514` | anthropic |
-| `openrouter` | `OPENROUTER_API_KEY` | `anthropic/Codex-sonnet-4` | openai |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | anthropic |
+| `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4` | openai |
 | `gemini` | `GEMINI_API_KEY` | `gemini-2.5-flash` | openai |
 | `minimax` | `MINIMAX_API_KEY` | `MiniMax-M2.5` | openai |
 | `kimi` | `MOONSHOT_API_KEY` | `kimi-k2.5` | openai |
@@ -1621,7 +2011,7 @@ type ToolEntry = Extract<TimelineEntry, { kind: "tool" }>;
 | `mimo` | `MIMO_API_KEY` (+ optional `MIMO_BASE_URL`) | `mimo-v2.5` | mimo |
 | `ollama` | _(none)_ | _(user-specified)_ | openai |
 | `lmstudio` | _(none)_ | _(user-specified)_ | openai |
-| `bedrock` | `AWS_ACCESS_KEY_ID` | `anthropic.Codex-3-5-sonnet-20241022-v2:0` | bedrock |
+| `bedrock` | `AWS_ACCESS_KEY_ID` | `anthropic.claude-3-5-sonnet-20241022-v2:0` | bedrock |
 
 ### Reasoning Models
 
@@ -1910,14 +2300,37 @@ For example patterns from real implementations, see [examples.md](examples.md).
 37. **Bound `/` directives are replaced with placeholders, not stripped**: `/compact` becomes `[invoked_extension__hook_compact]` in the parsed text the model sees. The placeholder is non-triggerable (it doesn't match the directive regex), so a future re-parse of the same text doesn't re-fire the extension. Hook and skill handlers receive `parsedText` containing the placeholder, not the bare directive — keep that in mind when matching against it.
 38. **Skill-injected messages are `is_skill_injection: true`**: Synthetic user messages produced by `/skill` invocations have this flag set. Use it in transcript renderers to distinguish them from real user turns. They are persisted in the store like any other message and survive compaction (subject to `splitAtLastCompaction` like everything else).
 39. **`glove_invoke_skill` reads the live registry per call**: The auto-registered tool checks `this.skills` at run time, so skills defined after `build()` with `exposeToAgent: true` are immediately callable. The tool's description is also rebuilt in place when a new exposed skill is registered, so the listing the model sees stays current. The same applies to `glove_invoke_subagent` and the subagent registry.
-40. **`@mention` is a model-side routing signal, not a parsed directive**: Following Codex's subagent convention, glove never parses `@name` tokens. The full user message reaches the model and the model decides whether to call `glove_invoke_subagent` based on that tool's description. This means: invocation is not guaranteed (the model could ignore an `@mention`), but multiple `@mentions` in one message Just Work — the model can call the dispatch tool once per subagent.
-41. **Subagents do not see parent context**: A subagent runs in isolation — the only input it gets is the `prompt` string the agent supplied. If your subagent needs context, the parent agent must put it in the prompt (Codex-style). The factory builds a fresh child `Glove` with its own store; pass `parentControls.glove.model` and `parentControls.displayManager` if you want to inherit them.
+40. **`@mention` is a model-side routing signal, not a parsed directive**: Following Claude Code's subagent convention, glove never parses `@name` tokens. The full user message reaches the model and the model decides whether to call `glove_invoke_subagent` based on that tool's description. This means: invocation is not guaranteed (the model could ignore an `@mention`), but multiple `@mentions` in one message Just Work — the model can call the dispatch tool once per subagent.
+41. **Subagents do not see parent context**: A subagent runs in isolation — the only input it gets is the `prompt` string the agent supplied. If your subagent needs context, the parent agent must put it in the prompt (Claude Code-style). The factory builds a fresh child `Glove` with its own store; pass `parentControls.glove.model` and `parentControls.displayManager` if you want to inherit them.
 42. **`subagent_invoked` / `subagent_completed` are guaranteed symmetric**: The Executor — not the dispatcher — fires both bracket events around every `glove_invoke_subagent` tool call. Even when a parent abort short-circuits the dispatcher's promise chain, the executor's abort branch still fires `subagent_completed` with `status: "error"` and `message: "Subagent run aborted by the user."`. Subscribers can rely on 1:1 symmetry.
 43. **Hook `shortCircuit` still persists the user message**: Even when a hook short-circuits the turn, the user's (post-rewrite) message is appended to context first so transcripts stay consistent. The model just isn't called for that turn.
 44. **Token consumption events**: The Observer fires `token_consumption` (`{ consumption: { tokens_in, tokens_out } }`) on subscribers after each model turn. `StoreAdapter.addTokens` takes the same `TokenConsumptionCounter` shape; `getTokenCount()` still returns a single sum.
 45. **Reasoning capture is opt-in**: `OpenAICompatAdapter` ignores `reasoning_content` by default. Pass `reasoning: true` (or an object) on `createAdapter` / `new OpenAICompatAdapter` to capture the trace into `Message.reasoning_content`. The MiMo adapter is opinionated and captures unconditionally.
 46. **`reasoning_content` vs `reasoning` field**: The adapter reads either field from the response. DeepSeek / Qwen3 / GLM / Kimi / MiniMax / MiMo emit `reasoning_content`; OpenRouter emits `reasoning` (with `reasoning_content` as a documented alias). The captured string always lands on `Message.reasoning_content` — that's the canonical Glove field.
+47. **Tool result summaries are off by default**: `enableToolResultSummary` on `GloveConfig` defaults to `false`. Setting it to `true` alone does nothing — you also have to add `generateToolSummary` to each tool you want to shrink AND have `do()` return `generateSummaryArgs`. The Executor only populates `result.summary` when BOTH the handler and the args are present.
+48. **`summary` only replaces `data` in older context**: `PromptMachine.summarizeOlderToolResults` finds the latest non-tool user message and only rewrites tool results at or before that index. Current-turn tool results always reach the model with full `data`. The store keeps both `data` and `summary` untouched on every result — only the messages handed to the model adapter are rewritten.
+49. **`summarizeOlderToolResults` skips empty summaries**: The substitution only happens when `result.summary` is truthy. Partially-instrumented tool catalogues are safe — instrumented tools shrink in older context, uninstrumented tools keep their original `data`. There's no way to force a tool to be excluded from the rewrite other than not populating `summary` for it.
+50. **String error data is no longer double-JSON-stringified**: All model adapters (`anthropic`, `bedrock`, `mimo`, `openai-compat`, `openrouter`) now check `typeof data === "string"` before `JSON.stringify`-ing error result data. If your tool returns `{ status: "error", data: "some message" }`, the model sees `Error: ...\nsome message` rather than `Error: ...\n"some message"`. Bug fix — no consumer action needed, but a behavior change worth knowing if you parse error strings on the model side.
 47. **Echo is required on tool turns for DeepSeek V4 / MiMo**: When `reasoning` is enabled, the adapter echoes `Message.reasoning_content` back on assistant turns that produced `tool_calls` — DeepSeek V4 and MiMo reject the request otherwise. DeepSeek-R1 (the older model) rejects the field entirely; set `reasoning: { echo: false }` if you're specifically targeting R1.
 48. **`reasoning_effort` "minimal" is GPT-5-only**: The full effort enum is `"minimal" | "low" | "medium" | "high"`, but `"minimal"` only works on GPT-5 / o-series. The MiMo branch silently drops it. Other providers may reject it — check provider docs before using.
 49. **Adaptive reasoning models can suppress thinking on "low"**: On `mimo-v2.5-pro` and similar adaptive models, passing `effort: "low"` or `"medium"` can suppress reasoning rather than bound it. Pass `"high"` for consistently deep reasoning, or leave unset to let the model decide.
 50. **Provider-specific reasoning extras via `extraBody`**: For Qwen3 dashscope's `enable_thinking` / `thinking_budget`, or any other non-standard request field, use `reasoning: { extraBody: { ... } }` — fields are merged straight into the request body. Structured options (`effort`, `reasoningObject`, `thinking`) are exposed for the common cases.
+51. **Permissions are keyed on (tool, input), not just tool**: `Executor.checkPermission` calls `store.getPermission(name, input)` with the model-supplied input on every gated call. The default `MemoryStore` exact-matches inputs via `permissionKey(name, input)` → `"${name}::${JSON.stringify(input ?? null)}"`, so calls with different inputs prompt independently and calls with identical inputs hit the cached decision. Custom stores can implement fuzzier matching (regex on a command, prefix on a path) by ignoring or canonicalising `input` themselves.
+52. **`requiresPermission` accepts a function**: `boolean | ((input: I) => boolean)`. Use the function form when the *gate itself* depends on input — e.g. a single `bash` tool that gates writes but not reads: `requiresPermission: (i) => !i.cmd.startsWith("ls")`. Returning `false` skips the store lookup entirely for that call; returning `true` runs the normal `getPermission(name, input)` flow.
+53. **SqliteStore migration on upgrade**: Existing databases get an `input_hash` column added to the `permissions` table (PK becomes `(session_id, tool_name, input_hash)`). Legacy rows are preserved with `input_hash = ''` (a sentinel that won't match any real call), so users re-prompt once for every tool after upgrade — consistent with the new exact-match semantics. `glove-sqlite` is still deprecated; prefer `MemoryStore` from `glove-core` or BYO `StoreAdapter`.
+54. **`mountMesh` requires inbox-capable stores**: It throws `MeshStoreUnsupportedError` if `glove.store` doesn't implement all four inbox methods (`getInboxItems`, `addInboxItem`, `updateInboxItem`, `getResolvedInboxItems`). `MemoryStore` and `SqliteStore` both qualify; BYO stores need to opt in. The framework no longer no-ops silently here — fail-fast on misconfiguration.
+55. **Mesh blocking sends use the existing inbox-injection path**: The pending blocking item created by `glove_mesh_send_message({ blocking: true })` synthesises a transient reminder each turn via `Agent.buildPendingBlockingMessage` until it resolves. On ack/reply, the resolved item shows up via the standard `[Inbox: N item(s) resolved]` injection. No new mechanism in `glove-core` — mesh is strictly additive.
+56. **Mesh sender ids are unverified**: `MeshMessage.from` is sender-claimed. The framework does not verify the sender matches the registered identity. If you need authenticated messaging, sign messages before calling `adapter.send`/`broadcast` and verify in your `subscribe` handler — mirrors how `McpAdapter.getAccessToken` keeps auth a consumer concern.
+57. **Mesh tag prefixes are `mesh:`, not `glove_mesh:`**: Tool names are `glove_mesh_*` (matching the framework's `glove_<package>_*` convention), but inbox tags use the shorter `mesh:from:<sender>`, `mesh:broadcast:from:<sender>`, `mesh:waiting:<msg_id>` prefixes. The mismatch is intentional — tags are filter keys, tool names are model-facing — but worth noting when grepping inbox histories.
+58. **Mesh reply implies ack**: An incoming direct message with `in_reply_to: X` does BOTH things: surfaces the reply body as a new resolved inbox item AND resolves the pending blocking item for `X` (if one exists). The recipient doesn't need to call `glove_mesh_acknowledge` separately when replying.
+59. **`InMemoryMeshAdapter` is process-local**: Construct ONE `MeshNetwork` per process and share it across every `InMemoryMeshAdapter`. For cross-process or distributed messaging, implement `MeshAdapter` directly over your transport (Redis pub/sub, NATS, HTTP webhooks). The `MeshNetwork` LRU that maps `message_id → sender_id` for ack routing caps at 1024 by default — acks for very old messages are best-effort.
+60. **Continuum `agent()` builder forks on mode**: After `.input(zod)`, calling `.triggered()` returns `TriggeredAgentBuilder<TInput>` and `.concurrent()` returns `ConcurrentAgentBuilder<TInput>`. `.retries(n)` / `.every("5m")` / `.withInput(default)` only exist on triggered; trying them on concurrent is a type error, not a runtime error. The terminal `.factory(ctx => Glove)` returns the built agent (branded with `AGENT_BRAND`). Mirrors station-signal's `.run()` vs `.step().build()` fork.
+61. **`.notify()` is type-level concurrent-only**: `ConcurrentAgent<T>` exposes both `.trigger(input)` and `.notify(input)` (both write `kind: "notify"` runs); `TriggeredAgent<T>` only has `.trigger(input)` (which writes `kind: "trigger"`). The runtime distinguishes by run kind: trigger/recurring spawn fresh subprocesses, notify routes IPC to the warm one. Calling `agent.notify()` on a triggered agent doesn't compile.
+62. **Triggered agents NEED `.store(name => StoreAdapter)`**: Without it, each wakeup gets a fresh `MemoryStore` and loses all context from previous wakeups — defeating continuum's purpose. Discovery emits a console warning when a triggered agent omits `.store(...)`. Concurrent agents are usually fine without one because their subprocess is long-lived, but persistence helps if the runner can restart.
+63. **Mounting `mountMesh` in a continuum factory works out-of-the-box**: Continuum's stores must already be inbox-capable when mesh is mounted (mesh requires those four inbox methods). Glove's `MemoryStore` qualifies; a BYO `StoreAdapter` needs the inbox methods too. The continuum substrate provides no special IPC for mesh — the factory just calls `await mountMesh(glove, { adapter, identity })` after building the glove and the adapter runs entirely inside the subprocess.
+64. **Continuum subscribers receive `onAgentEvent(envelope)`, NOT per-type Glove events**: The runner forwards every Glove `SubscriberEvent` from any child subprocess as a single `AgentEventEnvelope` (`{ agentName, runId, mode, event_type, data, timestamp }`). Subscribers narrow on `envelope.event_type` to handle specific types. `runId` is nullable for ambient warm-agent events emitted outside any notify (e.g. during factory setup). Wrappers can build per-type fan-out on top trivially.
+65. **Continuum parent is single source of truth for run status**: Children only emit IPC envelopes; the parent runner translates them into `adapter.updateRun(…)` calls. Children NEVER reconstruct or talk to the adapter directly (a real simplification over station-signal that falls out of dropping steps). The `resolved` flag and active-count decrement on terminal IPC are set in the synchronous critical path BEFORE any `await`, so slow adapter backends can't trip a double-decrement when the 200ms exit grace overlaps a pending status update.
+66. **Continuum warm-restart budget resets after 60s of stability**: `warmRestartPolicy.maxRestarts` (default 5) caps how many crash-loop restarts an agent gets, but the counter zeroes out once the warm subprocess has been `ready` for 60s without exiting. So a once-in-a-while crash after hours of healthy work doesn't permanently lose the agent; chronic flap still hits the budget. The reset timer is cleared in the exit handler so a quick re-crash doesn't earn a fresh budget.
+67. **Continuum runner spawn env-blocklist**: `NODE_OPTIONS`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, and `DYLD_INSERT_LIBRARIES` are stripped from BOTH the parent env forwarded to subprocesses AND any `.env({...})` override an agent supplies. Defense-in-depth against loader injection — the trust model is still "I trust my own agent code", but blocking the highest-impact escapes is cheap. `PATH` is deliberately kept so `spawn("node", …)` resolves.
+68. **`runner.notify(name, input)` vs `agent.notify(input)`**: Both write a `kind: "notify"` run that routes to the warm subprocess. The agent's instance method goes through `getAdapter()` (the global `configure({adapter})` singleton); the runner method goes through the runner's own adapter. Use the runner method when you have multiple runners in one process (the global races) or when you want to be explicit about which runner gets the run.
+69. **Continuum bootstrap path is `dist/bootstrap.js` (production) or falls back to `src/bootstrap.ts` (dev)**: The runner uses `existsSync` to pick whichever exists. If you delete `dist/` while running under `tsx`, the runner still works against the source file. If neither exists, `spawn` fails at runtime with `ENOENT` — make sure you've built the package (or are running under `tsx`) before starting a runner.

@@ -5,7 +5,7 @@
       "source": "porkytheblack/glove",
       "sourceType": "github",
       "skillPath": ".claude/skills/glove/SKILL.md",
-      "computedHash": "3b2c5daa572f15c07c28f2ec4f67629bfe59ef2eb9281a0df4dc3ea07afca6a2"
+      "computedHash": "76768cbc5b8f38e899bac62b88ccbd8278fcc622cc6a752cc32d34309a9786ab"
     },
     "opentui": {
       "source": "msmps/opentui-skill",
@@ -18,6 +18,12 @@
       "sourceType": "github",
       "skillPath": ".claude/skills/station/SKILL.md",
       "computedHash": "f074159448ed70dbd617ca76f7b5af277a495fba10ea0eb66134d5297c5a1ed2"
+    },
+    "under200": {
+      "source": "porkytheblack/skeelz",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/under200/SKILL.md",
+      "computedHash": "5d38a4f30eea44db2a320b88b195a15fe54de7c776ebd2bd060ecfcea83245d9"
     }
   }
 }

@@ -1,515 +1,440 @@
----
-name: glove
-description: Expert guide for building AI-powered applications with the Glove framework. Use when working with glove-core, glove-react, glove-next, tools, display stack, model adapters, stores, any Glove example project, or deploying agents as sandboxed runtime services with Glovebox (glovebox / glovebox-kit / glovebox-client).
----
+# Glove API Reference
 
-# Glove Framework — Development Guide
+## glove-core
 
-You are an expert on the Glove framework. Use this knowledge when writing, debugging, or reviewing Glove code.
-
-## What Glove Is
-
-Glove is an open-source TypeScript framework for building AI-powered applications. Users describe what they want in conversation, and an AI decides which capabilities (tools) to invoke. Developers define tools and renderers; Glove handles the agent loop.
-
-**Repository**: https://github.com/porkytheblack/glove
-**Docs site**: https://glove.dterminal.net
-**License**: MIT (dterminal)
-
-## Package Overview
-
-| Package | Purpose | Install |
-|---------|---------|---------|
-| `glove-core` | Runtime engine: agent loop, tool execution, display manager, model adapters, `MemoryStore` default in-memory `StoreAdapter` (browser-safe — no native deps) | `pnpm add glove-core` |
-| `glove-sqlite` | **Deprecated.** `SqliteStore` — persistent SQLite-backed store. Prefer `MemoryStore` from `glove-core` for prototyping or BYO `StoreAdapter` for production. | `pnpm add glove-sqlite` |
-| `glove-react` | React hooks (`useGlove`), `GloveClient`, `GloveProvider`, `defineTool`, `<Render>`, `MemoryStore`, `ToolConfig` with colocated renderers | `pnpm add glove-react` |
-| `glove-next` | One-line Next.js API route handler (`createChatHandler`) for streaming SSE | `pnpm add glove-next` |
-| `glove-mcp` | Bridge MCP servers into a Glove agent: `mountMcp`, `connectMcp`, `bridgeMcpTool`, `McpAdapter`, `discovermcp` discovery subagent. Opt-in OAuth helpers at `glove-mcp/oauth`. | `pnpm add glove-mcp` |
-| `glove-memory` | Schema-first memory layer with four sibling subsystems: entity graph, episodic timeline, resource filesystem, and ambient context. BYO storage via the adapter contracts; reference in-memory adapters ship for dev/test. Storage backends (`glove-memory-sqlite`, `glove-memory-postgres`) are companion packages — not yet released. Draft v0.1. | `pnpm add glove-memory` |
-| `glovebox-core` | Authoring + `glovebox` build CLI. `glovebox.wrap(runnable, config)` packages a built Glove agent into a deployable artifact (Dockerfile + nixpacks.toml + bundled server + manifest + auth key). Storage DSL (`rule.*`, `composite`) and wire protocol types live here too. The unscoped `glovebox` name is taken on npm — install as `glovebox-core`; the CLI binary is still `glovebox`. | `pnpm add glovebox-core` |
-| `glovebox-kit` | In-container runtime. `startGlovebox({ app, port, key, manifestPath, ... })` boots the WS server, auto-injects glovebox skills/hooks, and bridges Glove's display stack onto the wire. Storage adapters: `InlineStorage`, `UrlStorage`, `LocalServerStorage`, `S3Storage`. | (transitive — bundled by `glovebox build`) |
-| `glovebox-client` | Client SDK. `GloveboxClient.make({ endpoints })`, `client.box(name).prompt(text, { files })`, `result.read(name)`, `box.environment()`. Symmetric `ClientStorage` interface with a default inline+url implementation. | `pnpm add glovebox-client` |
-
-**Most projects need just `glove-react` + `glove-next`.** `glove-core` is included as a dependency of `glove-react`. For server-side or non-React agents, use `glove-core` directly — see [Server-Side Agents](#server-side-agents) below. For agents that need third-party tools via the Model Context Protocol, see [MCP Integration](#mcp-integration-glove-mcp).
-
-### What's in the framework
-
-- **`glove-core`** — agent loop, tools, display stack, store/model/subscriber adapters, context compaction, inbox, hooks/skills/subagents, `MemoryStore` default in-memory `StoreAdapter`.
-- **`glove-react`** — colocated renderers via `defineTool`, `<Render>`, `useGlove`, `MemoryStore`, `createRemoteStore`, `createEndpointModel`, `createRemoteModel`.
-- **`glove-next`** — `createChatHandler` (one-line SSE route), voice token handler.
-- **`glove-sqlite`** — deprecated; `SqliteStore` for persistence (server-side only).
-- **`glove-voice`** — full-duplex voice pipeline: STT/TTS/VAD adapters, `GloveVoice`, `useGloveVoice`, `useGlovePTT`, `<VoicePTTButton>`.
-- **`glove-mcp`** — MCP servers as first-class tools: `mountMcp`, `connectMcp`, `bridgeMcpTool`, `McpAdapter` (consumer-supplied per-conversation seam). `discovermcp` discovery subagent (registered via `glove.defineSubAgent(discoverySubAgent({...}))`). Opt-in OAuth helpers at `glove-mcp/oauth` (`runMcpOAuth`, `FsOAuthStore`, `MemoryOAuthStore`, `McpOAuthProvider`).
-- **`glove-memory`** — Memory layer with four sibling subsystems (entity graph / episodic timeline / resource filesystem / ambient context) and matching `useMemoryReader` / `useMemoryCurator`, `useEpisodicReader` / `useEpisodicCurator`, `useResourcesReader` / `useResourcesCurator`, and `useContext` helper families. Storage-agnostic adapter contracts plus reference `InMemory*` adapters for dev/test.
-
-## Architecture at a Glance
-
-```
-User message → Agent Loop → Model decides tool calls → Execute tools → Feed results back → Loop until done
-                                                          ↓
-                                                   Display Stack (pushAndWait / pushAndForget)
-                                                          ↓
-                                                   React renders UI slots
-```
-
-### Core Concepts
-
-- **Agent** — AI coordinator that replaces router/navigation logic. Reads tools, decides which to call.
-- **Tool** — A capability: name, description, inputSchema (Zod), `do` function, optional `render` + `renderResult`.
-- **Display Stack** — Stack of UI slots tools push onto. `pushAndWait` blocks tool; `pushAndForget` doesn't.
-- **Display Strategy** — Controls slot visibility lifecycle: `"stay"`, `"hide-on-complete"`, `"hide-on-new"`.
-- **renderData** — Client-only data returned from `do()` that is NOT sent to the AI model. Used by `renderResult` for history rendering.
-- **Adapter** — Pluggable interfaces for Model, Store, DisplayManager, and Subscriber. Swap providers without changing app code.
-- **Context Compaction** — Auto-summarizes long conversations to stay within context window limits. The store preserves full message history (so frontends can display the entire chat), while `Context.getMessages()` splits at the last compaction summary so the model only sees post-compaction context. Summary messages are marked with `is_compaction: true`.
-- **Inbox** — Persistent async mailbox for cross-instance communication. An agent posts a request (text) that can't be resolved now; an external service resolves it later (text response). Resolved items are automatically injected into the agent's context on the next `ask()` call. Items can be blocking (agent should wait) or non-blocking. Built-in `glove_post_to_inbox` tool auto-registered when store supports inbox methods.
-- **Extensions (hooks, skills, subagents)** — `/hookname` runs a builder-defined handler with full agent controls (force compaction, swap model, short-circuit a turn). `/skillname` materialises a synthetic user message before the real one (marked `is_skill_injection: true`). `defineSubAgent({ name, factory })` registers a subagent the main agent can route to via the auto-registered `glove_invoke_subagent` tool — the user's `@name` text is NOT parsed by glove, it reaches the model verbatim and acts as a routing signal (mirrors Claude Code's subagent convention). `/` tokens are replaced with non-triggerable placeholders (`[invoked_extension__hook_<name>]` / `[invoked_extension__skill_<name>]`) so the model sees that an extension fired without the placeholder re-binding on a future parse; unbound `/` tokens stay untouched (so `/usr/local` survives). Skills can be exposed to the agent (`exposeToAgent: true`) so the agent pulls them in via the auto-registered `glove_invoke_skill` tool.
-- **MCP catalogue + adapter** — `glove-mcp` introduces two pieces: a static `McpCatalogueEntry[]` describing servers the app supports, and a per-conversation `McpAdapter` holding active ids and resolving access tokens. `mountMcp` reloads previously active servers and registers a `discovermcp` discovery subagent (via `glove.defineSubAgent(discoverySubAgent({...}))`) — the model invokes it through `glove_invoke_subagent({ name: "discovermcp", prompt: "..." })` to find and activate servers mid-conversation.
-
-## Quick Start (Next.js)
-
-### 1. Install
-
-```bash
-pnpm add glove-core glove-react glove-next zod
-```
-
-### 2. Server route
+### Glove Class (Builder)
 
 ```typescript
-// app/api/chat/route.ts
-import { createChatHandler } from "glove-next";
-
-export const POST = createChatHandler({
-  provider: "anthropic",     // or "openai", "openrouter", "gemini", etc.
-  model: "claude-sonnet-4-20250514",
-});
-```
-
-Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, etc.) in `.env.local`.
-
-### 3. Define tools with `defineTool`
-
-```tsx
-// lib/glove.tsx
-import { GloveClient, defineTool } from "glove-react";
-import type { ToolConfig } from "glove-react";
-import { z } from "zod";
-
-const inputSchema = z.object({
-  question: z.string().describe("The question to display"),
-  options: z.array(z.object({
-    label: z.string().describe("Display text"),
-    value: z.string().describe("Value returned when selected"),
-  })),
-});
-
-const askPreferenceTool = defineTool({
-  name: "ask_preference",
-  description: "Present options for the user to choose from.",
-  inputSchema,
-  displayPropsSchema: inputSchema,       // Zod schema for display props
-  resolveSchema: z.string(),             // Zod schema for resolve value
-  displayStrategy: "hide-on-complete",   // Hide slot after user responds
-  async do(input, display) {
-    const selected = await display.pushAndWait(input);  // typed!
-    return {
-      status: "success" as const,
-      data: `User selected: ${selected}`,         // sent to AI
-      renderData: { question: input.question, selected },  // client-only
-    };
-  },
-  render({ props, resolve }) {           // typed props, typed resolve
-    return (
-      <div>
-        <p>{props.question}</p>
-        {props.options.map(opt => (
-          <button key={opt.value} onClick={() => resolve(opt.value)}>
-            {opt.label}
-          </button>
-        ))}
-      </div>
-    );
-  },
-  renderResult({ data }) {               // renders from history
-    const { question, selected } = data as { question: string; selected: string };
-    return <div><p>{question}</p><span>Selected: {selected}</span></div>;
-  },
-});
-
-// Tools without display stay as raw ToolConfig
-const getDateTool: ToolConfig = {
-  name: "get_date",
-  description: "Get today's date",
-  inputSchema: z.object({}),
-  async do() { return { status: "success", data: new Date().toLocaleDateString() }; },
-};
-
-export const gloveClient = new GloveClient({
-  endpoint: "/api/chat",
-  systemPrompt: "You are a helpful assistant.",
-  tools: [askPreferenceTool, getDateTool],
-  // getSessionId: () => fetch("/api/session").then(r => r.json()).then(d => d.id),
-});
-```
-
-### 4. Provider + Render
-
-```tsx
-// app/providers.tsx
-"use client";
-import { GloveProvider } from "glove-react";
-import { gloveClient } from "@/lib/glove";
-
-export function Providers({ children }: { children: React.ReactNode }) {
-  return <GloveProvider client={gloveClient}>{children}</GloveProvider>;
-}
-```
-
-```tsx
-// app/page.tsx — using <Render> component
-"use client";
-import { useGlove, Render } from "glove-react";
-
-export default function Chat() {
-  const glove = useGlove();
-
-  return (
-    <Render
-      glove={glove}
-      strategy="interleaved"
-      renderMessage={({ entry }) => (
-        <div><strong>{entry.kind === "user" ? "You" : "AI"}:</strong> {entry.text}</div>
-      )}
-      renderStreaming={({ text }) => <div style={{ opacity: 0.7 }}>{text}</div>}
-    />
-  );
-}
-```
-
-Or use `useGlove()` directly for full manual control:
-
-```tsx
-// app/page.tsx — manual rendering
-"use client";
-import { useState } from "react";
-import { useGlove } from "glove-react";
-
-export default function Chat() {
-  const { timeline, streamingText, busy, slots, sendMessage, renderSlot, renderToolResult } = useGlove();
-  const [input, setInput] = useState("");
-
-  return (
-    <div>
-      {timeline.map((entry, i) => (
-        <div key={i}>
-          {entry.kind === "user" && <p><strong>You:</strong> {entry.text}</p>}
-          {entry.kind === "agent_text" && <p><strong>AI:</strong> {entry.text}</p>}
-          {entry.kind === "tool" && (
-            <>
-              <p>Tool: {entry.name} — {entry.status}</p>
-              {entry.renderData !== undefined && renderToolResult(entry)}
-            </>
-          )}
-        </div>
-      ))}
-      {streamingText && <p style={{ opacity: 0.7 }}>{streamingText}</p>}
-      {slots.map(renderSlot)}
-      <form onSubmit={(e) => { e.preventDefault(); sendMessage(input.trim()); setInput(""); }}>
-        <input value={input} onChange={(e) => setInput(e.target.value)} disabled={busy} />
-        <button type="submit" disabled={busy}>Send</button>
-      </form>
-    </div>
-  );
-}
-```
-
-## Server-Side Agents
-
-For CLI tools, backend services, WebSocket servers, or any non-browser environment, use `glove-core` directly. No React, Next.js, or browser required.
-
-### Minimal Setup
-
-```typescript
-import { Glove, Displaymanager, MemoryStore, createAdapter } from "glove-core";
-import z from "zod";
-
-// MemoryStore from glove-core is the default. Omit `store` from the
-// Glove config and Glove constructs one for you with a generated identifier.
-// For persistence implement your own StoreAdapter.
-const store = new MemoryStore("my-session");
+import { Glove } from "glove-core";
 
 const agent = new Glove({
-  store,
-  model: createAdapter({ provider: "anthropic", stream: true }),
-  displayManager: new Displaymanager(),  // required but can be empty
-  systemPrompt: "You are a helpful assistant.",
-  serverMode: true,  // canonical "I am headless" flag — drives default permission gating + MCP discovery policy
-  compaction_config: {
-    compaction_instructions: "Summarize the conversation.",
+  store?: StoreAdapter,                   // Optional — defaults to a fresh MemoryStore. Can also be supplied later to .build(store).
+  model: ModelAdapter,                    // Required — LLM provider
+  displayManager: DisplayManagerAdapter,  // Required — UI slot management
+  systemPrompt: string,                   // Required — system instructions
+  serverMode?: boolean,                   // Canonical "I am headless" flag — drives default permission gating + MCP discovery policy. Default: false.
+  maxRetries?: number,                    // Tool retry limit (default: 3)
+  maxConsecutiveErrors?: number,          // Reserved
+  compaction_config: {                    // Required
+    compaction_instructions: string,      // Summarization prompt
+    max_turns?: number,                   // Turn limit (default: 120)
+    compaction_context_limit?: number,    // Token threshold (default: 100k)
   },
 })
-  .fold({
-    name: "search",
-    description: "Search the database.",
-    inputSchema: z.object({ query: z.string() }),
-    async do(input) {
-      const results = await db.search(input.query);
-      return { status: "success", data: results };
-    },
-  })
-  .build();
+  .fold<I>(toolArgs)            // Register tool (chainable; ALSO callable post-build on the IGloveRunnable)
+  .defineHook(name, handler)    // Register `/name` hook
+  .defineSkill(args)            // Register `/name` skill
+  .defineSubAgent(args)         // Register a subagent the model routes to via glove_invoke_subagent
+  .setDisplayManager(dm)        // Swap the display manager (chainable, also callable post-build)
+  .addSubscriber(subscriber)    // Add event subscriber (chainable)
+  .build(store?);               // Returns IGloveRunnable. Optional store argument supersedes the constructor's store
+                                // (used by subagent factories that derive a store via parentStore.createSubAgentStore).
 
-const result = await agent.processRequest("Find recent orders");
-console.log(result.messages[0]?.text);
+await agent.processRequest("Hello", abortSignal?);  // Also accepts ContentPart[]
+agent.setModel(newModelAdapter);  // Hot-swap model at runtime
+agent.fold({ ... });              // Legal post-build — adds tools mid-session (used by the MCP discovery subagent)
+agent.rebuild(store?);            // Alias for build(store?) when re-binding to a new store post-construction
 ```
 
-### `MemoryStore` from `glove-core`
+The runnable returned by `build()` exposes `model`, `displayManager`, and `serverMode` as read-only fields so subagents and dynamically-folded tools (e.g. MCP discovery) can inherit them.
 
-`MemoryStore` is the default `StoreAdapter` used when `Glove` is constructed without a `store`. It implements every optional surface — messages, tokens, turns, tasks, permissions, inbox, and `createSubAgentStore` — so subagents work out of the box.
+### GloveFoldArgs<I>
+
+```typescript
+{
+  name: string,
+  description: string,
+  inputSchema?: z.ZodType<I>,             // Optional. Provide either inputSchema (Zod, validated locally) or jsonSchema (raw, passthrough).
+  jsonSchema?: Record<string, unknown>,   // Raw JSON Schema. When set, executor skips local Zod validation. Used by bridgeMcpTool.
+  requiresPermission?: boolean | ((input: I) => boolean),  // boolean gates every call; function form gates per-input (return true to require check, false to skip)
+  unAbortable?: boolean,                  // When true, tool runs to completion even if abort signal fires (e.g. voice barge-in)
+  do: (
+    input: I,
+    display: DisplayManagerAdapter,
+    glove: IGloveRunnable,
+    signal?: AbortSignal,
+  ) => Promise<ToolResultData>,
+  generateToolSummary?: (summaryArgs?: unknown) => Promise<string>,
+  // ^ `glove` is the running Glove instance — used by subagent-folded tools (e.g. discovermcp's `activate`)
+  //   to fold bridged tools onto the main agent and inherit its model/displayManager.
+  // ^ `signal` is the active request's AbortSignal. Forward it into long-running internal work so abort
+  //   propagates. Tools that ignore it still get the executor's abortable-promise unwind for free; tools
+  //   marked `unAbortable: true` should ignore signal entirely.
+  // ^ `generateToolSummary` is called by the Executor when `do()` returns `generateSummaryArgs`. Returned
+  //   string lands on `result.summary` and replaces `result.data` in older context when the Glove was
+  //   constructed with `enableToolResultSummary: true`. See "Tool result summaries" further down.
+}
+```
+
+### DisplayManager
+
+```typescript
+import { Displaymanager } from "glove-core";
+
+const dm = new Displaymanager();
+dm.subscribe((stack) => { /* stack changed */ });  // Returns unsubscribe fn
+
+// Non-blocking — returns slot ID
+const slotId = await dm.pushAndForget({ renderer?: string, input: data });
+
+// Blocking — returns resolved value
+const result = await dm.pushAndWait({ renderer?: string, input: data });
+
+dm.resolve(slotId, value);     // Unblock pushAndWait
+dm.reject(slotId, error);      // Reject pushAndWait
+dm.removeSlot(slotId);         // Remove from stack
+await dm.clearStack();         // Clear all slots
+```
+
+### StoreAdapter Interface
+
+```typescript
+interface TokenConsumptionCounter {
+  tokens_in: number;
+  tokens_out: number;
+}
+
+interface StoreAdapter {
+  identifier: string;
+  getMessages(): Promise<Message[]>;
+  appendMessages(msgs: Message[]): Promise<void>;
+  getTokenCount(): Promise<number>;                 // Returns a single sum of in + out
+  addTokens(args: TokenConsumptionCounter): Promise<void>;  // Takes the split counter
+  getTurnCount(): Promise<number>;
+  incrementTurn(): Promise<void>;
+  resetCounters(): Promise<void>;  // Reset token/turn counts without deleting messages
+  // Optional — enables built-in task tool when present:
+  getTasks?(): Promise<Task[]>;
+  addTasks?(tasks: Task[]): Promise<void>;
+  updateTask?(taskId: string, updates: Partial<Pick<Task, "status" | "content" | "activeForm">>): Promise<void>;
+  // Optional — enables permission system (input-aware):
+  // The Executor passes the model-supplied tool input on every gated call.
+  // Stores can scope decisions per-(name, input) or ignore input and treat
+  // all calls to a tool uniformly. The default MemoryStore exact-matches via
+  // permissionKey(name, input).
+  getPermission?(toolName: string, input?: unknown): Promise<PermissionStatus>;
+  setPermission?(toolName: string, status: PermissionStatus, input?: unknown): Promise<void>;
+  // Optional — enables built-in inbox tool when present:
+  getInboxItems?(): Promise<InboxItem[]>;
+  addInboxItem?(item: InboxItem): Promise<void>;
+  updateInboxItem?(itemId: string, updates: Partial<Pick<InboxItem, "status" | "response" | "resolved_at">>): Promise<void>;
+  getResolvedInboxItems?(): Promise<InboxItem[]>;
+  // Optional — enables subagent factories to derive isolated child stores:
+  // durable: false (default) → fresh per call. durable: true → cached for the namespace.
+  createSubAgentStore?(namespace: string, durable?: boolean): Promise<StoreAdapter>;
+}
+```
+
+**Implementations**:
+- `MemoryStore` (glove-core) — default; implements every optional surface including `createSubAgentStore`. `Glove` constructs one automatically when no `store` is passed.
+- `MemoryStore` (glove-react) — separate, simpler React-side implementation; lacks `createSubAgentStore`.
+- `createRemoteStore` (glove-react) — delegates messages/tokens/etc. to user-provided async actions.
+- `SqliteStore` (glove-sqlite) — **deprecated**.
+
+### MemoryStore (glove-core)
 
 ```typescript
 import { MemoryStore } from "glove-core";
 
-const store = new MemoryStore("my-session");
+const store = new MemoryStore("session-id");
 
-// Sub-stores: durable: false (default) returns a fresh per-call store.
-// durable: true caches the same instance per namespace so a subagent can
-// carry message history across invocations.
+// Sub-store: durable false → fresh per call; durable true → cached for namespace.
 const childStore = await store.createSubAgentStore("researcher", false);
 ```
 
-`MemoryStore` is process-local — it loses data on restart. For persistence, implement `StoreAdapter` against your own backend. `glove-sqlite` is deprecated; new projects should prefer `MemoryStore` for prototyping or BYO `StoreAdapter` for production.
+Used as the default `StoreAdapter` when `Glove` is constructed without a `store`. Implements messages, tokens (`tokens_in` + `tokens_out`), turns, tasks, permissions, inbox, and `createSubAgentStore`. Process-local — data is lost on restart.
 
-### Key Differences from React
-
-| React (`glove-react`) | Server-side (`glove-core`) |
-|----------------------|---------------------------|
-| `defineTool` with `render`/`renderResult` | `.fold()` with just `do` — no renderers needed |
-| `useGlove()` hook manages state | Call `agent.processRequest()` directly |
-| `GloveClient` + `GloveProvider` | `new Glove({...}).build()` |
-| `createEndpointModel` (SSE client) | `createAdapter()` or direct adapter (e.g. `new AnthropicAdapter()`) |
-| `MemoryStore` from glove-react | `MemoryStore` from glove-core (default) — or implement `StoreAdapter` for persistence |
-
-### Tools Without Display
-
-Most server-side tools ignore the display manager — just return a result:
+Permission decisions are keyed on `(toolName, input)` via the exported `permissionKey(name, input)` helper — distinct inputs prompt independently and identical inputs hit the cached decision.
 
 ```typescript
-gloveBuilder.fold({
-  name: "get_weather",
-  description: "Get weather for a city.",
-  inputSchema: z.object({ city: z.string() }),
-  async do(input) {
-    const res = await fetch(`https://wttr.in/${input.city}?format=j1`);
-    return { status: "success", data: await res.json() };
-  },
+import { permissionKey } from "glove-core";
+
+permissionKey("bash", { cmd: "ls" });        // "bash::{\"cmd\":\"ls\"}"
+permissionKey("bash", { cmd: "rm -rf /" });  // different key → independent prompt
+permissionKey("read_file");                  // "read_file::null" (omitted input is its own bucket)
+```
+
+Custom stores that want fuzzier matching (regex on a command, prefix on a path) should canonicalise `input` themselves rather than reusing this helper.
+
+### SqliteStore (deprecated)
+
+```typescript
+import { SqliteStore } from "glove-sqlite";
+
+const store = new SqliteStore({ dbPath: ":memory:", sessionId: "abc123" });
+// Additional methods: getName(), setName(), getWorkingDir(), setWorkingDir(), close()
+// Static: SqliteStore.listSessions(dbPath)
+// Static: SqliteStore.resolveInboxItem(dbPath, itemId, response) — resolve inbox item from external process
+```
+
+`@deprecated` — use `MemoryStore` from `glove-core` for prototyping or implement `StoreAdapter` against your own backend for production.
+
+### ModelAdapter Interface
+
+```typescript
+interface ModelAdapter {
+  name: string;
+  prompt(request: PromptRequest, notify: NotifySubscribersFunction, signal?: AbortSignal): Promise<ModelPromptResult>;
+  setSystemPrompt(systemPrompt: string): void;
+}
+```
+
+**Built-in adapters**: `AnthropicAdapter`, `OpenAICompatAdapter`, `OpenRouterAdapter`, `MimoAdapter`, `BedrockAdapter`
+
+### createAdapter (Provider Factory)
+
+```typescript
+import { createAdapter, getAvailableProviders } from "glove-core/models/providers";
+
+const model = createAdapter({
+  provider: "anthropic",         // openai | anthropic | openrouter | gemini | minimax | kimi | glm | mimo | ollama | lmstudio | bedrock
+  model?: "claude-sonnet-4-20250514",
+  apiKey?: string,               // Defaults to env var
+  maxTokens?: number,
+  stream?: boolean,              // Default: true
+  baseURL?: string,              // Override provider's default base URL
+  timeout?: number,              // Request timeout in ms (default 600_000 — 10m)
+  // ─── Reasoning (OpenAI-compat path) ────────────────────────────────────
+  reasoning?: boolean | OpenAICompatReasoningOptions,
+  reasoningEffort?: "minimal" | "low" | "medium" | "high",  // legacy; folded into reasoning
+  includeReasoningInText?: boolean,                          // legacy; folded into reasoning
+  // ─── Bedrock-only ──────────────────────────────────────────────────────
+  region?: string, accessKeyId?: string, secretAccessKey?: string, sessionToken?: string,
+});
+
+const available = getAvailableProviders();
+// [{ id, name, available, models, defaultModel }]
+```
+
+### OpenAICompatAdapter Reasoning
+
+OpenAI-compat reasoning models (DeepSeek-R1 / V4, Qwen3-Thinking,
+GLM-4.5 / 4.6, Kimi K2, MiniMax M2.5, OpenRouter, GPT-5 / o-series)
+emit a reasoning trace under `reasoning_content` (DeepSeek convention,
+most upstreams) or `reasoning` (OpenRouter's normalized field). The
+adapter captures either onto `Message.reasoning_content` and echoes it
+back on tool-calling turns (required by DeepSeek V4 and MiMo).
+
+```typescript
+import {
+  OpenAICompatAdapter,
+  type OpenAICompatReasoningOptions,
+  type ReasoningEffort,
+} from "glove-core/models/openai-compat";
+
+interface OpenAICompatReasoningOptions {
+  /** Wrap reasoning in <think>…</think> and prepend to visible text. Default false. */
+  includeInText?: boolean;
+  /**
+   * Echo Message.reasoning_content back on subsequent assistant turns that
+   * produced tool_calls. Required by DeepSeek V4 and MiMo. Default true when
+   * reasoning is enabled. Set false for DeepSeek-R1 specifically.
+   */
+  echo?: boolean;
+  /** Sent as top-level `reasoning_effort` field. */
+  effort?: ReasoningEffort;  // "minimal" | "low" | "medium" | "high"
+  /** OpenRouter-style `reasoning` object. Sent verbatim. */
+  reasoningObject?: {
+    effort?: "low" | "medium" | "high";
+    max_tokens?: number;
+    exclude?: boolean;
+    enabled?: boolean;
+  };
+  /** Anthropic-style `thinking` object. For OpenAI shims that forward thinking. */
+  thinking?: { type: "enabled" | "disabled"; budget_tokens?: number };
+  /** Escape hatch — merged into request body. For Qwen3 dashscope's `enable_thinking`, etc. */
+  extraBody?: Record<string, unknown>;
+}
+
+// Sensible defaults: capture + echo on tool turns.
+new OpenAICompatAdapter({ baseURL, apiKey, model, reasoning: true });
+
+// Hint thinking depth.
+new OpenAICompatAdapter({ baseURL, apiKey, model, reasoning: { effort: "high" } });
+
+// OpenRouter unified shape.
+new OpenAICompatAdapter({
+  baseURL: "https://openrouter.ai/api/v1", apiKey, model,
+  reasoning: { reasoningObject: { effort: "high", max_tokens: 2000 } },
+});
+
+// Qwen3 dashscope.
+new OpenAICompatAdapter({
+  baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", apiKey, model,
+  reasoning: { extraBody: { enable_thinking: true, thinking_budget: 1024 } },
 });
 ```
 
-Returning a plain string also works — auto-wrapped to `{ status: "success", data: yourString }`.
+The MiMo provider has its own `MimoAdapter` with the round-trip
+baked-in — use `createAdapter({ provider: "mimo", ... })` for it.
 
-### Interactive Tools (pushAndWait)
-
-When a tool calls `display.pushAndWait()`, the agent loop blocks until `dm.resolve(slotId, value)` is called. Wire this to your UI layer (WebSocket, terminal, Slack, etc.):
-
-```typescript
-// Tool side
-async do(input, display) {
-  const confirmed = await display.pushAndWait({
-    renderer: "confirm",
-    input: { message: `Delete ${input.file}?` },
-  });
-  if (!confirmed) return { status: "error", data: null, message: "Cancelled" };
-  // proceed...
-}
-
-// Server side — resolve when user responds
-dm.resolve(slotId, true);
-```
-
-### Subscribers (Logging, Forwarding)
+### SubscriberAdapter & Typed Events
 
 ```typescript
-import type { SubscriberAdapter } from "glove-core";
+// Discriminated union of all subscriber events
+type SubscriberEvent =
+  | { type: "text_delta"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "model_response"; text: string; tool_calls?: ToolCall[]; stop_reason?: string; tokens_in?: number; tokens_out?: number }
+  | { type: "model_response_complete"; text: string; tool_calls?: ToolCall[]; stop_reason?: string; tokens_in?: number; tokens_out?: number }
+  | { type: "tool_use_result"; tool_name: string; call_id?: string; result: ToolResultData }
+  | { type: "compaction_start"; current_token_consumption: number }
+  | { type: "compaction_end"; current_token_consumption: number; summary_message: Message }
+  | { type: "token_consumption"; consumption: TokenConsumptionCounter }
+  | { type: "hook_invoked"; name: string }
+  | { type: "skill_invoked"; name: string; source: "user" | "agent"; args?: string }
+  | { type: "subagent_invoked"; name: string; prompt: string }
+  | { type: "subagent_completed"; name: string; status: "success" | "error"; message?: string };
 
-const logger: SubscriberAdapter = {
-  async record(event_type, data) {
-    if (event_type === "text_delta") process.stdout.write((data as any).text);
-    if (event_type === "tool_use") console.log(`\n[tool] ${(data as any).name}`);
-  },
-};
+// Mapped type: extracts data shape (minus "type") for each event
+type SubscriberEventDataMap = { [E in SubscriberEvent as E["type"]]: Omit<E, "type"> };
 
-gloveBuilder.addSubscriber(logger);
-```
+// Type-safe notify callback — passed to ModelAdapter.prompt()
+type NotifySubscribersFunction = <T extends SubscriberEvent["type"]>(
+  event_name: T, data: SubscriberEventDataMap[T]
+) => Promise<void>;
 
-### Common Patterns
-
-- **CLI script**: Build agent, call `processRequest()`, print result
-- **Multi-turn REPL**: Loop with readline, each `processRequest()` accumulates in the store
-- **WebSocket server**: Per-connection session with isolated store/dm/subscriber, forward events via `record()`
-- **Background worker**: Build agent per job, process from a queue, no display needed
-- **Hot-swap model**: Call `agent.setModel(newAdapter)` at runtime
-- **MCP-backed agent**: Set `serverMode: true`, call `mountMcp(glove, { adapter, entries })` before `build()`. See [MCP Integration](#mcp-integration-glove-mcp).
-
-### Optional Store Features
-
-- **Tasks** (`getTasks`, `addTasks`, `updateTask`): Auto-registers `glove_update_tasks` tool
-- **Permissions** (`getPermission`, `setPermission`): Tools with `requiresPermission: true` check consent
-- **Inbox** (`getInboxItems`, `addInboxItem`, `updateInboxItem`, `getResolvedInboxItems`): Auto-registers `glove_post_to_inbox` tool. Enables async cross-instance communication.
-
-If your store doesn't implement these, they're silently disabled.
-
-## Inbox (Async Mailbox)
-
-The inbox enables agents to post requests that will be resolved later by external services — surviving across sessions and instances.
-
-### How It Works
-
-1. Agent calls `glove_post_to_inbox` with a tag, request text, and blocking flag
-2. Item persists in the store with status `pending`
-3. External service resolves the item (via `SqliteStore.resolveInboxItem()` from `glove-sqlite`, or store API)
-4. Next time `agent.ask()` runs, resolved items are injected as text messages and marked `consumed`
-5. Pending blocking items are surfaced as transient reminders (not persisted)
-6. Compaction preserves pending inbox items in the summary block
-
-### Built-in Tool: `glove_post_to_inbox`
-
-Auto-registered when store implements inbox methods. Input schema:
-
-```typescript
-{
-  tag: string,       // Category label, e.g. "restock_watch"
-  request: string,   // Natural language description of what needs to happen
-  blocking: boolean, // Default false. If true, agent should wait for resolution
+// Interface for event receivers
+interface SubscriberAdapter {
+  record: <T extends SubscriberEvent["type"]>(
+    event_type: T, data: SubscriberEventDataMap[T]
+  ) => Promise<void>;
 }
 ```
 
-### External Resolution
+**Events emitted:**
+
+| Event | Emitted by | Data | Description |
+|-------|-----------|------|-------------|
+| `text_delta` | Adapter (streaming) | `{ text: string }` | Incremental text fragment |
+| `tool_use` | Adapter (streaming) | `{ id, name, input }` | Tool call assembled |
+| `model_response` | Adapter (non-streaming) | `{ text, tool_calls?, stop_reason?, tokens_in?, tokens_out? }` | Complete non-streaming response |
+| `model_response_complete` | Adapter (streaming) | `{ text, tool_calls?, stop_reason?, tokens_in?, tokens_out? }` | Final aggregated streaming response |
+| `tool_use_result` | Core (Executor) | `{ tool_name, call_id?, result }` | Tool execution finished |
+| `compaction_start` | Core (Observer) | `{ current_token_consumption }` | Compaction begun |
+| `compaction_end` | Core (Observer) | `{ current_token_consumption, summary_message }` | Compaction finished |
+| `token_consumption` | Core (Observer) | `{ consumption: { tokens_in, tokens_out } }` | Token counter update — fires after each model turn alongside `store.addTokens` |
+| `hook_invoked` | Core (Glove) | `{ name }` | A `/name` hook handler is about to run |
+| `skill_invoked` | Core (Glove or skill dispatch tool) | `{ name, source: "user" | "agent", args? }` | A skill handler is about to run. `source: "user"` fires from `Glove.processRequest`; `source: "agent"` fires from inside `glove_invoke_skill` |
+| `subagent_invoked` | Core (Executor, not the dispatcher) | `{ name, prompt }` | Open bracket — fires before a `glove_invoke_subagent` call runs |
+| `subagent_completed` | Core (Executor, not the dispatcher) | `{ name, status: "success" | "error", message? }` | Close bracket — fires after the dispatcher resolves OR on abort/error. **Guaranteed 1:1 with `subagent_invoked`** |
+
+**Custom adapter event contract:**
+- Non-streaming: emit `model_response` once per prompt call
+- Streaming: emit `text_delta` per chunk, `tool_use` per tool call, `model_response_complete` once at end
+- Use `?? undefined` to coerce null `stop_reason` from provider SDKs
+- Never emit `tool_use_result`, `compaction_start`, `compaction_end`, `token_consumption`, `hook_invoked`, `skill_invoked`, `subagent_invoked`, or `subagent_completed` — those are framework-only
+
+#### Subagent bracket symmetry
+
+The `Executor` (not the dispatcher) brackets every `glove_invoke_subagent` call. Even if the parent agent is aborted mid-run and the dispatcher's promise short-circuits, the executor's abort handler still fires `subagent_completed` with `status: "error"` and `message: "Subagent run aborted by the user."`. Subscribers can rely on every `subagent_invoked` having a matching `subagent_completed`. Events the child Glove emits between them belong to that subagent — parent subscribers are attached to the child for the duration of the run.
+
+### Message
 
 ```typescript
-// From a background job, webhook handler, or cron:
-import { SqliteStore } from "glove-sqlite";
-
-SqliteStore.resolveInboxItem(
-  "path/to/db.db",
-  "inbox_item_id",
-  "The item you requested is now available."  // text response
-);
+interface Message {
+  sender: "user" | "agent";
+  id?: string;
+  text: string;
+  /** Set when a hook rewrites a user message via `rewriteText` — preserves the user's raw input. */
+  pre_modified_text?: string;
+  content?: ContentPart[];
+  tool_results?: ToolResult[];
+  tool_calls?: ToolCall[];
+  is_compaction?: boolean;          // true for compaction summary messages
+  is_compaction_request?: boolean;  // internal marker on the synthetic compaction prompt
+  is_skill_injection?: boolean;     // true for synthetic user messages from /skill invocations
+  /**
+   * Provider-emitted reasoning trace, captured by the OpenAI-compat adapter
+   * (`reasoning: true | {...}`) and the MiMo adapter. DeepSeek V4 and MiMo
+   * require this to be echoed back on subsequent tool-calling turns; the
+   * OpenAI-compat formatter handles the round-trip when echo is on.
+   */
+  reasoning_content?: string;
+}
 ```
 
-Or via REST if you've set up inbox API routes (see coffee example).
-
-### InboxItem Type
+### Core Types
 
 ```typescript
+interface ToolCall { tool_name: string; input_args: unknown; id?: string; }
+interface ToolResult { tool_name: string; call_id?: string; result: ToolResultData; }
+interface Task { id: string; content: string; activeForm: string; status: "pending" | "in_progress" | "completed"; }
+type PermissionStatus = "granted" | "denied" | "unset";
+
+type InboxItemStatus = "pending" | "resolved" | "consumed";
 interface InboxItem {
   id: string;
   tag: string;
   request: string;
   response: string | null;
-  status: "pending" | "resolved" | "consumed";
+  status: InboxItemStatus;
   blocking: boolean;
   created_at: string;
   resolved_at: string | null;
 }
 ```
 
-### Store Methods (Optional)
+### ToolResultData
 
 ```typescript
-// Add to StoreAdapter to enable inbox:
-getInboxItems?(): Promise<InboxItem[]>
-addInboxItem?(item: InboxItem): Promise<void>
-updateInboxItem?(itemId: string, updates: Partial<Pick<InboxItem, "status" | "response" | "resolved_at">>): Promise<void>
-getResolvedInboxItems?(): Promise<InboxItem[]>
+interface ToolResultData {
+  status: "success" | "error";
+  data: unknown;          // Sent to the AI model
+  message?: string;       // Error message (for status: "error")
+  renderData?: unknown;   // Client-only — NOT sent to model, used by renderResult
+}
 ```
 
-All store implementations (SqliteStore from `glove-sqlite`, MemoryStore, createRemoteStore) support inbox.
+**Note:** Model adapters (Anthropic, OpenAI-compat) explicitly destructure and only send `data`, `status`, and `message` to the API. `renderData` is preserved in the store for client-side rendering but never reaches the AI.
 
-### React Integration
+### Built-in Task Tool
 
-`useGlove()` returns `inbox: InboxItem[]` alongside `tasks`:
-
-```tsx
-const { inbox, tasks, timeline, sendMessage } = useGlove({ tools, sessionId });
-
-// Show pending watches in UI
-{inbox.filter(i => i.status === "pending").map(item => (
-  <div key={item.id}>{item.tag}: {item.request}</div>
-))}
-```
-
-### Remote Store Actions
-
-When using `createRemoteStore`, add inbox actions to persist to your backend:
+Auto-registered when store has `getTasks` and `addTasks`:
 
 ```typescript
-const storeActions: RemoteStoreActions = {
-  // ...existing getMessages, appendMessages...
-  getInboxItems: (sid) => fetch(`/api/sessions/${sid}/inbox`).then(r => r.json()),
-  addInboxItem: (sid, item) => fetch(`/api/sessions/${sid}/inbox`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item }) }),
-  updateInboxItem: (sid, itemId, updates) => fetch(`/api/sessions/${sid}/inbox/update`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId, updates }) }),
-  getResolvedInboxItems: (sid) => fetch(`/api/sessions/${sid}/inbox/resolved`).then(r => r.json()),
-};
+import { createTaskTool } from "glove-core";
+const taskTool = createTaskTool(context); // name: "glove_update_tasks"
 ```
 
-## Extensions: Hooks, Skills & Subagents
+### Built-in Inbox Tool
 
-`processRequest` parses two kinds of inline directive out of the user text and dispatches them before the model is called. Subagents are a third extension surface, but they are NOT parsed from user text — they are routed by the model through a dispatch tool. Builders register handlers via three builder methods (chainable, callable post-`build()` like `fold`):
-
-| Token / mechanism | Purpose | Builder method |
-|-------|---------|----------------|
-| `/hookname` | Mutate agent state, force compaction, swap model, short-circuit a turn | `defineHook(name, handler)` |
-| `/skillname` | Inject context as a synthetic user message marked `is_skill_injection: true` | `defineSkill({ name, handler, description?, exposeToAgent? })` |
-| `glove_invoke_subagent({ name, prompt })` (model-side tool) | Register a child Glove the main agent can route a self-contained task to. The user's `@name` text reaches the model verbatim — it's a routing signal, not a parsed directive. Mirrors Claude Code's subagent convention. | `defineSubAgent({ name, factory, description? })` |
-
-`/` tokens only bind when the name matches a registered hook or skill — `/usr/local/bin` survives untouched. Bound `/` tokens are **replaced**, not stripped, with a non-triggerable placeholder of the form `[invoked_extension__hook_<name>]` or `[invoked_extension__skill_<name>]`. The placeholder doesn't re-bind on a future parse, but it keeps the persisted user message structurally honest — the model can see that an extension fired. `@` tokens are never parsed by glove at all, so emails like `a@b.com` reach the model unchanged.
-
-### Quick example
+Auto-registered when store has `getInboxItems`, `addInboxItem`, `updateInboxItem`, and `getResolvedInboxItems`:
 
 ```typescript
-import { Glove, MemoryStore } from "glove-core";
-
-const agent = new Glove({ /* ... */ })
-  .defineHook("compact", async ({ controls }) => {
-    await controls.forceCompaction();
-  })
-  .defineHook("stop", async () => ({
-    shortCircuit: { message: { sender: "agent", text: "Cancelled." } },
-  }))
-  .defineSkill({
-    name: "concise",
-    description: "Tighter, snappier responses",
-    exposeToAgent: true,
-    handler: async ({ source, args }) =>
-      `Be terse. (source=${source}, hint=${args ?? "none"})`,
-  })
-  .defineSubAgent({
-    name: "weather",
-    description: "Run the weather subagent. Use for weather questions.",
-    factory: async ({ parentStore, parentControls, prompt }) => {
-      const subStore = await parentStore.createSubAgentStore?.("weather", false)
-        ?? new MemoryStore(`weather_${Date.now()}`);
-      return new Glove({
-        store: subStore,
-        model: parentControls.glove.model,
-        displayManager: parentControls.displayManager,
-        systemPrompt: "You are a weather assistant. Answer the prompt and return.",
-        compaction_config: { compaction_instructions: "Summarise weather lookups." },
-      })
-        .fold(weatherTool)
-        .build();
-    },
-  })
-  .build();
-
-await agent.processRequest("/concise tell me about Rust");      // user-invoked skill
-await agent.processRequest("/compact what's next?");           // hook → forceCompaction
-// "@weather" reaches the model verbatim. The agent calls
-// glove_invoke_subagent({ name: "weather", prompt: "NYC" }).
-await agent.processRequest("@weather NYC");
+import { createInboxTool } from "glove-core";
+const inboxTool = createInboxTool(context); // name: "glove_post_to_inbox"
+// Input: { tag: string, request: string, blocking?: boolean }
 ```
 
-### Hooks
+### AbortError
+
+```typescript
+import { AbortError } from "glove-core";
+try { await agent.processRequest("Hello", signal); }
+catch (err) { if (err instanceof AbortError) { /* cancelled */ } }
+```
+
+### Extensions: Hooks, Skills & Subagents
+
+Three builder methods on `Glove` (and on the `IGloveBuilder` / `IGloveRunnable` interfaces):
+
+```typescript
+glove.defineHook(name: string, handler: HookHandler): this;
+glove.defineSkill(args: DefineSkillArgs): this;
+glove.defineSubAgent(args: DefineSubAgentArgs): this;
+```
+
+All three are chainable and legal post-`build()`, like `fold`. `defineSkill` takes an object form mirroring `fold(GloveFoldArgs)`:
+
+```typescript
+interface DefineSkillArgs extends SkillOptions {
+  name: string;
+  handler: SkillHandler;
+}
+```
+
+#### Handler types
 
 ```typescript
 type HookHandler = (ctx: HookContext) => Promise<HookResult | void>;
@@ -517,55 +442,29 @@ type HookHandler = (ctx: HookContext) => Promise<HookResult | void>;
 interface HookContext {
   name: string;
   rawText: string;
-  parsedText: string;        // text with bound tokens replaced by [invoked_extension__<type>_<name>] placeholders
+  parsedText: string;        // text with bound directives replaced by [invoked_extension__<type>_<name>] placeholders
   controls: AgentControls;
   signal?: AbortSignal;
 }
 
 interface HookResult {
-  rewriteText?: string;      // override parsedText for downstream skills + the user message
-  shortCircuit?:
-    | { message: Message }
-    | { result: ModelPromptResult };
+  rewriteText?: string;
+  shortCircuit?: { message: Message } | { result: ModelPromptResult };
 }
 
-interface AgentControls {
-  context: Context;
-  observer: Observer;
-  promptMachine: PromptMachine;
-  executor: Executor;
-  glove: IGloveRunnable;
-  store: StoreAdapter;             // direct access to the agent's StoreAdapter
-  displayManager: DisplayManagerAdapter;  // direct access to the agent's display stack
-  forceCompaction: () => Promise<void>;
-}
-```
-
-`forceCompaction` calls `Observer.runCompactionNow()` — same body as `tryCompaction` minus the token-threshold guard. Subscribers still see `compaction_start` / `compaction_end`.
-
-Hooks run in document order. `rewriteText` overrides the working text passed to subsequent hooks, skills, and the final user message. `shortCircuit` persists the user message and returns immediately — the model is not called. Glove emits `hook_invoked` (`{ name }`) on subscribers just before each hook handler runs.
-
-### Skills
-
-```typescript
 type SkillHandler = (ctx: SkillContext) => Promise<string | ContentPart[]>;
 
 interface SkillContext {
   name: string;
   parsedText: string;        // when source = "user": user text with bound directives replaced by their placeholders. when source = "agent": same as args ?? "".
-  args?: string;             // model-supplied free-form args (only when source = "agent")
+  args?: string;             // model-supplied when source = "agent". undefined when user-invoked.
   source: "user" | "agent";
   controls: AgentControls;
 }
 
 interface SkillOptions {
-  description?: string;       // shown to the agent in the invoke-skill tool listing
+  description?: string;       // shown to the agent in glove_invoke_skill
   exposeToAgent?: boolean;    // default false
-}
-
-interface DefineSkillArgs extends SkillOptions {
-  name: string;
-  handler: SkillHandler;
 }
 
 interface RegisteredSkill {
@@ -573,58 +472,11 @@ interface RegisteredSkill {
   description?: string;
   exposeToAgent: boolean;
 }
-```
 
-Skill-injected messages set `is_skill_injection: true` on `Message`, alongside the existing `is_compaction` and `is_compaction_request` flags. Use it in transcript renderers to render injected context differently from real user turns. Glove emits `skill_invoked` (`{ name, source: "user" | "agent", args? }`) on subscribers — for user-side directives, the dispatch fires from `Glove.processRequest`; for agent-side calls, it fires from inside the `glove_invoke_skill` tool.
-
-#### Exposing skills to the agent
-
-Set `exposeToAgent: true` and Glove auto-registers a single `glove_invoke_skill` tool on the executor. Its description lists every exposed skill (`- name — description`) and is rebuilt in place each time a new exposed skill is defined, so post-`build()` registrations are picked up immediately.
-
-```typescript
-agent.defineSkill({
-  name: "research-mode",
-  description: "Switch to long-form research mode with citations",
-  exposeToAgent: true,
-  handler: async ({ source, args, parsedText }) => {
-    if (source === "agent") {
-      // Agent invoked via glove_invoke_skill — `args` is the model-supplied string.
-      return `Switch into research mode. Focus: ${args ?? "general"}.`;
-    }
-    // source === "user" — `parsedText` is the user message after directive substitution
-    // (e.g. "[invoked_extension__skill_research-mode] tell me about ribosomes").
-    return `Switch into research mode. User said: ${parsedText}`;
-  },
-});
-
-// User: "/research-mode tell me about ribosomes"
-//   → source = "user", parsedText = "[invoked_extension__skill_research-mode] tell me about ribosomes"
-// Agent: glove_invoke_skill({ name: "research-mode", args: "ribosome assembly" })
-//   → source = "agent", args = "ribosome assembly"
-```
-
-The tool returns `{ status: "success", data: { skill, content } }` on success and `{ status: "error", message: 'Skill "..." is not available', data: null }` for unknown or unexposed names. When the skill returns `ContentPart[]`, text parts are joined into `data.content` (visible to the model) and the full part list is preserved on `renderData` (visible to client renderers, mirroring the MCP-bridge convention).
-
-| Aspect | User `/skill` | Agent `glove_invoke_skill` |
-|--------|--------------|----------------------------|
-| Where it lands | Synthetic user message before the real turn (`is_skill_injection: true`) | Tool result on the agent's tool_use |
-| `SkillContext.source` | `"user"` | `"agent"` |
-| `SkillContext.args` | undefined | free-form string the model supplied |
-| Gated by `exposeToAgent` | No — user-invoked always works | Yes — only exposed skills are callable |
-
-### Subagents
-
-Modelled on Claude Code's subagent convention. Defining one auto-registers a `glove_invoke_subagent` tool (constant `SUBAGENT_DISPATCH_TOOL_NAME` exported from core) the main agent calls with `{ name, prompt }`. The user's `@name` text in the original message is **not** parsed by glove — it reaches the model verbatim and acts as a routing signal. The factory builds a fresh child `Glove` for each invocation and the dispatcher runs it.
-
-```typescript
 interface SubAgentFactoryContext {
-  /** Subagent name as registered with `defineSubAgent`. */
   name: string;
-  /** The task prompt the parent agent supplied when calling `glove_invoke_subagent`. */
   prompt: string;
-  /** The parent agent's store. Use `createSubAgentStore(name, durable)` to derive a child store. */
   parentStore: StoreAdapter;
-  /** Full parent agent controls (context, observer, promptMachine, executor, glove, store, displayManager, forceCompaction). */
   parentControls: AgentControls;
 }
 
@@ -633,8 +485,7 @@ type SubAgentFactory = (
 ) => Promise<IGloveRunnable> | IGloveRunnable;
 
 interface SubAgentOptions {
-  /** Short description shown to the agent in the invoke-subagent tool listing. */
-  description?: string;
+  description?: string;       // shown to the agent in the invoke-subagent tool listing
 }
 
 interface DefineSubAgentArgs extends SubAgentOptions {
@@ -646,46 +497,92 @@ interface RegisteredSubAgent {
   factory: SubAgentFactory;
   description?: string;
 }
+
+interface AgentControls {
+  context: Context;
+  observer: Observer;
+  promptMachine: PromptMachine;
+  executor: Executor;
+  glove: IGloveRunnable;
+  store: StoreAdapter;                  // direct access to the agent's StoreAdapter
+  displayManager: DisplayManagerAdapter; // direct access to the agent's display stack
+  forceCompaction: () => Promise<void>;  // calls Observer.runCompactionNow()
+}
 ```
 
-#### Canonical factory
+#### Token parsing
 
 ```typescript
-import { Glove, MemoryStore } from "glove-core";
+import { parseTokens, formatSkillMessage } from "glove-core";
 
-glove.defineSubAgent({
-  name: "researcher",
-  description: "Deep research subagent",
-  factory: async ({ parentStore, parentControls }) => {
-    // Sub-store: durable false → fresh per-call; durable true → cached for the namespace.
-    const subStore = await parentStore.createSubAgentStore?.("researcher", false)
-      ?? new MemoryStore(`researcher_${Date.now()}`);
+interface ParsedTokens {
+  /**
+   * The original text with each bound `/name` directive replaced by a
+   * non-triggerable placeholder of the form `[invoked_extension__<type>_<name>]`
+   * (where `<type>` is `hook` or `skill`). Unbound `/name` tokens — including
+   * filesystem-like paths such as `/usr/local` — are left untouched.
+   */
+  replaced: string;
+  hooks: string[];
+  skills: string[];
+}
 
-    return new Glove({
-      store: subStore,
-      model: parentControls.glove.model,           // inherit the parent's model
-      displayManager: parentControls.displayManager, // share the parent's display stack
-      systemPrompt: "You are a researcher.",
-      compaction_config: { compaction_instructions: "Summarize research progress." },
-    })
-      .fold(searchTool)
-      .fold(fetchTool)
-      .build();   // build() can take a store too; passing it here is equivalent to constructor `store`
-  },
-});
+interface ExtensionRegistries {
+  hooks: ReadonlySet<string>;
+  skills: ReadonlySet<string>;
+}
+
+function parseTokens(text: string, registries: ExtensionRegistries): ParsedTokens;
+function formatSkillMessage(name: string, injection: string | ContentPart[]): Message;
 ```
 
-The dispatcher attaches the parent's subscribers to the child for the run, calls `child.processRequest(prompt, signal)` (forwarding the parent's abort signal), then detaches them. The child's final agent text is returned as the tool result.
+The regex is `(^|\s)\/([A-Za-z][\w-]*)(?=\s|$)`. Only `/name` directives are parsed. A token only binds when its name appears in the hook or skill registry; unbound tokens are left in `replaced`. Bound directives are **substituted with placeholders** (`[invoked_extension__hook_<name>]` / `[invoked_extension__skill_<name>]`) — the placeholder is non-triggerable, so a future re-parse of the same text doesn't re-fire the extension. `@mention` tokens are intentionally NOT parsed — they reach the model verbatim and route through the `glove_invoke_subagent` tool. `formatSkillMessage` produces the synthetic user message used by `processRequest` and sets `is_skill_injection: true`.
 
-#### Tool result shape
-
-Symmetric with `glove_invoke_skill`:
+#### Subagent dispatch tool name
 
 ```typescript
+import { SUBAGENT_DISPATCH_TOOL_NAME } from "glove-core";
+// "glove_invoke_subagent" — the tool name the Executor recognises so it can fire
+// the subagent_invoked / subagent_completed bracket events around each call.
+```
+
+#### Built-in agent tools
+
+When any skill is registered with `exposeToAgent: true`, `glove_invoke_skill` is auto-registered on the executor:
+
+```typescript
+import { createSkillInvokeTool, renderSkillToolDescription } from "glove-core";
+
+// Tool input
+{ name: string, args?: string }
+
+// Tool result on success (string handler return)
+{ status: "success", data: { skill: string, content: string } }
+
+// Tool result on success (ContentPart[] handler return) — text parts join into data,
+// the full part list is preserved on renderData for client renderers (mirrors the
+// MCP-bridge convention; renderData is stripped by adapters before being sent to the model).
+{
+  status: "success",
+  data: { skill: string, content: string },         // text join, or "[non-text skill content]"
+  renderData: { skill: string, parts: ContentPart[] }
+}
+
+// Tool result on unknown / unexposed name
+{ status: "error", message: 'Skill "..." is not available. Use one of: ...', data: null }
+```
+
+The tool description (built by `renderSkillToolDescription`) lists every exposed skill with its `description`. Glove rebuilds the description in place each time a new exposed skill is defined, so post-`build()` registrations are immediately visible to the model.
+
+When any subagent is registered, `glove_invoke_subagent` is auto-registered on the executor (mirrors Claude Code's subagent dispatch):
+
+```typescript
+import { createSubAgentInvokeTool, renderSubAgentToolDescription } from "glove-core";
+
 // Tool input
 { name: string, prompt: string }
 
-// Success
+// Tool result on success
 { status: "success", data: { subagent: string, content: string } }
 
 // Unknown name
@@ -698,911 +595,63 @@ Symmetric with `glove_invoke_skill`:
 { status: "error", message: 'Subagent "..." failed: ...', data: null }
 ```
 
-#### Bracket events — guaranteed 1:1 symmetry
+The dispatcher invokes the registered factory with `{ name, prompt, parentStore, parentControls }`, attaches the parent's subscribers to the returned child Glove, calls `child.processRequest(prompt, signal)` (forwarding the parent's abort signal), and detaches the subscribers afterward. The child's final agent text becomes `data.content`. The `subagent_invoked` / `subagent_completed` bracket events are NOT fired by the dispatcher — they fire from the `Executor`, which guarantees 1:1 symmetry even when an abort short-circuits the dispatcher's promise.
 
-The `Executor` (not the dispatcher) brackets every `glove_invoke_subagent` call with `subagent_invoked` (`{ name, prompt }`) before the run and `subagent_completed` (`{ name, status: "success" | "error", message? }`) after. The bracket is symmetric even when a parent abort short-circuits the dispatcher's promise chain: the executor's abort handler still fires the close bracket. Events emitted by the child Glove between them belong to that subagent — parent subscribers are attached to the child for the duration of the run.
+#### Observer additions
 
-#### Common patterns
+- `Observer.runCompactionNow()` — same body as `tryCompaction()` minus the token-threshold guard. Called by `AgentControls.forceCompaction`.
+- `Observer.ESCAPE_COMPACTION_THRESHOLD` (default `90`, percent) — controls when `Agent.ask` runs an early compaction to keep `tool_use` / `tool_result` pairs from being split across the boundary. Configurable via the `Observer` constructor's 7th argument.
+- `Observer.isCompactionImminent()` — `true` when current token consumption is at or above `(CONTEXT_COMPACTION_LIMIT * ESCAPE_COMPACTION_THRESHOLD) / 100`. `Agent.ask` checks this before each turn and pre-emptively compacts when the model produced tool calls so pairs stay together.
+- `Observer.addTokensConsumed(args: TokenConsumptionCounter)` — called per turn; persists via `store.addTokens(args)` and emits `token_consumption` to subscribers.
 
-- **Fresh child per call**: factory builds a new `Glove` each invocation, with its own `MemoryStore` (or a non-durable sub-store). Default and recommended.
-- **Durable child**: `parentStore.createSubAgentStore("name", true)` returns the same store for the namespace, so the subagent carries message history across invocations. The factory still builds a fresh `Glove`; only the store is reused.
-- **Multiple in one message** (`"@reviewer @architect please discuss this design"`): both names reach the model, which can call `glove_invoke_subagent` once per subagent (sequentially or in parallel via separate tool calls — its choice).
+#### Message fields added
 
-### Sub-stores: `createSubAgentStore`
+- `Message.is_skill_injection?: boolean` — set on the synthetic user message produced by a `/skill` invocation so transcript renderers can distinguish injected context from real user turns.
+- `Message.pre_modified_text?: string` — populated when a hook rewrites the user message via `rewriteText`; preserves the user's raw input so frontends can render it alongside the rewritten version.
 
-`StoreAdapter` exposes an optional `createSubAgentStore(namespace: string, durable?: boolean): Promise<StoreAdapter>` factory:
+---
 
-- `durable: false` (default) → a fresh, isolated store per call. The subagent starts from zero context every invocation.
-- `durable: true` → the same instance is returned for the same namespace, so the subagent retains messages, tasks, tokens, and counters across invocations within the parent's lifetime.
+## glove-react
 
-`MemoryStore` from `glove-core` implements both modes. If your store doesn't implement `createSubAgentStore`, fall back to `new MemoryStore(...)` inside the factory — that preserves the "fresh per call" behavior.
-
-### `setDisplayManager` (chainable)
-
-`Glove` (both builder and runnable forms) exposes `setDisplayManager(displayManager)`. Subagent factories typically pass `parentControls.displayManager` into the child's constructor, but they can also opt in mid-flight by calling `child.setDisplayManager(parentControls.displayManager)` after build. Returns `this` for chaining.
-
-### Dispatch order in `processRequest`
-
-1. Parse `/` directives from the raw text (regex `(^|\s)\/([A-Za-z][\w-]*)(?=\s|$)`). Bound tokens are **replaced** with `[invoked_extension__<type>_<name>]` placeholders; unbound tokens stay in place. `@` tokens are not parsed at all.
-2. Run hooks in document order. Glove emits `hook_invoked` per hook. Apply any `rewriteText`; honour the first `shortCircuit` and return.
-3. Materialise skills (`source: "user"`) — each becomes a synthetic user message persisted via `context.appendMessages` before the real one. Glove emits `skill_invoked` per skill.
-4. Build the real user `Message` from the placeholder-substituted text (still contains any `@mention`s untouched) + any non-text `ContentPart`s the caller passed.
-5. Hand off to `Agent.ask`. Subagent invocations happen inside the agent loop via `glove_invoke_subagent` tool calls; the executor brackets each one with `subagent_invoked` / `subagent_completed`.
-
-### `is_skill_injection` flag
-
-Skill-materialised user messages set `is_skill_injection: true` on `Message`. Pair it with `is_compaction` for transcript rendering — collapse, mute, or filter injected messages so they're visually distinct from real user turns.
-
-### `pre_modified_text` on Message
-
-When a hook rewrites the user message via `rewriteText`, the original raw text is preserved on `Message.pre_modified_text` so frontends can render what the user actually typed alongside the rewritten version the model received.
-
-### Public API surface
+### GloveClient
 
 ```typescript
-import {
-  // Builder
-  Glove, // .defineHook(), .defineSkill(), .defineSubAgent()
-  // Types
-  HookHandler, HookContext, HookResult,
-  SkillHandler, SkillContext, SkillOptions, DefineSkillArgs, RegisteredSkill,
-  SubAgentFactory, SubAgentFactoryContext, SubAgentOptions, DefineSubAgentArgs, RegisteredSubAgent,
-  AgentControls,
-  // Constants
-  SUBAGENT_DISPATCH_TOOL_NAME, // "glove_invoke_subagent"
-  // Helpers
-  parseTokens, formatSkillMessage,
-  createSkillInvokeTool, renderSkillToolDescription,
-  createSubAgentInvokeTool, renderSubAgentToolDescription,
-} from "glove-core";
-```
+import { GloveClient } from "glove-react";
 
-Available at the main entry and the `glove-core/extensions` subpath.
-
-## MCP Integration (`glove-mcp`)
-
-`glove-mcp` bridges Model Context Protocol servers (Notion, Gmail, Linear, Slack, an internal MCP wrapper around your own APIs, …) into a Glove agent so their tools appear in the model's tool list as ordinary Glove tools. Streamable HTTP transport only in v1.
-
-### When to use it
-
-- You need third-party capabilities a vendor already exposes via MCP — Notion, Gmail, Linear, Slack, Zapier-MCP, etc.
-- You have multiple internal services and want a single integration shape across them.
-- You want the agent to discover and activate capabilities mid-conversation rather than wiring all tools at startup.
-
-If you control both ends and just need a few first-party tools, hand-rolled `glove.fold(...)` is still simpler. MCP earns its keep when the catalogue is large or the servers are not yours.
-
-### Mental model: catalogue + adapter
-
-Two pieces, deliberately split:
-
-- **`McpCatalogueEntry[]`** — a static list authored at the application level. One entry per MCP server the app supports: `id`, `name`, `description`, `url`, `tags?`, `metadata?`. Identical across users. The `id` doubles as the tool namespace prefix and the activation key.
-
-- **`McpAdapter`** — a per-conversation interface the consumer implements (analogous to `StoreAdapter`). Holds the conversation's active server ids and resolves access tokens.
-
-  ```typescript
-  interface McpAdapter {
-    identifier: string;                          // for log correlation
-    getActive(): Promise<string[]>;              // ids active in this conversation
-    activate(id: string): Promise<void>;         // called by the discovery subagent
-    deactivate(id: string): Promise<void>;       // for the consumer's UI; v1 limitation: doesn't unload tools
-    getAccessToken(id: string): Promise<string>; // SOLE auth seam — return a bearer string
-  }
-  ```
-
-`getAccessToken` is the only auth seam. The framework wraps the returned string in `Authorization: Bearer ...`. Token acquisition, refresh, and persistence are entirely the consumer's responsibility — env vars, vault, your own OAuth flow, the opt-in `runMcpOAuth` helper, all valid.
-
-### `mountMcp` — the canonical entry point
-
-After `new Glove(...)` and before `glove.build()`:
-
-```typescript
-import { mountMcp } from "glove-mcp";
-
-const glove = new Glove({ /* ... */ , serverMode: true });
-
-await mountMcp(glove, {
-  adapter,                                  // McpAdapter
-  entries,                                  // McpCatalogueEntry[]
-  ambiguityPolicy: { type: "auto-pick-best" },  // optional
-  subagentModel: undefined,                 // optional — defaults to glove.model
-  subagentSystemPrompt: undefined,          // optional — defaults to per-policy prompt
-  clientInfo: { name: "My App", version: "1.0.0" },  // optional
-});
-
-glove.build();
-```
-
-What it does, in order:
-
-1. Reads `adapter.getActive()`, opens an MCP connection per active id (using `getAccessToken`), lists tools, and folds each one onto the main agent via `bridgeMcpTool`. Per-server reload failures are logged and skipped — a transient outage doesn't kill the agent.
-2. Registers the `discovermcp` discovery **subagent** via `glove.defineSubAgent(discoverySubAgent({...}))` so the model can ask it to activate more servers mid-conversation. The model invokes it via `glove_invoke_subagent({ name: "discovermcp", prompt: "..." })`.
-
-`mountMcp` returns when reload + subagent registration are complete. Call it before `build()` for the cleanest init order, but `fold()` / `defineSubAgent()` after `build()` work too.
-
-### Bridged tool shape
-
-`bridgeMcpTool(connection, tool, serverMode)` produces a `GloveFoldArgs` with these conventions:
-
-- **Name**: `${entry.id}__${tool.name}` (e.g. `notion__search`). The `__` separator (exported as `MCP_NAMESPACE_SEP`) is regex-safe across all model providers.
-- **Schema**: raw JSON Schema from the MCP server, passed via `jsonSchema` (no Zod). The MCP server is the source of truth.
-- **`requiresPermission`**: in `serverMode` always `false`; otherwise `true` unless the MCP tool annotates `readOnlyHint: true`.
-- **Result**: server `content[]` text is joined into `data` (what the model sees); the full `content[]` is also passed through as `renderData` so React renderers can use it.
-- **Auth-expired contract**: any 401-shaped error during `callTool` is mapped to `{ status: "error", message: "auth_expired", data: null }`. Detect this from the conversation log, refresh your token, and the next call picks up the new value via `getAccessToken`.
-
-### Discovery (`discovermcp`) and ambiguity policies
-
-`mountMcp` registers a single subagent the model can route to: **`discovermcp`**. The model invokes it via `glove_invoke_subagent({ name: "discovermcp", prompt: "send an email" })`. The factory builds a child `Glove` (with its own sub-store from `parentStore.createSubAgentStore("discovermcp", false)`, falling back to a private `DiscoveryMemoryStore` when sub-stores aren't supported, inheriting the main agent's model, displayManager, and `serverMode`), and folds these tools onto the child:
-
-- `list_capabilities(query?, tags?)` — substring search the catalogue.
-- `activate(id)` — connect, bridge tools onto the *main* agent, persist active state. Tools become available to the main model on its next turn.
-- `deactivate(id)` — flip persisted state. v1 limitation: tools stay loaded until session refresh.
-- `ask_user(question, options)` — only registered under the `interactive` policy. Renders via the `mcp_picker` renderer on the main displayManager.
-
-The **ambiguity policy** controls what happens when the subagent finds multiple plausible matches:
-
-| Policy | Behavior | When to use |
-|--------|----------|-------------|
-| `{ type: "interactive" }` | Subagent calls `ask_user` via `pushAndWait`. Requires an `mcp_picker` renderer on your displayManager. | Browser UIs / chat apps with a renderer wired up. Default when `serverMode: false`. |
-| `{ type: "auto-pick-best" }` | Subagent always picks the highest-ranked match. No human in the loop. | Headless / server-side / CLI. Default when `serverMode: true`. |
-| `{ type: "defer-to-main" }` | Subagent returns the candidate list as text and lets the main agent decide what to activate. | Multi-MCP discovery flows where the main model has more conversation context than the subagent. |
-
-`serverMode: true` on the `Glove` config is the canonical "I am headless" flag — drives both the default ambiguity policy and the default `requiresPermission` on bridged tools (never gate).
-
-### Auth model — bearer-only
-
-The framework only knows about static bearer tokens. `connectMcp` ships an `auth: bearer(token | () => token)` helper; pass either a string or a thunk that resolves a fresh token per connection. `mountMcp` and the discovery `activate` tool both use the thunk form so every connection re-reads `getAccessToken`.
-
-```typescript
-import { bearer, connectMcp } from "glove-mcp";
-
-const conn = await connectMcp({
-  namespace: "notion",
-  url: "https://mcp.notion.com/mcp",
-  auth: bearer(() => adapter.getAccessToken("notion")),
-  clientInfo: { name: "My App", version: "1.0.0" },
+const client = new GloveClient({
+  endpoint?: string,                       // Chat endpoint URL
+  createModel?: () => ModelAdapter,        // Custom model factory (overrides endpoint)
+  createStore?: (sessionId: string) => StoreAdapter,  // Custom store factory
+  getSessionId?: () => Promise<string>,    // Async function to fetch session ID from backend
+  systemPrompt?: string,
+  tools?: ToolConfig[],
+  compaction?: CompactionConfig,
+  subscribers?: SubscriberAdapter[],
 });
 ```
 
-### `auth_expired` contract
-
-Mid-call, an expired token surfaces as `{ status: "error", message: "auth_expired" }` on the bridged tool result. The framework does **not** refresh tokens. Your app must:
-
-1. Detect `auth_expired` on the conversation log (subscriber `tool_use_result` event, or post-hoc).
-2. Refresh / re-auth via whatever mechanism owns the credential.
-3. Update your store; the next bridged call pulls a fresh token from `getAccessToken`.
-
-For UI consumers this is usually a "Reconnect Notion" toast. For CLIs, instructing the user to re-run the auth command is normal.
-
-### `glove-mcp/oauth` — opt-in OAuth tooling
-
-If you don't already have an OAuth flow, the `glove-mcp/oauth` subpath ships a small reference implementation built on the MCP authorization spec:
-
-- **`runMcpOAuth(opts)`** — one call, end-to-end flow. Spins up a local listener on `http://localhost:53683/callback` (configurable), drives the SDK through DCR (or skips it via `preRegisteredClient`), opens the user's browser, exchanges the code for tokens, and verifies via `listTools` (or a `callTool` of your choice). Used by the `examples/mcp-cli/*-mcp-auth.ts` scripts.
-- **`FsOAuthStore` / `MemoryOAuthStore`** — `OAuthStore` implementations. `FsOAuthStore` writes a single JSON file with mode `0600` and atomic temp+rename. Replace with your DB for production.
-- **`McpOAuthProvider`** — lower-level `OAuthClientProvider` for advanced consumers driving `auth()` from the SDK directly.
-- **`buildClientMetadata`**, **`MCP_DEFAULT_CLIENT_INFO`**, **`emptyOAuthState`** — small helpers.
-
-Consumers who already have tokens (env vars, internal integrations, vault, an existing OAuth setup) can ignore this subpath entirely — `getAccessToken` returns the bearer, full stop.
-
-See [api-reference.md — `glove-mcp/oauth`](api-reference.md) for full type signatures, and [examples.md — Pattern: MCP OAuth flow](examples.md) for a worked example.
-
-### Production lift-and-shift
-
-The reference `examples/mcp-cli` setup is a single-user Node CLI; production typically wants:
-
-- **Multi-user store** — replace `FsOAuthStore` with a per-user `OAuthStore` backed by your DB. The interface is three methods (`get`, `set`, `delete`).
-- **OAuth flow in route handlers** — `GET /oauth/<id>/start` calls `runMcpOAuth` (or the lower-level SDK `auth()` directly), `GET /oauth/<id>/callback` finishes it. Same machinery, different invocation. The local-listener flavour of `runMcpOAuth` is convenient for CLIs but not what you want behind a load balancer.
-- **Background refresh** — refresh expired tokens however your stack does it; `getAccessToken` just reads the latest bearer string.
-- **Persistent active state** — the `McpAdapter` shown in examples uses an in-memory `Set` for active ids. In production, persist active ids per conversation (alongside messages) so reload after restart actually does something.
-
-The agent code itself doesn't change — `McpAdapter.getAccessToken` is the only seam.
-
-### Quick reference — where things live
-
-| Need | Symbol |
-|------|--------|
-| Mount MCP onto an agent | `mountMcp(glove, { adapter, entries, ... })` |
-| Implement consumer adapter | `McpAdapter` interface |
-| Author catalogue entries | `McpCatalogueEntry` |
-| One-off connect (preflight, custom flow) | `connectMcp({ namespace, url, auth })` |
-| Bridge a tool by hand | `bridgeMcpTool(connection, tool, serverMode)` |
-| Bearer header helper | `bearer(token | () => token)` |
-| Discovery subagent factory | `discoverySubAgent({ adapter, entries, ambiguityPolicy })` (returns `DefineSubAgentArgs`; pass to `glove.defineSubAgent(...)`) |
-| Tool namespace separator | `MCP_NAMESPACE_SEP` (`"__"`) |
-| 401 detection on raw connect | `UnauthorizedError` |
-| Run the OAuth flow | `runMcpOAuth(opts)` from `glove-mcp/oauth` |
-| Persist OAuth state | `FsOAuthStore`, `MemoryOAuthStore` from `glove-mcp/oauth` |
-| Build client metadata | `buildClientMetadata(opts)` from `glove-mcp/oauth` |
-
-## Memory (`glove-memory`)
-
-Schema-first memory layer with four sibling subsystems. Storage-agnostic adapter contracts; reference in-memory adapters ship for dev/test. Status: draft v0.1; companion storage backends (`glove-memory-sqlite`, `glove-memory-postgres`) are not yet released.
-
-### The four subsystems
-
-| Subsystem | Adapter | What it's for |
-|-----------|---------|---------------|
-| Entity | `EntityMemoryAdapter` | Graph-shaped, schema-first, deterministic identity resolution. Nodes (people, organizations, projects) and typed edges between them. Curator-written, agent-read. |
-| Episodic | `EpisodicMemoryAdapter` | Timeline-bound, append-only events. Meetings, decisions, observations. Time is a first-class field; semantic search is opt-in (advertised by `supportsSemanticSearch`). |
-| Resources | `ResourceFsAdapter` | POSIX-style virtual filesystem the agent navigates with `ls` / `read` / `grep` / `glob` / `edit`. Holds research notes, transcripts, link collections. Text-only; absolute paths only (no `.` / `..`). |
-| Context | `ContextAdapter` | User-configured ambient context, auto-injected into the system prompt every turn. Different shape: not curator-extracted, no reader/curator split — one registration gives the agent both read and write tools. |
-
-### Architectural recommendation: don't dump memory tools on the main Glove
-
-If you're building an agent that needs memory access, **do not attach the entity / episodic / resources tools directly to your main Glove**. Build subagents — one per retrieval task — and register them on the main agent. Each subagent attaches only the adapter slice it needs.
-
-Why:
-
-- **Bounded prompt surface.** Tool descriptions render the schema slice for that role only — token cost scales with role, not with total ontology size.
-- **Sharper routing.** `lookup` / `recall` / `find-notes` subagent names are themselves a reasoning surface. Tighter signal than "you have eight memory tools, decide which".
-- **Mutation scope is structural.** A subagent attached with `useMemoryReader` *cannot* write; the affordance isn't there.
-- **Adapters stay shared.** All subagents read and write to the same underlying graph / timeline / filesystem. Splitting tools does not split the data.
-
-Same advice on the curator side: a parent curator that routes to specialised write-side subagents (entity-linker, episode-recorder, resource-filer) beats a single curator with every write tool attached.
-
-The exception is `useContext`. Context is small (4 tools), user-driven ("remember that…"), and ships with the system-prompt-injection wrapper that has to live on the agent the user actually talks to. **Keep `useContext` on the main agent.**
-
-See [examples.md — Memory: subagent-delegated reader / curator composition / context flow](examples.md) for worked-out patterns.
-
-### Helper families
-
-Each helper folds the relevant tool surface onto a Glove. All return the same `G` for chaining; all operate on either an `IGloveBuilder` or an `IGloveRunnable` (anything that exposes `fold`).
-
-| Helper | Folds | Notes |
-|--------|-------|-------|
-| `useMemoryReader(glove, adapter)` | `glove_memory_find`, `_get`, `_query` | Read-only entity graph access. |
-| `useMemoryCurator(glove, adapter)` | reader tools + `_add_node`, `_update_node`, `_connect`, `_disconnect`, `_merge_nodes` | Full entity write access. |
-| `useEpisodicReader(glove, adapter)` | `glove_episodic_find`, `_timeline`, `_search` | `_search` only registered when `adapter.supportsSemanticSearch === true`. |
-| `useEpisodicCurator(glove, adapter)` | reader tools + `_record`, `_update`, `_delete` | |
-| `useResourcesReader(glove, adapter)` | `glove_resources_ls`, `_read`, `_stat`, `_grep`, `_glob`, `_search`, `_links_for` | `_search` only when `supportsSemanticSearch`. |
-| `useResourcesCurator(glove, adapter)` | reader tools + `_write`, `_edit`, `_mkdir`, `_move`, `_remove`, `_set_metadata` | |
-| `useContext(glove, adapter)` | `glove_context_get`, `_set`, `_update`, `_unset` | **Also wraps `processRequest`** to call `adapter.render()` and prepend the rendered markdown block to the system prompt every turn. |
-
-### Tool inventory
-
-#### Entity (`useMemoryReader` / `useMemoryCurator`)
-
-| Tool | Purpose |
-|------|---------|
-| `glove_memory_find` | Find nodes by class + filter, optional fuzzy |
-| `glove_memory_get` | Fetch a node by id + one-hop neighbourhood |
-| `glove_memory_query` | Full structured query via the query DSL |
-| `glove_memory_add_node` | Create or upsert a node by identity keys *(curator)* |
-| `glove_memory_update_node` | Patch a node's properties *(curator)* |
-| `glove_memory_connect` | Create or update an edge *(curator)* |
-| `glove_memory_disconnect` | Remove an edge *(curator)* |
-| `glove_memory_merge_nodes` | Fold one node into another *(curator)* |
-
-#### Episodic (`useEpisodicReader` / `useEpisodicCurator`)
-
-| Tool | Purpose |
-|------|---------|
-| `glove_episodic_search` | Semantic search over episode content *(only when `supportsSemanticSearch`)* |
-| `glove_episodic_find` | Structured filter — by kind, participant, time range, properties |
-| `glove_episodic_timeline` | Chronological listing for an entity or time window |
-| `glove_episodic_record` | Append a new episode *(curator)* |
-| `glove_episodic_update` | Patch an existing episode *(curator)* |
-| `glove_episodic_delete` | Remove an episode *(curator)* |
-
-#### Resources (`useResourcesReader` / `useResourcesCurator`)
-
-| Tool | Purpose |
-|------|---------|
-| `glove_resources_ls` | List directory contents |
-| `glove_resources_read` | Read a file body, with optional line range |
-| `glove_resources_stat` | Get metadata about a single path |
-| `glove_resources_grep` | Text/regex search across the tree |
-| `glove_resources_glob` | Find paths by name pattern |
-| `glove_resources_search` | Semantic search *(only when `supportsSemanticSearch`)* |
-| `glove_resources_links_for` | Reverse-lookup: find resources linking to a target |
-| `glove_resources_write` | Create or overwrite a file *(curator)* |
-| `glove_resources_edit` | Replace a unique substring *(curator)* |
-| `glove_resources_mkdir` | Create an empty directory *(curator)* |
-| `glove_resources_move` | Rename or relocate *(curator)* |
-| `glove_resources_remove` | Delete a file or directory *(curator)* |
-| `glove_resources_set_metadata` | Patch metadata without rewriting body *(curator)* |
-
-#### Context (`useContext`)
-
-| Tool | Purpose |
-|------|---------|
-| `glove_context_get` | Read entries by section or list all |
-| `glove_context_set` | Add a new entry |
-| `glove_context_update` | Patch an existing entry in place |
-| `glove_context_unset` | Remove an entry or wipe an entire section |
-
-### `MemorySchema` — the shared ontology
-
-One schema object is passed to every adapter. Lives in code; the package does not persist it, validate it across deployments, or expose migration primitives — that's the consumer's concern.
-
-```ts
-import { MemorySchema } from "glove-memory/core";
-import { z } from "zod";
-
-const schema = new MemorySchema()
-  .defineNodeClass({
-    name: "Person",
-    schema: z.object({ name: z.string(), email: z.string().optional() }),
-    identityKeys: [["email"], ["name"]],          // multi-set: any matching set folds the write
-    searchableProperties: ["name", "email"],      // indexed for fuzzy / contains
-  })
-  .defineRelationship({
-    type: "worksAt",
-    from: "Person",
-    to: "Organization",
-    propertiesSchema: z.object({ since: z.string().optional() }).optional(),
-    multi: false,                                  // default — re-connect updates rather than duplicating
-  })
-  .defineEpisodeKind({
-    name: "meeting",
-    description: "A scheduled gathering.",
-    propertiesSchema: z.object({ duration_min: z.number() }).optional(),
-  })
-  .defineResourceRoot({
-    path: "/research",
-    description: "External research artifacts.",
-    semanticSearch: true,                          // default true; false skips embedding lifecycle for this root
-  });
-```
-
-What's safe at runtime:
-
-- Adding a new node class, relationship, or episode kind is always safe.
-- Adding an *optional* property is always safe.
-- Adding a *required* property won't break reads; new writes that don't supply it fail validation.
-- Removing or renaming properties needs a consumer-managed rewrite — the adapter won't notice.
-- Changing identity keys may silently collapse or split nodes on subsequent writes.
-
-### Provenance — required, append-only, every write
-
-Every adapter write takes a `Provenance`. It's append-only per node, edge, episode, resource, and context entry. Reader-facing tools filter `provenance` out of results; only direct adapter calls return it.
-
-```ts
-interface Provenance {
-  source: string;     // "conversation:<id>/turn:<n>", "manual", "import:<kind>:<id>"
-  actor: string;      // "curator-run-xyz", "user:don", "system"
-  timestamp: string;  // ISO 8601
-  note?: string;      // free-form rationale (identity-merge decisions, conflict notes)
-}
-```
-
-`Link` is the shared cross-reference vocabulary — episodes pointing at people, resources pointing at episodes, context entries pointing at projects.
-
-```ts
-interface Link {
-  kind: "entity" | "episode" | "resource";
-  id: string;             // entity / episode id, or resource path
-  relation?: string;      // free-form, e.g. "primary-contact", "source-transcript"
-}
-```
-
-The package does **not** validate that link targets exist — adapters stay decoupled. Cross-validation is the curator / orchestrator's job.
-
-### Embedding lifecycle — out-of-band, BYO adapter
-
-Episodic and resources use the same lifecycle. Writes mark records `embeddingStatus: "missing"` (initial) or `"stale"` (content change) and return immediately. A separate process — typically a [Station](https://station.dterminal.net) signal — does the embed pass:
-
-```ts
-interface EmbeddingAdapter {
-  dimensions: number;
-  embed(texts: string[]): Promise<number[][]>;
-}
-```
-
-The refresh loop:
-
-```ts
-const pending = await episodic.findEpisodesNeedingEmbedding({ limit: 50 });
-const vectors = await embedder.embed(pending.map((p) => p.content));
-for (let i = 0; i < pending.length; i++) {
-  await episodic.setEmbedding(pending[i].id, vectors[i]);
-}
-```
-
-Resources use `findFilesNeedingEmbedding` / `setEmbedding` (both optional on `ResourceFsAdapter`, present only when `supportsSemanticSearch === true`). Stale marking on episodes is **content-only** in the in-memory adapter — `kind` / `participants` / `properties` / `occurredAt` patches don't re-embed; consumers wanting different behaviour can delete + re-record. The recency blend in `searchEpisodes` defaults to `recencyWeight = 0.2` with a 30-day half-life.
-
-### Reconciliation primitives
-
-The package's contract is deliberately narrow: store, query, write, search. It does **not** cascade across adapters. When an entity is merged or deleted, episodes that reference its old ID don't auto-update. Orchestrators reach for these primitives:
-
-| Action | Primitive |
-|--------|-----------|
-| Entity merged | `episodic.replaceParticipantId(oldId, newId, prov)`, `resources.replaceLinkTarget("entity", oldId, newId, prov)` |
-| Entity deleted | `episodic.findEpisodes({ where: { participantIds: [id] } })`, `resources.linksFor("entity", id)` then orchestrator decides |
-| Resource moved | `resources.replaceLinkTarget("resource", fromPath, toPath, prov)` |
-| Episode deleted | `resources.linksFor("episode", id)` then orchestrator decides |
-| Stale embeddings | `findEpisodesNeedingEmbedding` / `findFilesNeedingEmbedding` → `embed` → `setEmbedding` |
-
-### Reference in-memory adapters
-
-For dev / tests / quick prototypes. All exported from `glove-memory/in-memory` (and re-exported from the barrel).
-
-```ts
-import {
-  InMemoryEntityAdapter,
-  InMemoryEpisodicAdapter,
-  InMemoryResourcesAdapter,
-  InMemoryContextAdapter,
-} from "glove-memory";
-
-const entity = new InMemoryEntityAdapter({ schema });
-const episodic = new InMemoryEpisodicAdapter({ schema, embedder });   // omit embedder → supportsSemanticSearch = false
-const resources = new InMemoryResourcesAdapter({ schema, embedder }); // ditto
-const context = new InMemoryContextAdapter({ schema });
-```
-
-Process-local — they lose data on restart. Production projects swap in a companion package or BYO adapter.
-
-### Out of scope
-
-- Triggering, scheduling, or pipeline orchestration ([Station](https://station.dterminal.net)'s territory).
-- Curation logic itself (configured by the consumer).
-- Embedding *generation* — consumers plug in their own `EmbeddingAdapter`.
-- Schema persistence or migration — schema lives in code only.
-- Cross-adapter cascade on entity merge, episode delete, or resource rename — that's reconciliation, an orchestrator responsibility.
-- The user-side write path for context — the adapter exposes `set` / `update` / `unset`; the UI / API / form / wherever users edit their preferences calls those directly.
-- Binary resources. Resources is text-only.
-- `.` and `..` path resolution. All resource paths are absolute.
-
-### Quick reference — where things live
-
-| Need | Symbol |
-|------|--------|
-| Define the ontology | `MemorySchema` from `glove-memory/core` |
-| Required write metadata | `Provenance` from `glove-memory/core` |
-| Cross-reference between subsystems | `Link` from `glove-memory/core` |
-| Embedding contract | `EmbeddingAdapter` from `glove-memory/core` |
-| Entity contract | `EntityMemoryAdapter` from `glove-memory/entity` |
-| Episodic contract | `EpisodicMemoryAdapter` from `glove-memory/episodic` |
-| Resources contract | `ResourceFsAdapter` from `glove-memory/resources` |
-| Context contract | `ContextAdapter` from `glove-memory/context` |
-| Reader / curator helpers | `useMemoryReader` / `useMemoryCurator`, `useEpisodicReader` / `useEpisodicCurator`, `useResourcesReader` / `useResourcesCurator`, `useContext` from `glove-memory/tools` |
-| Reference in-process adapters | `InMemoryEntityAdapter`, `InMemoryEpisodicAdapter`, `InMemoryResourcesAdapter`, `InMemoryContextAdapter` from `glove-memory/in-memory` |
-| Error classes | `MemoryError`, `MemoryNotFoundError`, `MemorySchemaError`, `MemoryQueryError`, `MemoryWriteError`, `EpisodicMemoryError`, `ResourceFsError`, `ContextError` from `glove-memory/core` |
-
-See [api-reference.md — `glove-memory`](api-reference.md) for full type signatures, and [examples.md — Memory](examples.md) for worked examples (schema definition, subagent-delegated reader, curator composition, context flow).
-
-## Glovebox — Sandboxed Runtime
-
-Glovebox packages a built Glove agent as an isolated, network-addressable service. Developer writes a Glove agent normally, calls `glovebox.wrap(runnable, config)`, runs `glovebox build`, and gets a deployable artifact (Dockerfile + nixpacks.toml + esbuild server bundle + manifest + auth key). The deployed server exposes one authenticated WebSocket endpoint per session, with prompts multiplexed by `id` over that single socket.
-
-### When to use it
-
-- You have a Glove agent that needs system tools the host process can't safely (or portably) provide — ffmpeg, pandoc, headless Chromium, ImageMagick, qpdf, libreoffice — and you want them sandboxed inside a container instead of installed on every deployment target.
-- You want a network-callable surface around a Glove agent that consumers can hit from React frontends, Node services, or other agents without re-implementing the agent loop.
-- You need stable input/output contracts: clients send a prompt + files, get back a final message + output files, and don't care which adapters or tools fired in between.
-
-If you only need a chat endpoint, `glove-next`'s `createChatHandler` is still simpler. Glovebox earns its keep when the agent's environment matters (system binaries, isolated FS) or when several clients share one specialized agent.
-
-### The three packages
-
-- **`glovebox`** — authoring + `glovebox build` CLI. Public API in `packages/glovebox/src/index.ts` (`glovebox.wrap`, re-exports of `config`, `protocol`, `storage`). Storage DSL (`rule.inline`, `rule.url`, `rule.localServer`, `rule.s3`, `composite`). Wire protocol types (`FileRef`, `ClientMessage`, `ServerMessage`, `Manifest`, `StoragePolicyEncoded`).
-- **`glovebox-kit`** — in-container runtime. `startGlovebox(opts)` from `packages/glovebox-kit/src/server.ts`. Auto-injects two skills (`environment`, `workspace`), two hooks (`/output`, `/clear-workspace`), and prepends a static env block (built by `buildEnvironmentBlock`) to the agent's existing system prompt at boot. Hosts `/health` (public), `/environment` (Bearer-auth'd), `/files/:id` (Bearer-auth'd) HTTP routes alongside the WS upgrade endpoint.
-- **`glovebox-client`** — client SDK. `GloveboxClient.make({ endpoints })` registers named endpoints; `client.box(name)` returns a lazily-constructed `Box`. `box.prompt(text, { files })` returns a `PromptResult` with async-iterable `events` / `display` plus `message` / `outputs` promises and a `read(name)` helper.
-
-### Base images
-
-Five prebuilt bases live under `docker/`, published to `ghcr.io/porkytheblack/glovebox/<name>:<tag>` (override the registry with the `GLOVEBOX_REGISTRY` env var). Tags are pinned in `packages/glovebox/src/build/dockerfile.ts`'s `KNOWN_BASE_TAGS`:
-
-| Base | Tag | What's in it |
-|------|-----|--------------|
-| `glovebox/base` | `1.0` | Node 20, `glovebox` user (uid 10001), /work + /input + /output + prebuilt better-sqlite3 at `/opt/glovebox-prebuilt/node_modules` |
-| `glovebox/media` | `1.4` | base + ffmpeg, imagemagick, sox, yt-dlp |
-| `glovebox/docs` | `1.2` | base + pandoc, qpdf, pdftk-java, ghostscript, libreoffice headless |
-| `glovebox/python` | `1.3` | base + uv, numpy, pandas, pillow, scipy, matplotlib |
-| `glovebox/browser` | `1.1` | base + Playwright with Chromium |
-
-Standard bases skip the user/layout setup in the generated Dockerfile and `ln -sfn` the prebuilt better-sqlite3 into the server bundle's `node_modules`. Custom bases run a normal `npm install --omit=dev` against the emitted `package.json`.
-
-### Authoring: `glovebox.wrap`
-
-Build the Glove agent like always, then export a `GloveboxApp` as the default export:
-
-```typescript
-// glovebox.ts
-import { glovebox, rule, composite } from "glovebox-core"
-import { agent } from "./my-agent"   // your built IGloveRunnable
-
-export default glovebox.wrap(agent, {
-  name: "pdf-extractor",
-  base: "glovebox/docs",
-  packages: { apt: ["poppler-utils"] },
-  storage: {
-    inputs: composite([rule.url(), rule.inline()]),
-    outputs: composite([
-      rule.inline({ below: "1MB" }),
-      rule.localServer({ ttl: "1h" }),
-    ]),
-  },
-  env: {
-    ANTHROPIC_API_KEY: { required: true, secret: true },
-  },
-  limits: { memory: "2GB", timeout: "10m" },
-})
-```
-
-Defaults (from `packages/glovebox/src/config.ts`):
-- `base`: `"glovebox/base"`.
-- `fs`: `{ work: "/work" (rw), input: "/input" (ro), output: "/output" (rw) }` — `DEFAULT_FS`.
-- `storage.inputs`: `DEFAULT_INPUTS_POLICY` — try `url` always, fall back to `inline`.
-- `storage.outputs`: `DEFAULT_OUTPUTS_POLICY` — `inline` below 1MB, else `localServer` with 1h TTL.
-
-Storage rule order matters: `composite([...])` keeps caller order, and `pickAdapter` walks rules first-match-wins. `always: true` is terminal-anywhere; `default: true` is the fallback used when no other rule matched. `validateOutputsPolicy` rejects an outputs policy that targets the read-only `url` adapter or omits a terminal rule — the container fails fast on boot.
-
-### Build: `glovebox build`
-
-```bash
-pnpm add -D glovebox
-npx glovebox build ./glovebox.ts --out ./dist --name pdf-extractor
-```
-
-Emits, under `dist/`:
-
-```
-Dockerfile           # FROM <resolved base>, optional apt/pip/npm, COPY server, CMD ["node", "index.js"]
-nixpacks.toml        # Same recipe for Railway / Render / nixpacks-aware platforms
-glovebox.json        # The Manifest (name, version, base, fs, env, limits, key_fingerprint, storage_policy, packages, protocol_version: 1)
-glovebox.key         # 32-byte hex random — the bearer token. KEEP SECRET. Re-runs reuse if present.
-.env.example         # Generated from `env` config — required vars first
-server/
-├── index.js         # esbuild ESM bundle: glovebox-kit + glovebox + glove-core + your wrap module
-├── package.json     # only declares "better-sqlite3" — the one native dep
-└── glovebox.json    # Manifest copy (the runtime resolves it via `new URL("./glovebox.json", import.meta.url)`)
-```
-
-The synthetic ESM entry the build emits reads `GLOVEBOX_KEY` (required), `GLOVEBOX_PORT` (default 8080), and `GLOVEBOX_PUBLIC_URL` (optional) from the environment, picks up the wrap module's default export, and calls `startGlovebox(...)`. `better-sqlite3` is the only `external:` in the esbuild call (`NATIVE_EXTERNALS` in `server-bundle.ts`).
-
-### Runtime injection
-
-Inside the container, `startGlovebox` runs `applyInjections(runnable, config, getExfilState)` once at boot (see `packages/glovebox-kit/src/injection.ts`). This adds:
-
-- **`environment` skill** — agent-callable; returns the resolved config (`name`, `version`, `base`, `fs`, `packages`, `limits`) as JSON. Useful for the agent itself to introspect.
-- **`workspace` skill** — agent-callable; lists the live contents of every fs mount (`work`, `input`, `output`).
-- **`/output` hook** — `parseTokens` directives: when the agent writes `/output /tmp/some/extra/file.png`, the absolute path is added to a per-request `extraOutputs: Set<string>`. After the turn completes, anything in that set gets uploaded alongside whatever the agent wrote to `/output`.
-- **`/clear-workspace` hook** — `rm -rf` on the `/work` mount. No-op if `work` isn't configured.
-
-`buildEnvironmentBlock(config)` is also prepended to the existing system prompt once at boot, so the agent learns about `/work`, `/input`, `/output`, available apt packages, and limits without you wiring it manually. Per-request input listings are NOT in the env block — the agent calls the `workspace` skill to read `/input` on demand.
-
-### Wire protocol shape
-
-One WebSocket per session, authenticated on upgrade with `Authorization: Bearer <key>`. Prompts multiplexed by `id`. **In v1 the server serializes prompts within a session** (`promptChain.then(...)` in `server.ts`) — Glove's `PromptMachine` + `Context` aren't safe to call concurrently. The protocol is multiplex-shaped because v2 will lift this restriction.
-
-Message types live in `packages/glovebox/src/protocol.ts`:
-- Client → server: `prompt`, `abort`, `display_resolve`, `display_reject`, `ping`.
-- Server → client: `event` (mirrors `SubscriberEvent` 1:1), `display_push` / `display_clear` (Glove's display stack bridged onto the wire by `attachDisplayBridge`), `complete` (final assistant message + outputs map), `error`, `pong`.
-
-`FileRef` is the wire shape for files crossing the boundary in either direction:
-
-```typescript
-type FileRef =
-  | { kind: "inline"; name; mime; data }              // base64
-  | { kind: "url"; name; mime?; url; headers? }
-  | { kind: "server"; name; mime; size; id; url }     // /files/:id on the same server
-  | { kind: "s3"; name; mime?; bucket; key; region? }
-  | { kind: "gcs"; name; mime?; bucket; object }      // v2-deferred adapter
-```
-
-The server picks the adapter for each output via `pickAdapter(policy, { size }, registry)`. Inputs are read by `pickAdapterForRef(ref, registry)` based on the ref's `kind` — server defaults always include `inline`, `url`, and `localServer`; `s3` only resolves if you registered an adapter via `adapters` (see below).
-
-### Auth model
-
-Bearer-only, single key per deployment. The build CLI writes a 32-byte hex key to `dist/glovebox.key` and stores its SHA-256 fingerprint in the manifest. At boot, `verifyAgainstManifest` checks both the configured `GLOVEBOX_KEY` matches the manifest fingerprint AND the presented bearer matches the configured key — `verifyBearer` does the constant-time compare via `timingSafeEqual`. Fingerprints in the manifest leak nothing; verification still requires the raw key.
-
-The same key gates the WS upgrade, `/environment`, and `/files/:id`. JWTs and per-session tokens are V2-deferred.
-
-### Custom storage adapters via `adapters` export
-
-The wrap module may export an `adapters` function (or value) alongside its default export. The synthetic build entry awaits it and forwards the result into `startGlovebox({ adapters })`. Adapters are merged by name into the registry on top of the defaults, so `s3` becomes a real adapter the policy can target:
-
-```typescript
-// glovebox.ts
-import { glovebox, rule, composite } from "glovebox-core"
-import { S3Storage } from "glovebox-kit"
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
-import { agent } from "./my-agent"
-
-const s3 = new S3Client({ region: process.env.AWS_REGION })
-
-export const adapters = () => ({
-  s3: new S3Storage({
-    bucket: process.env.OUTPUTS_BUCKET!,
-    region: process.env.AWS_REGION,
-    uploadObject: async ({ bucket, key, body, contentType }) => {
-      await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }))
-    },
-    downloadObject: async ({ bucket, key }) => {
-      const out = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
-      return new Uint8Array(await out.Body!.transformToByteArray())
-    },
-  }),
-})
-
-export default glovebox.wrap(agent, {
-  base: "glovebox/media",
-  storage: {
-    outputs: composite([
-      rule.inline({ below: "1MB" }),
-      rule.s3({ bucket: process.env.OUTPUTS_BUCKET! }),
-    ]),
-  },
-})
-```
-
-The kit ships `S3Storage` as a "deferred" adapter — no concrete SDK dependency in the runtime image. You pass `uploadObject` / `downloadObject` thunks from your own codebase. The kit will throw on boot if the outputs policy targets `s3` and no adapter is registered (`validateOutputsPolicy` is run on every effective policy, including per-request overrides).
-
-### Deploying
-
-The artifact is platform-agnostic. Two common paths:
-
-- **Docker** — `docker build -t my-app dist/` then run with `-p 8080:8080 -e GLOVEBOX_KEY=$(cat dist/glovebox.key) -e GLOVEBOX_PUBLIC_URL=https://my-app.example.com my-app`. Set any required env vars from `.env.example`.
-- **Railway / Render / nixpacks** — push `dist/` to a repo; the platform picks up `nixpacks.toml`. Set `GLOVEBOX_KEY` and any required env vars in the platform UI; `GLOVEBOX_PUBLIC_URL` should be the deployment's public URL so `server`-kind FileRefs are reachable from clients.
-
-`GLOVEBOX_PORT` defaults to 8080; the Dockerfile `EXPOSE`s and `ENV`s it. `GLOVEBOX_PUBLIC_URL` defaults to `http://localhost:<port>` — fine for local, broken for any client outside the container.
-
-### Calling from the client
-
-```typescript
-import { GloveboxClient } from "glovebox-client"
-
-const client = GloveboxClient.make({
-  endpoints: {
-    pdf: { url: "wss://pdf.example.com/", key: process.env.GLOVEBOX_PDF_KEY! },
-  },
-})
-
-const box = client.box("pdf")
-const env = await box.environment()        // Bearer-auth'd GET /environment, cached after first call
-console.log(env.base, env.packages.apt)
-
-const result = box.prompt("extract tables from invoice.pdf", {
-  files: { "invoice.pdf": { mime: "application/pdf", bytes: pdfBytes } },
-})
-
-for await (const event of result.events) {
-  if (event.event_type === "text_delta") {
-    process.stdout.write((event.data as { text: string }).text)
-  }
-}
-
-const message = await result.message
-const outputs = await result.outputs       // Record<string, FileRef>
-const csvBytes = await result.read("tables.csv")  // routes via ClientStorage based on FileRef.kind
-```
-
-`PromptResult` exposes both `events` and `display` as async iterables. Display events are session-scoped (not request-scoped) so they fan out to every active prompt's display stream. `result.resolve(slot_id, value)` / `result.reject(slot_id, error)` send display answers back; `result.abort()` sends `{ type: "abort", id }` upstream.
-
-`DefaultClientStorage` only handles `inline` and `url` (plus `server` over Bearer-auth'd HTTP) — pass a custom `ClientStorage` to `GloveboxClient.make({ storage })` if your inputs need to land in S3 first.
-
-### Debugging
-
-- **`GET /health`** is unauthenticated and returns `{ ok: true, name, version }`. Useful for liveness probes.
-- **`GET /environment`** with `Authorization: Bearer <key>` returns the manifest's `name`, `version`, `base`, `fs`, `packages`, `limits`, `protocol_version`. The client SDK caches this after first call. If `box.environment()` 401s, the key is wrong; if it returns a `base` you didn't expect, the deployment is built from a stale manifest.
-- **Manifest fingerprint mismatch** — boot fails with `Configured GLOVEBOX_KEY does not match the manifest fingerprint`. Either the key was rotated without rebuilding, or you're pointing at the wrong key file.
-- **`Outputs policy references unregistered adapter: s3`** — `validateOutputsPolicy` rejected the policy because the wrap module's `adapters` export didn't supply an `s3` entry. Either add the adapter or remove the `rule.s3(...)` from outputs.
-- **Empty completion message** — `processRequest` returned a result whose final message had no `text`. Check the agent's normal completion path — the kit only reads `result.messages[last].text` (or `result.text`) verbatim.
-- **Stuck prompts** — v1 serializes prompts per session via `promptChain.then(...)`. If a prompt hangs (e.g. waiting on a `pushAndWait` resolver), every subsequent prompt on the same session waits with it. Ensure the client either sends `display_resolve` or closes the WS to clear the chain.
-
-### V2-deferred caveats
-
-The v1 kit and protocol are deliberately narrow. Plan around these limitations:
-
-- **Multiplex execution** — wire is multiplex-shaped, server is not. Don't pipeline more than one prompt per session expecting parallelism.
-- **JWT auth** — single shared bearer key per deployment. Per-user JWTs / scoped tokens are deferred.
-- **Hot reload** — none. Rebuild + redeploy after every wrap-config change.
-- **GCS / Azure adapters** — only `inline`, `url`, `localServer`, and (via your `adapters` export) `s3` are supported. `gcs` exists in `FileRef` but throws at runtime without a registered adapter.
-- **Per-base preregistered subagents** — the `@transcoder` (media), `@pdfwright` (docs), `@analyst` (python), `@scraper` (browser) mentions land in v2; in v1 you wire those yourself if you want them.
-
-See [api-reference.md — glovebox / glovebox-kit / glovebox-client](api-reference.md) for full type signatures, and [examples.md — Pattern: Glovebox PDF Extractor](examples.md) for a worked example.
-
-## Display Stack Patterns
-
-### pushAndForget — Show results (non-blocking)
+### GloveProvider
 
 ```tsx
-async do(input, display) {
-  const data = await fetchData(input);
-  await display.pushAndForget({ input: data }); // Shows UI, tool continues
-  return { status: "success", data: "Displayed results", renderData: data };
-},
-render({ data }) {
-  return <Card>{data.title}</Card>;
-},
-renderResult({ data }) {
-  return <Card>{(data as any).title}</Card>;  // Same card from history
-},
+import { GloveProvider } from "glove-react";
+<GloveProvider client={gloveClient}>{children}</GloveProvider>
 ```
 
-### pushAndWait — Collect user input (blocking)
-
-```tsx
-async do(input, display) {
-  const confirmed = await display.pushAndWait({ input }); // Pauses until user responds
-  return {
-    status: "success",
-    data: confirmed ? "Confirmed" : "Cancelled",
-    renderData: { confirmed },
-  };
-},
-render({ data, resolve }) {
-  return (
-    <div>
-      <p>{data.message}</p>
-      <button onClick={() => resolve(true)}>Yes</button>
-      <button onClick={() => resolve(false)}>No</button>
-    </div>
-  );
-},
-renderResult({ data }) {
-  const { confirmed } = data as { confirmed: boolean };
-  return <div>{confirmed ? "Confirmed" : "Cancelled"}</div>;
-},
-```
-
-### Display Strategies
-
-| Strategy | Behavior | Use for |
-|----------|----------|---------|
-| `"stay"` (default) | Slot always visible | Info cards, results |
-| `"hide-on-complete"` | Hidden when slot is resolved | Forms, confirmations, pickers |
-| `"hide-on-new"` | Hidden when newer slot from same tool appears | Cart summaries, status panels |
-
-### SlotRenderProps
-
-| Prop | Type | Description |
-|------|------|-------------|
-| `data` | `T` | Input passed to pushAndWait/pushAndForget |
-| `resolve` | `(value: unknown) => void` | Resolves the slot. For pushAndWait, the value returns to `do`. For pushAndForget, use `resolve()` or `removeSlot(id)` to dismiss. |
-| `reject` | `(reason?: string) => void` | Rejects the slot. For pushAndWait, this causes the promise to reject. Use for cancellation flows. |
-
-## Tool Definition
-
-### `defineTool` (recommended for tools with UI)
+### useGlove
 
 ```typescript
-import { defineTool } from "glove-react";
-
-const tool = defineTool({
-  name: string,
-  description: string,
-  inputSchema: z.ZodType,              // Zod schema for tool input
-  displayPropsSchema?: z.ZodType,      // Zod schema for display props (recommended for tools with UI)
-  resolveSchema?: z.ZodType,           // Zod schema for resolve value (omit for pushAndForget-only)
-  displayStrategy?: SlotDisplayStrategy,
-  requiresPermission?: boolean,
-  unAbortable?: boolean,                 // Tool runs to completion even if abort signal fires (e.g. voice barge-in)
-  do(input, display): Promise<ToolResultData>,  // display is TypedDisplay<D, R>
-  render?({ props, resolve, reject }): ReactNode,
-  renderResult?({ data, output, status }): ReactNode,
-});
+const {
+  busy, isCompacting, sessionReady, sessionId,
+  timeline, streamingText, tasks, inbox, slots, stats,
+  sendMessage, abort, renderSlot, renderToolResult, resolveSlot, rejectSlot,
+} = useGlove(config?: UseGloveConfig);
 ```
 
-**Key points:**
-- `do()` should return `{ status, data, renderData }` — `data` goes to model, `renderData` stays client-only
-- `render()` gets typed `props` (matching displayPropsSchema) and typed `resolve` (matching resolveSchema)
-- `renderResult()` receives `renderData` for showing read-only views from history
-- `displayPropsSchema` is optional but recommended — tools without display should use raw `ToolConfig`
+`UseGloveConfig` fields (all optional overrides): `endpoint`, `sessionId`, `getSessionId`, `store`, `model`, `systemPrompt`, `tools`, `compaction`, `subscribers`
 
-### `ToolConfig` (for tools without UI or manual control)
+**`getSessionId`**: Async function `() => Promise<string>` that fetches the session ID from your backend. When configured, store creation is deferred until the ID resolves. Hook-level `getSessionId` overrides client-level. No change in behavior when not used.
 
-```typescript
-interface ToolConfig<I = any> {
-  name: string;
-  description: string;
-  inputSchema?: z.ZodType<I>;          // Optional now — tools may use jsonSchema instead
-  jsonSchema?: Record<string, unknown>; // Raw JSON Schema alternative (used by MCP-bridged tools)
-  do: (input: I, display: ToolDisplay) => Promise<ToolResultData>;
-  render?: (props: SlotRenderProps) => ReactNode;
-  renderResult?: (props: ToolResultRenderProps) => ReactNode;
-  displayStrategy?: SlotDisplayStrategy;
-  requiresPermission?: boolean;
-  unAbortable?: boolean;
-}
-```
-
-**`jsonSchema` vs `inputSchema`:** Pass exactly one. `inputSchema` (Zod) gets local validation before `do()` runs. `jsonSchema` (raw JSON Schema) is forwarded verbatim to the model and the executor skips Zod validation — the source of truth lives elsewhere. Used by `bridgeMcpTool` where the MCP server defines the schema, but you can use it directly when wrapping any external tool catalogue.
-
-### `glove.fold` after `build()`
-
-`fold()` is legal at any time on an `IGloveRunnable`, including after `build()`. The discovery subagent's `activate` tool relies on this — it folds in newly bridged MCP tools mid-conversation so they're available on the next turn. Useful for any "register tools dynamically" pattern.
-
-```typescript
-const agent = new Glove({...}).build();
-// ...later, mid-conversation:
-agent.fold({ name: "new_tool", description: "...", inputSchema: z.object({}), async do() { ... } });
-```
-
-### `do(input, display, glove, signal?)` — third and fourth arguments
-
-A tool's `do` function receives the running `IGloveRunnable` as a third argument and the active request's `AbortSignal` as an optional fourth. The `glove` argument is how the `discovermcp` subagent's `activate` tool reaches back to fold bridged MCP tools onto the main agent and inherit its model/displayManager. The `signal` argument should be forwarded into long-running internal work (nested agent runs, fetches) so abort propagates; tools that ignore it still get the executor's abortable-promise unwind for free, and tools marked `unAbortable: true` should ignore `signal` entirely. Most tools ignore both.
-
-### ToolResultData
-
-```typescript
-interface ToolResultData {
-  status: "success" | "error";
-  data: unknown;                 // Sent to the AI model
-  message?: string;              // Error message (for status: "error")
-  renderData?: unknown;          // Client-only — NOT sent to model, used by renderResult
-  summary?: string;              // Populated by the Executor from tool.generateSummary; swapped in for data in older context when enableToolResultSummary is on
-  generateSummaryArgs?: unknown; // Opaque payload do() returns to drive the tool's generateSummary handler
-}
-```
-
-**Important:** Model adapters explicitly strip `renderData` before sending to the AI. This makes it safe to store sensitive client-only data (e.g., email addresses, UI state) in `renderData`.
-
-### Tool result summaries (opt-in)
-
-Token-efficiency optimization for tools whose payloads bloat context (file reads, web fetches, large query results). Off by default; opt in with `enableToolResultSummary: true` on `GloveConfig`, and add `generateToolSummary` to each tool you want to compress.
-
-```typescript
-const agent = new Glove({
-  store,
-  model: createAdapter({ provider: "anthropic" }),
-  displayManager: new Displaymanager(),
-  systemPrompt: "...",
-  compaction_config: { compaction_instructions: "Summarize so far." },
-  enableToolResultSummary: true,            // turn on the pruner
-})
-  .fold({
-    name: "read_file",
-    description: "Read a slice of a file.",
-    inputSchema: z.object({ path: z.string(), from: z.number().optional(), to: z.number().optional() }),
-    async do(input) {
-      const slice = await readSlice(input);
-      return {
-        status: "success",
-        data: slice,
-        generateSummaryArgs: { path: input.path, from: input.from, to: input.to, lineCount: slice.split("\n").length },
-      };
-    },
-    async generateToolSummary(args) {
-      const { path, from, to, lineCount } = args as any;
-      const range = from != null || to != null ? ` lines ${from ?? 1}-${to ?? "EOF"}` : "";
-      return `Read ${path}${range} (${lineCount} lines).`;
-    },
-  })
-  .build();
-```
-
-How it works:
-
-1. **`do()` returns `generateSummaryArgs`** — whatever the summary handler needs (path + line range, URL, query, row count).
-2. **Executor calls `generateToolSummary(args)`** after `do()` resolves and stores the result on `ToolResultData.summary`. Both `data` and `summary` live on the result.
-3. **`PromptMachine.summarizeOlderToolResults`** runs before every model call (when `enableToolResultSummary: true`): finds the latest non-tool user message and, for every tool result at or before that index, swaps `data` → `summary`. Tool results from the current turn are untouched.
-
-The store always keeps both `data` and `summary`. Only the messages handed to the model adapter are rewritten — transcript renderers, history snapshots, and analytics still see the full record.
-
-Tools without `generateToolSummary`, or calls that omit `generateSummaryArgs`, leave `summary` unset and the pruner leaves them alone. Partially instrumented tool catalogues work fine.
-
-Composes with compaction: tool summaries delay the point at which the Observer needs to compact, and compaction still fires when the instrumented context grows past `CONTEXT_COMPACTION_LIMIT`.
-
-## `<Render>` Component
-
-Headless render component that replaces manual timeline rendering:
-
-```tsx
-import { Render } from "glove-react";
-
-<Render
-  glove={gloveHandle}           // return value of useGlove()
-  strategy="interleaved"        // "interleaved" | "slots-before" | "slots-after" | "slots-only"
-  renderMessage={({ entry, index, isLast }) => ...}
-  renderToolStatus={({ entry, index, hasSlot }) => ...}
-  renderStreaming={({ text }) => ...}
-  renderInput={({ send, busy, abort }) => ...}
-  renderSlotContainer={({ slots, renderSlot }) => ...}
-  as="div"                      // wrapper element
-  className="chat"
-/>
-```
-
-**Features:**
-- Automatic slot visibility based on `displayStrategy`
-- Automatic `renderResult` rendering for completed tools with `renderData`
-- Interleaving: slots appear inline next to their tool call
-- Sensible defaults for all render props
-
-## `GloveHandle` Interface
+### GloveHandle
 
 The interface consumed by `<Render>`, returned by `useGlove()`:
 
@@ -1623,28 +672,149 @@ interface GloveHandle {
 }
 ```
 
-## useGlove Hook Return
+### ToolConfig
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `timeline` | `TimelineEntry[]` | Messages + tool calls |
-| `streamingText` | `string` | Current streaming buffer |
-| `busy` | `boolean` | Agent is processing |
-| `sessionReady` | `boolean` | `false` while async `getSessionId` resolves; always `true` if not configured |
-| `sessionId` | `string` | The resolved session ID |
-| `isCompacting` | `boolean` | Context compaction in progress (driven by `compaction_start`/`compaction_end` events) |
-| `slots` | `EnhancedSlot[]` | Active display stack with metadata |
-| `tasks` | `Task[]` | Agent task list |
-| `inbox` | `InboxItem[]` | Inbox items (pending, resolved, consumed) |
-| `stats` | `GloveStats` | `{ turns, tokens_in, tokens_out }` |
-| `sendMessage(text, images?)` | `void` | Send user message |
-| `abort()` | `void` | Cancel current request |
-| `renderSlot(slot)` | `ReactNode` | Render a display slot |
-| `renderToolResult(entry)` | `ReactNode` | Render a tool result from history |
-| `resolveSlot(id, value)` | `void` | Resolve a pushAndWait slot |
-| `rejectSlot(id, reason?)` | `void` | Reject a pushAndWait slot |
+```typescript
+interface ToolConfig<I = any> {
+  name: string;
+  description: string;
+  inputSchema?: z.ZodType<I>;            // Optional — provide this OR jsonSchema
+  jsonSchema?: Record<string, unknown>;  // Raw JSON Schema alternative — executor skips Zod validation
+  do: (input: I, display: ToolDisplay, glove?: IGloveRunnable) => Promise<ToolResultData>;
+  render?: (props: SlotRenderProps) => ReactNode;
+  renderResult?: (props: ToolResultRenderProps) => ReactNode;
+  displayStrategy?: SlotDisplayStrategy;
+  requiresPermission?: boolean | ((input: I) => boolean);  // function form gates per-input
+  unAbortable?: boolean;
+}
+```
 
-## TimelineEntry
+**`inputSchema` vs `jsonSchema`:** Pass exactly one. `inputSchema` is validated locally before `do()`. `jsonSchema` is forwarded raw and the executor skips validation — used by `bridgeMcpTool` so the MCP server's schema is the source of truth.
+
+### defineTool
+
+Type-safe tool definition helper with colocated renderers. Preferred over raw `ToolConfig` for tools with display UI.
+
+```typescript
+import { defineTool } from "glove-react";
+
+const tool = defineTool<I, D, R>({
+  name: string,
+  description: string,
+  inputSchema: I,                          // z.ZodType — tool input schema
+  displayPropsSchema?: D,                  // z.ZodType — display props schema (recommended for tools with UI)
+  resolveSchema?: R,                       // z.ZodType — resolve value schema (default: z.ZodVoid)
+  displayStrategy?: SlotDisplayStrategy,
+  requiresPermission?: boolean | ((input: z.infer<I>) => boolean),  // function form gates per-input
+  unAbortable?: boolean,                   // Tool runs to completion even if abort signal fires
+  do(input: z.infer<I>, display: TypedDisplay<z.infer<D>, z.infer<R>>): Promise<ToolResultData>,
+  render?({ props, resolve, reject }): ReactNode,
+  renderResult?({ data, output, status }): ReactNode,
+});
+```
+
+**Notes:**
+- Returns a `ToolConfig` — compatible with `GloveClient.tools` and `useGlove` config
+- `do()` receives a `TypedDisplay` with typed `pushAndWait`/`pushAndForget`
+- `render()` receives typed `props` (from displayPropsSchema) and typed `resolve` (from resolveSchema)
+- `renderResult()` receives `renderData` from the tool result for history rendering
+- Raw return values from `do()` are auto-wrapped into `{ status: "success", data: value }`
+- `displayPropsSchema` is optional but recommended — use raw `ToolConfig` for tools without display
+
+### unAbortable Tools
+
+When `unAbortable: true` is set on a tool, glove-core guarantees the tool runs to completion even if the abort signal fires (e.g. from voice barge-in or manual `interrupt()`). This is essential for tools that perform mutations the user has already committed to, like checkout forms.
+
+**How it works (two layers):**
+
+1. **Core layer** (`Agent.executeTools`): When the abort signal fires, abortable tools are skipped with `{ status: "aborted" }`. But if `tool.unAbortable` is `true`, the tool executes normally — no `abortablePromise` wrapper, retries still allowed.
+
+2. **Voice layer** (`GloveVoice.interrupt`): Before clearing display slots, checks `displayManager.resolverStore.size > 0`. If a `pushAndWait` resolver is pending (the form is open), barge-in is suppressed entirely — `interrupt()` is never called. This prevents the abort signal from firing in the first place.
+
+**Important distinction:** `pushAndWait` alone does NOT make a tool survive barge-in. It only suppresses the barge-in trigger at the voice layer. If `interrupt()` is called through other means (e.g. programmatically), only `unAbortable: true` guarantees the tool runs to completion. Use both together for full protection.
+
+```typescript
+const checkout = defineTool({
+  name: "checkout",
+  unAbortable: true,           // Survives abort signals
+  displayStrategy: "hide-on-complete",
+  async do(input, display) {
+    const result = await display.pushAndWait({ items });  // Resolver suppresses voice barge-in
+    if (!result) return "Cancelled";
+    // Mutation happens here — safe because unAbortable guarantees completion
+    cartOps.clear();
+    return "Order placed!";
+  },
+});
+```
+
+### TypedDisplay
+
+Typed display adapter provided to `defineTool`'s `do()` function:
+
+```typescript
+interface TypedDisplay<D, R = void> {
+  pushAndWait: (input: D) => Promise<R>;
+  pushAndForget: (input: D) => Promise<string>;
+}
+```
+
+### ToolDisplay
+
+Untyped display adapter provided to raw `ToolConfig`'s `do()` function:
+
+```typescript
+interface ToolDisplay {
+  pushAndWait: <I, O = unknown>(slot: { renderer?: string; input: I }) => Promise<O>;
+  pushAndForget: <I>(slot: { renderer?: string; input: I }) => Promise<string>;
+}
+```
+
+### SlotRenderProps
+
+```typescript
+interface SlotRenderProps<T = any> {
+  data: T;
+  resolve: (value: unknown) => void;
+  reject: (reason?: string) => void;
+}
+```
+
+### ToolResultRenderProps
+
+```typescript
+interface ToolResultRenderProps<T = any> {
+  data: T;            // The renderData from ToolResultData
+  output?: string;    // The string output of the tool
+  status: "success" | "error";
+}
+```
+
+### SlotDisplayStrategy
+
+```typescript
+type SlotDisplayStrategy = "stay" | "hide-on-complete" | "hide-on-new";
+```
+
+| Strategy | Behavior |
+|----------|----------|
+| `"stay"` | Slot always visible (default) |
+| `"hide-on-complete"` | Hidden when slot is resolved/rejected |
+| `"hide-on-new"` | Hidden when a newer slot from the same tool appears |
+
+### EnhancedSlot
+
+```typescript
+interface EnhancedSlot extends Slot<unknown> {
+  toolName: string;
+  toolCallId: string;
+  createdAt: number;
+  displayStrategy: SlotDisplayStrategy;
+  status: "pending" | "resolved" | "rejected";
+}
+```
+
+### TimelineEntry / ToolEntry
 
 ```typescript
 type TimelineEntry =
@@ -1655,321 +825,2311 @@ type TimelineEntry =
 type ToolEntry = Extract<TimelineEntry, { kind: "tool" }>;
 ```
 
-## Supported Providers
+### Render Component
 
-| Provider | Env Variable | Default Model | SDK Format |
-|----------|-------------|---------------|------------|
-| `openai` | `OPENAI_API_KEY` | `gpt-4.1` | openai |
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | anthropic |
-| `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4` | openai |
-| `gemini` | `GEMINI_API_KEY` | `gemini-2.5-flash` | openai |
-| `minimax` | `MINIMAX_API_KEY` | `MiniMax-M2.5` | openai |
-| `kimi` | `MOONSHOT_API_KEY` | `kimi-k2.5` | openai |
-| `glm` | `ZHIPUAI_API_KEY` | `glm-4-plus` | openai |
-| `mimo` | `MIMO_API_KEY` (+ optional `MIMO_BASE_URL`) | `mimo-v2.5` | mimo |
-| `ollama` | _(none)_ | _(user-specified)_ | openai |
-| `lmstudio` | _(none)_ | _(user-specified)_ | openai |
-| `bedrock` | `AWS_ACCESS_KEY_ID` | `anthropic.claude-3-5-sonnet-20241022-v2:0` | bedrock |
+Headless render component for chat UIs:
 
-### Reasoning Models
+```tsx
+import { Render } from "glove-react";
 
-The OpenAI-compat adapter captures provider-emitted reasoning traces
-(`reasoning_content` / `reasoning` field) from DeepSeek-R1 / V4,
-Qwen3-Thinking, GLM-4.5 / 4.6, Kimi K2, MiniMax M2.5, OpenRouter,
-GPT-5 / o-series, and any other OpenAI-shape endpoint that follows the
-convention. Captured trace lands on `Message.reasoning_content` (a typed
-string field) and is echoed back on subsequent tool-calling assistant
-turns (DeepSeek V4 and MiMo reject the request otherwise).
-
-| Use case | Config |
-|----------|--------|
-| Default capture + echo | `createAdapter({ provider, reasoning: true })` |
-| Hint thinking depth (GPT-5 / GLM / MiniMax / Kimi / DeepSeek V4) | `createAdapter({ provider, reasoning: { effort: "high" } })` — `"minimal"`/`"low"`/`"medium"`/`"high"` |
-| OpenRouter unified reasoning object | `createAdapter({ provider: "openrouter", reasoning: { reasoningObject: { effort: "high", max_tokens: 2000 } } })` |
-| Anthropic-style `thinking` (for OpenAI shims) | `createAdapter({ provider, reasoning: { thinking: { type: "enabled", budget_tokens: 4000 } } })` |
-| Qwen3 dashscope `enable_thinking` | `createAdapter({ provider, reasoning: { extraBody: { enable_thinking: true, thinking_budget: 1024 } } })` |
-| Surface trace in visible text (wrapped in `<think>…</think>`) | `createAdapter({ provider, reasoning: { includeInText: true } })` |
-| Disable echo (DeepSeek-R1 specifically) | `createAdapter({ provider, reasoning: { echo: false } })` |
-
-`OpenAICompatReasoningOptions` is exported from
-`glove-core/models/openai-compat`. Legacy `reasoningEffort` /
-`includeReasoningInText` fields on `createAdapter` and
-`createChatHandler` are folded into the new shape — existing MiMo
-callers keep working unchanged. The MiMo provider continues to use
-its dedicated adapter (`MimoAdapter` already has the field built-in).
-
-## Pre-built Tool Registry
-
-Available at https://glove.dterminal.net/tools — copy-paste into your project:
-
-- `confirm_action` — Yes/No confirmation dialog
-- `collect_form` — Multi-field form
-- `ask_preference` — Single-select preference picker
-- `text_input` — Free-text input
-- `show_info_card` — Info/success/warning card (pushAndForget)
-- `suggest_options` — Multiple-choice suggestions
-- `approve_plan` — Step-by-step plan approval
-
-## Voice Integration (`glove-voice`)
-
-### Package Overview
-
-| Package | Purpose | Install |
-|---------|---------|---------|
-| `glove-voice` | Voice pipeline: `GloveVoice`, adapters (STT/TTS/VAD), `AudioCapture`, `AudioPlayer` | `pnpm add glove-voice` |
-| `glove-react/voice` | React hooks: `useGloveVoice`, `useGlovePTT`, `VoicePTTButton` | Included in `glove-react` |
-| `glove-next` | Token handlers: `createVoiceTokenHandler` (already in `glove-next`, no separate import) | Included in `glove-next` |
-
-### Architecture
-
-```
-Mic → VAD → STTAdapter → glove.processRequest() → TTSAdapter → Speaker
+interface RenderProps {
+  glove: GloveHandle;                                              // Required
+  strategy?: RenderStrategy;                                       // Default: "interleaved"
+  renderMessage?: (props: MessageRenderProps) => ReactNode;
+  renderToolStatus?: (props: ToolStatusRenderProps) => ReactNode;  // Default: hidden
+  renderStreaming?: (props: StreamingRenderProps) => ReactNode;
+  renderInput?: (props: InputRenderProps) => ReactNode;
+  renderSlotContainer?: (props: SlotContainerRenderProps) => ReactNode;
+  voice?: VoiceRenderHandle;                                       // Optional — auto-renders transcript/status
+  renderTranscript?: (props: TranscriptRenderProps) => ReactNode;  // Optional custom transcript renderer
+  renderVoiceStatus?: (props: VoiceStatusRenderProps) => ReactNode; // Optional custom voice status renderer
+  as?: keyof JSX.IntrinsicElements;                                // Default: "div"
+  className?: string;
+  style?: CSSProperties;
+}
 ```
 
-`GloveVoice` wraps a Glove instance with a full-duplex voice pipeline. Glove remains the intelligence layer — all tools, display stack, and context management work normally. STT and TTS are swappable adapters. Text tokens stream through a `SentenceBuffer` into TTS in real-time.
-
-### Quick Start (Next.js + ElevenLabs)
-
-**Step 1: Token routes** — server-side handlers that exchange your API key for short-lived tokens
+**Render prop interfaces:**
 
 ```typescript
-// app/api/voice/stt-token/route.ts
-import { createVoiceTokenHandler } from "glove-next";
-export const GET = createVoiceTokenHandler({ provider: "elevenlabs", type: "stt" });
+interface MessageRenderProps {
+  entry: Extract<TimelineEntry, { kind: "user" | "agent_text" }>;
+  index: number;
+  isLast: boolean;
+}
+
+interface ToolStatusRenderProps {
+  entry: ToolEntry;
+  index: number;
+  hasSlot: boolean;   // true if this tool has an active or result slot
+}
+
+interface StreamingRenderProps { text: string; }
+
+interface InputRenderProps {
+  send: (text: string, images?: { data: string; media_type: string }[]) => void;
+  busy: boolean;
+  abort: () => void;
+}
+
+interface SlotContainerRenderProps {
+  slots: EnhancedSlot[];
+  renderSlot: (slot: EnhancedSlot) => ReactNode;
+}
+
+type RenderStrategy = "interleaved" | "slots-before" | "slots-after" | "slots-only";
 ```
 
+**Features:**
+- Automatic slot visibility filtering based on `displayStrategy`
+- Automatic `renderResult` rendering for completed tools with `renderData`
+- Interleaving: slots appear inline next to their tool call entry
+- Sensible defaults for all render props (messages as divs, hidden tool status, basic input form)
+
+### MemoryStore (glove-react)
+
 ```typescript
-// app/api/voice/tts-token/route.ts
-import { createVoiceTokenHandler } from "glove-next";
-export const GET = createVoiceTokenHandler({ provider: "elevenlabs", type: "tts" });
+import { MemoryStore } from "glove-react";
+const store = new MemoryStore("session-id");
 ```
 
-Set `ELEVENLABS_API_KEY` in `.env.local`.
+The React-side `MemoryStore` is a separate, simpler implementation than the one in `glove-core`. It stores messages, tokens, turns, tasks, inbox, and permissions in memory but does NOT implement `createSubAgentStore`. For server-side or subagent-aware usage, prefer `MemoryStore` from `glove-core`.
 
-**Step 2: Client voice config**
+### createRemoteStore
 
 ```typescript
-// app/lib/voice.ts
+import { createRemoteStore, type RemoteStoreActions } from "glove-react";
+
+const store = createRemoteStore("session-id", {
+  getMessages: async (sid) => fetch(`/api/${sid}/messages`).then(r => r.json()),
+  appendMessages: async (sid, msgs) =>
+    fetch(`/api/${sid}/messages`, { method: "POST", body: JSON.stringify(msgs) }),
+  // Optional async actions, all curried with sessionId:
+  // getTokenCount?(sid)
+  // addTokens?(sid, args: TokenConsumptionCounter)   // TAKES THE SPLIT COUNTER, NOT A SINGLE NUMBER
+  // getTurnCount?(sid), incrementTurn?(sid), resetCounters?(sid)
+  // getTasks?(sid), addTasks?(sid, tasks), updateTask?(sid, taskId, updates)
+  // getPermission?(sid, toolName, input?), setPermission?(sid, toolName, status, input?)
+  //   ↑ input is the model-supplied tool input — use it to scope decisions per-input.
+  //     In-memory fallback keys on (toolName, JSON.stringify(input ?? null)) via permissionKey().
+  // getInboxItems?(sid), addInboxItem?(sid, item),
+  // updateInboxItem?(sid, itemId, updates), getResolvedInboxItems?(sid)
+});
+```
+
+`RemoteStoreActions.addTokens` receives `(sessionId, args: TokenConsumptionCounter)`. The fallback in-memory accumulator sums `args.tokens_in + args.tokens_out`. `createRemoteStore` does NOT implement `createSubAgentStore` — subagents folded onto an agent backed by this store will use the `MemoryStore` fallback inside their factories.
+
+### createRemoteModel
+
+```typescript
+import { createRemoteModel } from "glove-react";
+const model = createRemoteModel("custom", {
+  prompt: async (request, signal?) => { /* return { message, tokens_in, tokens_out } */ },
+  promptStream?: async function*(request, signal?) { /* yield RemoteStreamEvent */ },
+});
+```
+
+### createEndpointModel
+
+```typescript
+import { createEndpointModel } from "glove-react";
+const model = createEndpointModel("/api/chat"); // SSE-based, compatible with glove-next
+```
+
+### parseSSEStream
+
+```typescript
+import { parseSSEStream } from "glove-react";
+for await (const event of parseSSEStream(response)) { /* RemoteStreamEvent */ }
+```
+
+---
+
+## glove-next
+
+### createChatHandler
+
+```typescript
+import { createChatHandler } from "glove-next";
+
+export const POST = createChatHandler({
+  provider: string,    // "openai" | "anthropic" | "openrouter" | "gemini" | "minimax" | "kimi" | "glm"
+  model?: string,      // Defaults to provider default
+  apiKey?: string,     // Defaults to env var
+  maxTokens?: number,
+});
+```
+
+Returns `(req: Request) => Promise<Response>` — compatible with Next.js App Router route handlers.
+
+**SSE Protocol**: Streams `RemoteStreamEvent` objects as `data:` lines:
+
+```typescript
+type RemoteStreamEvent =
+  | { type: "text_delta"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "done"; message: Message; tokens_in: number; tokens_out: number };
+```
+
+---
+
+## glove-voice
+
+### GloveVoice Class
+
+```typescript
+import { GloveVoice } from "glove-voice";
+
+const voice = new GloveVoice(gloveRunnable, {
+  stt: STTAdapter,                    // Required — streaming STT adapter
+  createTTS: () => TTSAdapter,        // Required — factory, called per turn
+  turnMode?: "vad" | "manual",       // Default: "vad"
+  vad?: VADAdapter,                   // Override default VAD (only used in "vad" mode)
+  vadConfig?: VADConfig,              // Built-in VAD config (only used if no custom vad)
+  sampleRate?: number,                // Default: 16000
+  startMuted?: boolean,               // Default: false (true when turnMode="manual")
+});
+
+// Events
+voice.on("mode", (mode: VoiceMode) => { });
+voice.on("transcript", (text: string, partial: boolean) => { });
+voice.on("response", (text: string) => { });
+voice.on("error", (err: Error) => { });
+voice.on("audio_chunk", (pcm: Int16Array) => { });  // Raw mic PCM — emitted even when muted
+
+// Lifecycle
+await voice.start();       // Request mic, connect STT, begin listening
+await voice.stop();        // Stop everything, release resources
+voice.interrupt();         // Barge-in: abort request, stop TTS, return to listening
+voice.commitTurn();        // Manual turn commit: flush utterance to STT
+
+// Narration — speak text through TTS without involving the model
+await voice.narrate("Here is your order summary.");  // Resolves when audio finishes
+
+// Mic control — gate audio forwarding to STT/VAD
+voice.mute();              // Stop forwarding audio to STT/VAD (audio_chunk still emitted)
+voice.unmute();            // Resume forwarding audio to STT/VAD
+
+// Properties
+voice.currentMode;         // VoiceMode
+voice.isActive;            // boolean
+voice.isMuted;             // boolean
+```
+
+### Types
+
+```typescript
+type VoiceMode = "idle" | "listening" | "thinking" | "speaking";
+type TurnMode = "vad" | "manual";
+type TTSFactory = () => TTSAdapter;
+type GetTokenFn = () => Promise<string>;
+```
+
+### Adapter Contracts
+
+```typescript
+// STT — Streaming speech-to-text
+interface STTAdapter extends EventEmitter<STTAdapterEvents> {
+  connect(): Promise<void>;
+  sendAudio(pcm: Int16Array): void;
+  flushUtterance(): void;
+  disconnect(): void;
+  readonly isConnected: boolean;
+  readonly currentPartial: string;
+}
+// Events: partial(text), final(text), error(Error), close()
+
+// TTS — Streaming text-to-speech
+interface TTSAdapter extends EventEmitter<TTSAdapterEvents> {
+  open(): Promise<void>;
+  sendText(text: string): void;
+  flush(): void;
+  destroy(): void;
+  readonly isReady: boolean;
+}
+// Events: audio_chunk(Uint8Array), done(), error(Error)
+
+// VAD — Voice activity detection
+interface VADAdapter extends EventEmitter<VADAdapterEvents> {
+  process(pcm: Int16Array): void;
+  reset(): void;
+  readonly isSpeaking: boolean;
+}
+// Events: speech_start(), speech_end()
+```
+
+### ElevenLabs Adapters
+
+```typescript
 import { createElevenLabsAdapters } from "glove-voice";
 
-async function fetchToken(path: string): Promise<string> {
-  const res = await fetch(path);
-  const data = await res.json();
-  return data.token;
-}
-
-export const { stt, createTTS } = createElevenLabsAdapters({
-  getSTTToken: () => fetchToken("/api/voice/stt-token"),
-  getTTSToken: () => fetchToken("/api/voice/tts-token"),
-  voiceId: "JBFqnCBsd6RMkjVDRZzb",
+const { stt, createTTS } = createElevenLabsAdapters({
+  getSTTToken: GetTokenFn,           // Fetches token from your server
+  getTTSToken: GetTokenFn,           // Fetches token from your server
+  voiceId: string,                   // ElevenLabs voice ID
+  stt?: {                            // Override STT options
+    model?: string,                  // Default: "scribe_v2_realtime"
+    language?: string,               // Default: "en"
+    vadSilenceThreshold?: number,    // Default: 0 (we manage VAD ourselves)
+    maxReconnects?: number,          // Default: 3
+  },
+  tts?: {                            // Override TTS options
+    model?: string,                  // Default: "eleven_turbo_v2_5"
+    outputFormat?: string,           // Default: "pcm_16000"
+    voiceSettings?: { stability?: number; similarityBoost?: number; speed?: number },
+  },
 });
 ```
 
-**Step 3: SileroVAD** — dynamic import for SSR safety
+### SileroVADAdapter
 
 ```typescript
-export async function createSileroVAD() {
-  const { SileroVADAdapter } = await import("glove-voice/silero-vad");
-  const vad = new SileroVADAdapter({
-    positiveSpeechThreshold: 0.5,
-    negativeSpeechThreshold: 0.35,
-    wasm: { type: "cdn" },
-  });
-  await vad.init();
-  return vad;
-}
+// MUST use dynamic import — separate entry point to avoid WASM in SSR bundle
+const { SileroVADAdapter } = await import("glove-voice/silero-vad");
+
+const vad = new SileroVADAdapter({
+  positiveSpeechThreshold?: number,  // Default: 0.3 (higher = less sensitive)
+  negativeSpeechThreshold?: number,  // Default: 0.25 (lower = needs more silence)
+  wasm?: { type: "cdn" } | { type: "local"; path: string },
+});
+await vad.init();
 ```
 
-**Step 4: React hook**
-
-```tsx
-const { runnable } = useGlove({ tools, sessionId });
-const voice = useGloveVoice({ runnable, voice: { stt, createTTS, vad } });
-// voice.mode, voice.isActive, voice.isMuted, voice.error, voice.transcript
-// voice.start(), voice.stop(), voice.interrupt(), voice.commitTurn()
-// voice.mute(), voice.unmute()              — gate mic audio to STT/VAD
-// voice.narrate("text")                     — speak text via TTS without model (returns Promise)
-```
-
-### `startMuted` Config Option
-
-In manual (push-to-talk) mode, the pipeline now starts muted by default — no need to call `mute()` immediately after `start()`. This eliminates the race condition where audio leaks in the gap.
+### Built-in VAD (energy-based)
 
 ```typescript
-// Manual mode auto-mutes — just works
-await voice.start(); // already muted in manual mode
+import { VAD } from "glove-voice";
+const vad = new VAD({ silentFrames?: number }); // Default: 15 (~600ms). GloveVoice overrides to 40 (~1600ms).
+```
 
-// Explicit override
+### createVoiceTokenHandler (glove-next)
+
+```typescript
+import { createVoiceTokenHandler } from "glove-next";
+
+export const GET = createVoiceTokenHandler({
+  provider: "elevenlabs" | "deepgram" | "cartesia",
+  type?: "stt" | "tts",       // Required for elevenlabs
+  apiKey?: string,             // Defaults to env var
+});
+```
+
+### useGloveVoice (glove-react/voice)
+
+```typescript
+import { useGloveVoice } from "glove-react/voice";
+
 const voice = useGloveVoice({
-  runnable,
-  voice: { stt, createTTS, turnMode: "manual", startMuted: false }, // opt out
+  runnable: IGloveRunnable | null,   // From useGlove().runnable
+  voice: GloveVoiceConfig,           // STT, TTS factory, turn mode, VAD
 });
+
+// Returns:
+voice.mode;          // VoiceMode
+voice.transcript;    // string — partial transcript while speaking
+voice.enabled;       // boolean — true after start(), false after stop() or pipeline death
+voice.isActive;      // boolean
+voice.isMuted;       // boolean — whether mic audio is muted (reflects startMuted on start)
+voice.error;         // Error | null
+voice.start();       // () => Promise<void>
+voice.stop();        // () => Promise<void>
+voice.interrupt();   // () => void
+voice.commitTurn();  // () => void
+voice.mute();        // () => void — stop forwarding mic to STT/VAD
+voice.unmute();      // () => void — resume forwarding mic to STT/VAD
+voice.narrate(text); // (text: string) => Promise<void> — speak without model
 ```
 
-### `enabled` State on `useGloveVoice`
+### useGlovePTT (glove-react/voice)
 
-The hook now exposes `voice.enabled` — tracks user intent (true after `start()`, false after `stop()` or pipeline death). Replaces the manual `useState` + sync `useEffect` pattern:
+High-level push-to-talk hook. Encapsulates pipeline lifecycle, keyboard binding, click-vs-hold discrimination, and min-duration enforcement.
 
-```tsx
-// Before — consumer tracks + syncs
-const [voiceEnabled, setVoiceEnabled] = useState(false);
-useEffect(() => {
-  if (voiceEnabled && !voice.isActive) setVoiceEnabled(false);
-}, [voiceEnabled, voice.isActive]);
-
-// After — hook tracks it
-voice.enabled  // auto-resets on pipeline death
-```
-
-### `useGlovePTT` Hook (Push-to-Talk)
-
-High-level hook that encapsulates the entire PTT lifecycle. Reduces ~80 lines of boilerplate to ~5 lines:
-
-```tsx
+```typescript
 import { useGlovePTT } from "glove-react/voice";
 
-const glove = useGlove({ endpoint: "/api/chat", tools });
 const ptt = useGlovePTT({
-  runnable: glove.runnable,
-  voice: { stt, createTTS },    // turnMode forced to "manual"
-  hotkey: "Space",               // default, auto-guards INPUT/TEXTAREA
-  holdThreshold: 300,            // click-vs-hold discrimination (ms)
-  minRecordingMs: 350,           // min audio before committing
+  runnable: IGloveRunnable | null,    // From useGlove().runnable
+  voice: Omit<GloveVoiceConfig, "turnMode">,  // turnMode forced to "manual"
+  hotkey?: string | false,            // Default: "Space" — auto-guards INPUT/TEXTAREA/SELECT
+  holdThreshold?: number,             // Default: 300ms — click-vs-hold discrimination
+  minRecordingMs?: number,            // Default: 350ms — min audio before committing
 });
 
-// ptt.enabled      — is the pipeline active
-// ptt.recording    — is the user currently holding
-// ptt.processing   — is STT finalizing
-// ptt.mode         — voice mode (idle/listening/thinking/speaking)
-// ptt.transcript   — partial transcript while recording
-// ptt.error        — last error
-// ptt.toggle()     — enable/disable the pipeline
-// ptt.interrupt()  — barge-in
-// ptt.bind         — { onPointerDown, onPointerUp, onPointerLeave }
-
-<button {...ptt.bind}><MicIcon /></button>
+// Returns:
+ptt.enabled;       // boolean — pipeline active
+ptt.recording;     // boolean — user currently holding
+ptt.processing;    // boolean — STT finalizing after short recording
+ptt.mode;          // VoiceMode
+ptt.transcript;    // string — partial transcript
+ptt.error;         // Error | null
+ptt.toggle();      // () => Promise<void> — enable/disable pipeline
+ptt.interrupt();   // () => void — barge-in
+ptt.bind;          // { onPointerDown, onPointerUp, onPointerLeave } — spread onto button
+ptt.voice;         // UseGloveVoiceReturn — underlying voice hook for advanced use
 ```
 
-### `<VoicePTTButton>` Component
+### VoicePTTButton (glove-react/voice)
 
-Headless (unstyled) component with render prop for the mic button:
+Headless push-to-talk button component with render prop:
 
 ```tsx
 import { VoicePTTButton } from "glove-react/voice";
 
-<VoicePTTButton ptt={ptt}>
-  {({ enabled, recording, mode }) => (
+<VoicePTTButton ptt={pttReturn} className="..." style={...}>
+  {({ enabled, recording, processing, mode }) => (
     <button className={recording ? "active" : ""}>
       <MicIcon />
-      {enabled && <StatusDot />}
     </button>
   )}
 </VoicePTTButton>
 ```
 
-Includes click-vs-hold discrimination, pointer leave safety, and aria attributes.
+Wraps `ptt.bind` with `role="button"`, `tabIndex`, `aria-label`, `aria-pressed`, and touch safety (`touchAction: "none"`).
 
-### `<Render>` Voice Support
+### Render Voice Props
 
-`<Render>` accepts an optional `voice` prop to auto-render transcript and voice status:
+```typescript
+// voice prop on <Render>
+interface VoiceRenderHandle {
+  mode: VoiceMode;
+  transcript: string;
+  recording?: boolean;
+}
+
+// Custom renderers
+interface TranscriptRenderProps { transcript: string; mode: VoiceMode; }
+interface VoiceStatusRenderProps { mode: VoiceMode; recording?: boolean; }
+```
 
 ```tsx
 <Render
   glove={glove}
-  voice={ptt}                    // or useGloveVoice() return
-  renderTranscript={...}         // optional custom renderer
-  renderVoiceStatus={...}        // optional custom renderer
-  renderInput={() => null}
+  voice={ptt}                              // or useGloveVoice() return
+  renderTranscript={({ transcript }) => ...}  // optional
+  renderVoiceStatus={({ mode }) => ...}       // optional
 />
 ```
 
-### Turn Modes
+---
 
-| Mode | Behavior | Use for |
-|------|----------|---------|
-| `"vad"` (default) | Auto speech detection + barge-in | Hands-free, voice-first apps |
-| `"manual"` | Push-to-talk, explicit `commitTurn()` | Noisy environments, precise control |
+## Browser-Safe Import Paths
 
-### Narration + Mic Control
+`glove-core` no longer includes native deps — `SqliteStore` (and its `better-sqlite3` dependency) has been extracted to the separate `glove-sqlite` package. The `glove-core` barrel is now browser-safe. Subpath imports are still available:
 
-- **`voice.narrate(text)`** — Speak arbitrary text through TTS without the model. Resolves when audio finishes. Auto-mutes mic during narration. Abortable via `interrupt()`. Safe to call from `pushAndWait` tool handlers.
-- **`voice.mute()` / `voice.unmute()`** — Gate mic audio forwarding to STT/VAD. `audio_chunk` events still fire when muted (for visualization).
-- **`audio_chunk` event** — Raw `Int16Array` PCM from the mic, emitted even when muted. Use for waveform/level visualization.
-- **Compaction silence** — Voice automatically ignores `text_delta` during context compaction so the summary is never narrated.
+| Import | Content | Browser-safe |
+|--------|---------|-------------|
+| `glove-core` | Everything (barrel) | Yes |
+| `glove-core/core` | Core types, Agent, PromptMachine, Executor, Observer | Yes |
+| `glove-core/glove` | Glove builder class | Yes |
+| `glove-core/display-manager` | Displaymanager | Yes |
+| `glove-core/tools/task-tool` | Task tool factory | Yes |
+| `glove-core/tools/inbox-tool` | Inbox tool factory | Yes |
+| `glove-core/models/anthropic` | AnthropicAdapter | No |
+| `glove-core/models/openai-compat` | OpenAICompatAdapter | No |
+| `glove-core/models/providers` | Provider factory | No |
+| `glove-sqlite` | SqliteStore (native better-sqlite3) | No |
 
-### Voice-First Tool Design
+---
 
-- **Use `pushAndForget` instead of `pushAndWait`** — blocking tools that wait for clicks are unusable in voice mode
-- **Return descriptive text in `data`** — the LLM reads it to formulate spoken responses
-- **Add a voice-specific system prompt** — instruct the agent to narrate results concisely
-- **Use `narrate()` for slot narration** — read display content aloud from within tool handlers
+## glove-mcp
 
-### Supported Voice Providers
+Bearer-token bridge between Glove agents and MCP servers. Discovery subagent, opt-in OAuth helpers at `glove-mcp/oauth`.
 
-| Provider | Token Handler Config | Env Variable |
-|----------|---------------------|--------------|
-| ElevenLabs | `{ provider: "elevenlabs", type: "stt" \| "tts" }` | `ELEVENLABS_API_KEY` |
-| Deepgram | `{ provider: "deepgram" }` | `DEEPGRAM_API_KEY` |
-| Cartesia | `{ provider: "cartesia" }` | `CARTESIA_API_KEY` |
+### McpCatalogueEntry
 
-## Supporting Files
+```ts
+interface McpCatalogueEntry {
+  id: string;                              // namespace prefix + activation key
+  name: string;                            // discovery match
+  description: string;                     // discovery match
+  url: string;                             // HTTP transport only in v1
+  tags?: string[];                         // discovery match
+  metadata?: Record<string, unknown>;
+}
+```
 
-For detailed API reference, see [api-reference.md](api-reference.md).
-For example patterns from real implementations, see [examples.md](examples.md).
+### McpAdapter
 
-## Common Gotchas
+Per-conversation, mirrors `StoreAdapter`. Sole auth seam is `getAccessToken`; the framework wraps the returned string as `Authorization: Bearer …`.
 
-1. **model_response_complete vs model_response**: Streaming adapters emit `model_response_complete`, not `model_response`. Subscribers must handle both.
-2. **Closure capture in React hooks**: When re-keying sessions, use mutable `let currentKey = key` to avoid stale closures.
-3. **React useEffect timing**: State updates don't take effect in the same render cycle — guard with early returns.
-4. **Browser-safe imports**: `glove-core` is now browser-safe (no native deps). `SqliteStore` (with its native `better-sqlite3` dependency) lives in the separate `glove-sqlite` package for server-side use only. Subpath imports (`glove-core/core`, `glove-core/glove`, etc.) still work but are no longer required for browser safety.
-5. **`Displaymanager` casing**: The concrete class is `Displaymanager` (lowercase 'm'), not `DisplayManager`. Import it as: `import { Displaymanager } from "glove-core/display-manager"`.
-6. **`createAdapter` stream default**: `stream` defaults to `true`, not `false`. Pass `stream: false` explicitly if you want synchronous responses.
-7. **Tool return values**: The `do` function should return `ToolResultData` with `{ status, data, renderData? }`. `data` goes to the AI; `renderData` stays client-only.
-8. **Zod .describe()**: Always add `.describe()` to schema fields — the AI reads these descriptions to understand what to provide.
-9. **displayPropsSchema is optional but recommended**: `defineTool`'s `displayPropsSchema` is optional, but recommended for tools with display UI — tools without display should use raw `ToolConfig` instead.
-10. **renderData is stripped by model adapters**: Model adapters explicitly exclude `renderData` when formatting tool results for the AI, so it's safe for client-only data.
-11. **SileroVAD must use dynamic import**: Never import `glove-voice/silero-vad` at module level in Next.js/SSR. Use `await import("glove-voice/silero-vad")` to avoid pulling WASM into the server bundle.
-12. **Next.js transpilePackages**: Add `"glove-voice"` to `transpilePackages` in `next.config.ts` so Next.js processes the ES module.
-13. **createTTS must be a factory**: `GloveVoice` calls it once per turn to get a fresh TTS adapter. Pass `() => new ElevenLabsTTSAdapter(...)`, not a single instance.
-14. **Barge-in protection requires `unAbortable`**: A `pushAndWait` resolver suppresses voice barge-in at the trigger level (GloveVoice skips `interrupt()` when `resolverStore.size > 0`). But that alone doesn't protect the tool — if `interrupt()` is called by other means, only `unAbortable: true` on the tool guarantees it runs to completion despite the abort signal. Use both together for mutation-critical tools like checkout. Use `pushAndForget` for voice-first tools.
-15. **Empty committed transcripts**: ElevenLabs Scribe may return empty committed transcripts for short utterances. The adapter auto-falls back to the last partial transcript.
-16. **TTS idle timeout**: ElevenLabs TTS WebSocket disconnects after ~20s idle. GloveVoice handles this by closing TTS after each model_response_complete and opening a fresh session on next text_delta.
-17. **onnxruntime-web build warnings**: `Critical dependency: require function is used in a way...` warnings from onnxruntime-web are expected and harmless.
-18. **Audio sample rate**: All adapters must agree on 16kHz mono PCM (the default). Don't change unless your provider explicitly requires something different.
-19. **`narrate()` auto-mutes mic**: `voice.narrate()` automatically mutes the mic during playback to prevent TTS audio from feeding back into STT/VAD. It restores the previous mute state when done.
-20. **`narrate()` needs a started pipeline**: Calling `narrate()` before `voice.start()` throws. The TTS factory and AudioPlayer must be initialized.
-21. **Voice auto-silences during compaction**: When context compaction is triggered, the voice pipeline ignores all `text_delta` events between `compaction_start` and `compaction_end`. The compaction summary is never narrated.
-22. **`isCompacting` for React UI feedback**: `GloveState.isCompacting` is `true` while compaction is in progress. Use it to show a loading indicator or disable input during compaction.
-23. **`<Render>` ships a default input**: If you have a custom input form, always pass `renderInput={() => null}` to suppress the built-in one — otherwise you get duplicate inputs.
-24. **Tools execute outside React**: Tool `do()` functions run outside the component tree. To access React context (e.g. `useWallet()`), use a mutable singleton ref synced from a React component (bridge pattern).
-25. **SileroVAD not needed for manual mode**: When using `turnMode: "manual"` (push-to-talk), skip the SileroVAD import and its WASM overhead. VAD is only needed for `turnMode: "vad"`.
-26. **System prompt: document tools explicitly**: Even though tools have descriptions and schemas, listing every tool with its parameters in the system prompt dramatically improves tool selection accuracy.
-27. **Inbox items need remote store wiring**: When using `createRemoteStore`, inbox falls back to in-memory if you don't provide `getInboxItems`/`addInboxItem`/`updateInboxItem`/`getResolvedInboxItems` actions. Items will vanish on reload.
-28. **Inbox resolved items are plain text messages**: Resolved inbox items are injected as user text messages, not tool results. This avoids Anthropic API validation errors from unmatched tool_use/tool_result pairs.
-29. **Blocking inbox reminders are transient**: Pending blocking item reminders are included in the prompt but NOT persisted to the store, preventing context bloat across turns.
-30. **MCP tool names use `__`**: Bridged MCP tool names are `${entry.id}__${tool.name}` — the `__` separator (`MCP_NAMESPACE_SEP`) is regex-safe across all model providers. A Notion `search` tool surfaces as `notion__search`.
-31. **`auth_expired` is a contract, not an exception**: 401-shaped errors during MCP `callTool` become `{ status: "error", message: "auth_expired" }`. The framework never refreshes — your app refreshes the token, writes it back to your store, and the next call picks it up via `getAccessToken`.
-32. **`McpAdapter.deactivate` doesn't unload tools (v1)**: It flips persisted state, but bridged tools stay loaded on the running agent until the session is refreshed. Plan accordingly.
-33. **`mountMcp` fails open**: If an active server fails to reload (transient outage, expired token), the failure is logged via `console.warn` and the agent continues with the rest of the catalogue. Don't rely on `mountMcp` throwing.
-34. **`serverMode` defaults the discovery policy**: `serverMode: true` → `auto-pick-best` and bridged tools never gate on permission. `serverMode: false` (default) → `interactive` policy and read-write MCP tools require permission. Pass `ambiguityPolicy` explicitly to override.
-35. **Interactive discovery needs an `mcp_picker` renderer**: The `interactive` ambiguity policy renders via the `mcp_picker` renderer on the displayManager. If you're in a browser and using that policy, register a renderer for it; otherwise the `pushAndWait` will hang.
-36. **Only `/` directives are parsed**: `parseTokens` looks for `/name` only. `@name` tokens reach the model verbatim. Paths like `/usr/local` survive (the name `usr` won't be in any registry); emails like `a@b.com` are never touched at all. If a legitimate user message includes `/compact` and you have a hook by that name, it WILL fire — pick hook/skill names that won't collide with normal prose.
-37. **Bound `/` directives are replaced with placeholders, not stripped**: `/compact` becomes `[invoked_extension__hook_compact]` in the parsed text the model sees. The placeholder is non-triggerable (it doesn't match the directive regex), so a future re-parse of the same text doesn't re-fire the extension. Hook and skill handlers receive `parsedText` containing the placeholder, not the bare directive — keep that in mind when matching against it.
-38. **Skill-injected messages are `is_skill_injection: true`**: Synthetic user messages produced by `/skill` invocations have this flag set. Use it in transcript renderers to distinguish them from real user turns. They are persisted in the store like any other message and survive compaction (subject to `splitAtLastCompaction` like everything else).
-39. **`glove_invoke_skill` reads the live registry per call**: The auto-registered tool checks `this.skills` at run time, so skills defined after `build()` with `exposeToAgent: true` are immediately callable. The tool's description is also rebuilt in place when a new exposed skill is registered, so the listing the model sees stays current. The same applies to `glove_invoke_subagent` and the subagent registry.
-40. **`@mention` is a model-side routing signal, not a parsed directive**: Following Claude Code's subagent convention, glove never parses `@name` tokens. The full user message reaches the model and the model decides whether to call `glove_invoke_subagent` based on that tool's description. This means: invocation is not guaranteed (the model could ignore an `@mention`), but multiple `@mentions` in one message Just Work — the model can call the dispatch tool once per subagent.
-41. **Subagents do not see parent context**: A subagent runs in isolation — the only input it gets is the `prompt` string the agent supplied. If your subagent needs context, the parent agent must put it in the prompt (Claude Code-style). The factory builds a fresh child `Glove` with its own store; pass `parentControls.glove.model` and `parentControls.displayManager` if you want to inherit them.
-42. **`subagent_invoked` / `subagent_completed` are guaranteed symmetric**: The Executor — not the dispatcher — fires both bracket events around every `glove_invoke_subagent` tool call. Even when a parent abort short-circuits the dispatcher's promise chain, the executor's abort branch still fires `subagent_completed` with `status: "error"` and `message: "Subagent run aborted by the user."`. Subscribers can rely on 1:1 symmetry.
-43. **Hook `shortCircuit` still persists the user message**: Even when a hook short-circuits the turn, the user's (post-rewrite) message is appended to context first so transcripts stay consistent. The model just isn't called for that turn.
-44. **Token consumption events**: The Observer fires `token_consumption` (`{ consumption: { tokens_in, tokens_out } }`) on subscribers after each model turn. `StoreAdapter.addTokens` takes the same `TokenConsumptionCounter` shape; `getTokenCount()` still returns a single sum.
-45. **Reasoning capture is opt-in**: `OpenAICompatAdapter` ignores `reasoning_content` by default. Pass `reasoning: true` (or an object) on `createAdapter` / `new OpenAICompatAdapter` to capture the trace into `Message.reasoning_content`. The MiMo adapter is opinionated and captures unconditionally.
-46. **`reasoning_content` vs `reasoning` field**: The adapter reads either field from the response. DeepSeek / Qwen3 / GLM / Kimi / MiniMax / MiMo emit `reasoning_content`; OpenRouter emits `reasoning` (with `reasoning_content` as a documented alias). The captured string always lands on `Message.reasoning_content` — that's the canonical Glove field.
-47. **Tool result summaries are off by default**: `enableToolResultSummary` on `GloveConfig` defaults to `false`. Setting it to `true` alone does nothing — you also have to add `generateToolSummary` to each tool you want to shrink AND have `do()` return `generateSummaryArgs`. The Executor only populates `result.summary` when BOTH the handler and the args are present.
-48. **`summary` only replaces `data` in older context**: `PromptMachine.summarizeOlderToolResults` finds the latest non-tool user message and only rewrites tool results at or before that index. Current-turn tool results always reach the model with full `data`. The store keeps both `data` and `summary` untouched on every result — only the messages handed to the model adapter are rewritten.
-49. **`summarizeOlderToolResults` skips empty summaries**: The substitution only happens when `result.summary` is truthy. Partially-instrumented tool catalogues are safe — instrumented tools shrink in older context, uninstrumented tools keep their original `data`. There's no way to force a tool to be excluded from the rewrite other than not populating `summary` for it.
-50. **String error data is no longer double-JSON-stringified**: All model adapters (`anthropic`, `bedrock`, `mimo`, `openai-compat`, `openrouter`) now check `typeof data === "string"` before `JSON.stringify`-ing error result data. If your tool returns `{ status: "error", data: "some message" }`, the model sees `Error: ...\nsome message` rather than `Error: ...\n"some message"`. Bug fix — no consumer action needed, but a behavior change worth knowing if you parse error strings on the model side.
-47. **Echo is required on tool turns for DeepSeek V4 / MiMo**: When `reasoning` is enabled, the adapter echoes `Message.reasoning_content` back on assistant turns that produced `tool_calls` — DeepSeek V4 and MiMo reject the request otherwise. DeepSeek-R1 (the older model) rejects the field entirely; set `reasoning: { echo: false }` if you're specifically targeting R1.
-48. **`reasoning_effort` "minimal" is GPT-5-only**: The full effort enum is `"minimal" | "low" | "medium" | "high"`, but `"minimal"` only works on GPT-5 / o-series. The MiMo branch silently drops it. Other providers may reject it — check provider docs before using.
-49. **Adaptive reasoning models can suppress thinking on "low"**: On `mimo-v2.5-pro` and similar adaptive models, passing `effort: "low"` or `"medium"` can suppress reasoning rather than bound it. Pass `"high"` for consistently deep reasoning, or leave unset to let the model decide.
-50. **Provider-specific reasoning extras via `extraBody`**: For Qwen3 dashscope's `enable_thinking` / `thinking_budget`, or any other non-standard request field, use `reasoning: { extraBody: { ... } }` — fields are merged straight into the request body. Structured options (`effort`, `reasoningObject`, `thinking`) are exposed for the common cases.
+```ts
+interface McpAdapter {
+  identifier: string;
+  getActive(): Promise<string[]>;
+  activate(id: string): Promise<void>;
+  deactivate(id: string): Promise<void>;          // v1: doesn't unfold tools — refresh session for that
+  getAccessToken(id: string): Promise<string>;
+}
+```
+
+### mountMcp
+
+```ts
+function mountMcp(glove: IGloveRunnable, config: MountMcpConfig): Promise<void>;
+
+interface MountMcpConfig {
+  adapter: McpAdapter;
+  entries: McpCatalogueEntry[];
+  ambiguityPolicy?: DiscoveryAmbiguityPolicy;  // default: serverMode → auto-pick-best, else interactive
+  subagentModel?: ModelAdapter;                // default: glove.model
+  subagentSystemPrompt?: string;               // default: built-in per-policy prompt
+  clientInfo?: { name: string; version: string };
+}
+```
+
+Behavior: reload all `adapter.getActive()` ids, then call `glove.defineSubAgent(discoverySubAgent({...}))` so the model can route discovery tasks via `glove_invoke_subagent({ name: "discovermcp", prompt: "..." })`. Fails open — a single bad reload logs and continues.
+
+### Discovery
+
+```ts
+type DiscoveryAmbiguityPolicy =
+  | { type: "interactive" }       // pushAndWait via mcp_picker renderer
+  | { type: "auto-pick-best" }    // deterministic; default in serverMode
+  | { type: "defer-to-main" };    // returns candidates as text, main agent decides
+
+function discoverySubAgent(config: DiscoverySubAgentConfig): DefineSubAgentArgs;
+
+interface DiscoverySubAgentConfig {
+  adapter: McpAdapter;
+  entries: McpCatalogueEntry[];
+  ambiguityPolicy: DiscoveryAmbiguityPolicy;
+  /** Default: inherited from the parent glove at invocation time. */
+  subagentModel?: ModelAdapter;
+  /** Default: built-in per-policy prompt. */
+  subagentSystemPrompt?: string;
+  /** Forwarded to connectMcp during activation. */
+  clientInfo?: { name: string; version: string };
+}
+```
+
+`discoverySubAgent` returns a `DefineSubAgentArgs` with `name: "discovermcp"`. Pass it directly to `glove.defineSubAgent(...)`. `mountMcp` does this for you.
+
+The factory builds a child Glove on each invocation, asking the parent store for a non-durable sub-store via `parentStore.createSubAgentStore?.("discovermcp", false)` (falling back to a private `DiscoveryMemoryStore` when sub-stores aren't supported), inheriting the main agent's model / displayManager / serverMode, and folding `list_capabilities`, `activate`, `deactivate`, and (under `interactive`) `ask_user`. The `activate` tool reaches back to the parent glove (via the `glove` argument on its `do`) to fold bridged tools onto the main agent.
+
+### connectMcp
+
+```ts
+function connectMcp(config: ConnectMcpConfig): Promise<McpServerConnection>;
+
+interface ConnectMcpConfig {
+  namespace: string;
+  url: string;
+  auth?: ConnectMcpAuth;          // typically bearer(token)
+  clientInfo?: { name: string; version: string };
+}
+
+interface ConnectMcpAuth {
+  headers: () => Promise<Record<string, string>>;
+}
+
+interface McpServerConnection {
+  readonly namespace: string;
+  listTools(): Promise<McpToolDef[]>;
+  callTool(name: string, args: unknown): Promise<McpCallToolResult>;
+  close(): Promise<void>;
+  raw: Client;                    // SDK client for resources/prompts
+}
+
+interface McpToolDef {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean };
+}
+
+interface McpCallToolResult {
+  content: Array<{ type: string; text?: string; [k: string]: unknown }>;
+  isError?: boolean;
+}
+```
+
+### bridgeMcpTool
+
+```ts
+function bridgeMcpTool(
+  connection: McpServerConnection,
+  tool: McpToolDef,
+  serverMode: boolean,
+): GloveFoldArgs<unknown>;
+
+const MCP_NAMESPACE_SEP = "__";   // tool name separator
+```
+
+- Names: `${connection.namespace}__${tool.name}`.
+- `jsonSchema: tool.inputSchema` (raw forwarded; executor skips Zod validation).
+- `requiresPermission`: `serverMode === true` → always false; else true unless `tool.annotations.readOnlyHint === true`.
+- `do`: maps `result.isError` → `{ status: "error", message: textOrFallback, data: result.content }`. 401 → `{ status: "error", message: "auth_expired", data: null }`. Otherwise success with `data` = joined text content, `renderData` = full `content[]`.
+
+### bearer
+
+```ts
+type BearerToken = string | (() => Promise<string> | string);
+function bearer(token: BearerToken): ConnectMcpAuth;
+```
+
+Wraps a token (or thunk) as a `ConnectMcpAuth` returning `Authorization: Bearer …` headers. Most consumers don't call this — `mountMcp` and discovery do internally with `bearer(() => adapter.getAccessToken(id))`.
+
+### UnauthorizedError
+
+Re-exported from the MCP SDK. Thrown by `connectMcp` if the SDK rejects credentials. Useful for `instanceof` branches in custom flows.
+
+### extractText
+
+```ts
+function extractText(result: Message | ModelPromptResult): string;
+```
+
+Local helper for pulling agent text out of a Glove response. Used internally by the discovery subagent.
+
+---
+
+## glove-mcp/oauth
+
+Opt-in subpath. Reference implementation of "acquire and persist OAuth tokens for an MCP server." Consumers can use any of these pieces (or none).
+
+### OAuthStore + states
+
+```ts
+interface OAuthProviderState {
+  clientInformation: OAuthClientInformationMixed | null;
+  tokens: OAuthTokens | null;
+  codeVerifier: string | null;
+}
+
+interface OAuthStore {
+  get(key: string): Promise<OAuthProviderState>;     // missing keys → empty state, never null
+  set(key: string, state: OAuthProviderState): Promise<void>;
+  delete(key: string): Promise<void>;
+  clear?(): Promise<void>;
+}
+
+function emptyOAuthState(): OAuthProviderState;
+```
+
+`OAuthClientInformationMixed`, `OAuthTokens` are re-exported from `@modelcontextprotocol/sdk/shared/auth.js`.
+
+### FsOAuthStore
+
+```ts
+class FsOAuthStore implements OAuthStore {
+  constructor(path: string);                          // single JSON file, mode 0600, atomic writes
+}
+```
+
+Holds state for any number of MCP servers in one file, keyed by `key` (typically `McpCatalogueEntry.id`). Swap for a DB-backed implementation in production.
+
+### MemoryOAuthStore
+
+```ts
+class MemoryOAuthStore implements OAuthStore {}
+```
+
+In-process only. For tests and one-shot scripts.
+
+### McpOAuthProvider
+
+```ts
+class McpOAuthProvider implements OAuthClientProvider {
+  constructor(opts: McpOAuthProviderOptions);
+  reset(): Promise<void>;                            // wipes this key's state
+}
+
+interface McpOAuthProviderOptions {
+  store: OAuthStore;
+  key: string;
+  redirectUrl: string;
+  clientMetadata: OAuthClientMetadata;
+  onAuthorizeUrl: (url: URL) => void | Promise<void>;
+}
+```
+
+The SDK calls each `OAuthClientProvider` method; this implementation round-trips through the store. Auth-flow CLIs typically open the user's browser in `onAuthorizeUrl`; agent-runtime providers throw to fail loudly.
+
+### runMcpOAuth
+
+```ts
+function runMcpOAuth(opts: RunMcpOAuthOptions): Promise<RunMcpOAuthResult>;
+
+interface RunMcpOAuthOptions {
+  serverUrl: string;
+  store: OAuthStore;
+  key: string;
+  clientInfo?: { name: string; version: string };    // default MCP_DEFAULT_CLIENT_INFO
+  port?: number;                                     // default 53683
+  redirectUrl?: string;                              // default http://localhost:${port}/callback
+  preRegisteredClient?: PreRegisteredClient;         // for servers that don't support DCR (Google)
+  scope?: string;
+  tokenEndpointAuthMethod?: "none" | "client_secret_basic" | "client_secret_post";
+  onAuthorizeUrl?: (url: URL) => void | Promise<void>;   // default: open in browser
+  onProgress?: (msg: string) => void;                // default: stdout
+  verify?: McpOAuthVerify;                           // default: { type: "listTools" }
+  timeoutMs?: number;                                // default 5min
+}
+
+interface PreRegisteredClient { client_id: string; client_secret?: string; }
+
+type McpOAuthVerify =
+  | false
+  | { type: "listTools" }
+  | { type: "callTool"; name: string; arguments?: Record<string, unknown> };
+
+interface RunMcpOAuthResult {
+  status: "AUTHORIZED" | "ALREADY_AUTHORIZED";
+  toolCount?: number;                                // when verify.type === "listTools"
+  verifyResult?: unknown;                            // when verify.type === "callTool"
+  redirectUrl: string;
+}
+```
+
+Drives discovery → DCR (or pre-seed) → PKCE → callback listener → token exchange → verify. Throws on failure. The verification step matters because some servers (Gmail) return 200 to unauthenticated `initialize`/`tools/list` — only an authenticated tool call confirms auth actually worked.
+
+### buildClientMetadata
+
+```ts
+function buildClientMetadata(opts: BuildClientMetadataOptions): OAuthClientMetadata;
+
+interface BuildClientMetadataOptions {
+  redirectUrl: string;
+  scope?: string;
+  tokenEndpointAuthMethod?: "none" | "client_secret_basic" | "client_secret_post";
+  clientName?: string;                               // default MCP_CLIENT_NAME
+}
+```
+
+### MCP_DEFAULT_CLIENT_INFO
+
+```ts
+const MCP_DEFAULT_CLIENT_INFO = { name: "Glove MCP", version: "0.1.0" };
+```
+
+---
+
+## Core changes that landed alongside glove-mcp
+
+These are framework-level changes in `glove-core` that consumers of any package should know about.
+
+### Tool / GloveFoldArgs — `jsonSchema` alternative
+
+```ts
+interface Tool<I> {
+  name: string;
+  description: string;
+  input_schema?: z.ZodType<I>;
+  jsonSchema?: Record<string, unknown>;
+  /**
+   * Permission gate. boolean applies to every call; (input) => boolean runs
+   * per-call to decide whether THIS input needs a check. When the gate is
+   * on, the Executor consults the store via getPermission(name, input).
+   */
+  requiresPermission?: boolean | ((input: I) => boolean);
+  unAbortable?: boolean;
+  run(
+    input: I,
+    handOver?: (request: unknown) => Promise<unknown>,
+    signal?: AbortSignal,
+  ): Promise<ToolResultData>;
+  generateSummary?: (args: unknown) => Promise<string>;
+}
+
+interface GloveFoldArgs<I> {
+  name: string;
+  description: string;
+  inputSchema?: z.ZodType<I>;
+  jsonSchema?: Record<string, unknown>;
+  requiresPermission?: boolean | ((input: I) => boolean);  // see Tool<I> for semantics
+  unAbortable?: boolean;
+  do: (
+    input: I,
+    display: DisplayManagerAdapter,
+    glove: IGloveRunnable,
+    signal?: AbortSignal,
+  ) => Promise<ToolResultData>;
+  generateToolSummary?: (summaryArgs?: unknown) => Promise<string>;
+  // `glove` is the running instance (used by tools that fold further tools at runtime, e.g. discovermcp's `activate`).
+  // `signal` is the active request's AbortSignal — forward it into long-running internal work.
+  // `generateToolSummary` produces a compact string from the `generateSummaryArgs` returned by `do()`.
+  //   Lands on result.summary; swapped in for result.data in older context when the Glove was constructed
+  //   with `enableToolResultSummary: true`. See "Tool result summaries" further down.
+}
+```
+
+Pass exactly one of `inputSchema` / `jsonSchema`. The executor only runs Zod `safeParse` when `input_schema` is set; `jsonSchema`-only tools forward `call.input_args` straight to `run`. The subagent dispatcher (`glove_invoke_subagent`) explicitly forwards `signal` into the child's `processRequest` so a parent-side abort propagates into the child's `Agent.ask` loop.
+
+`getToolJsonSchema(tool)` — adapter helper that returns whichever schema the tool provided as JSON Schema.
+
+### Glove.fold — legal post-build
+
+```ts
+class Glove implements IGloveBuilder, IGloveRunnable {
+  fold<I>(args: GloveFoldArgs<I>): this;   // legal at any time, including after build()
+  // ...
+}
+
+interface IGloveRunnable {
+  processRequest(request: string | ContentPart[], signal?: AbortSignal): Promise<ModelPromptResult | Message>;
+  setModel(model: ModelAdapter): void;
+  setSystemPrompt(prompt: string): void;
+  getSystemPrompt(): string;
+  /** Swap the display manager for this Glove. Useful for subagents that want to share the parent's display stack mid-run. */
+  setDisplayManager(displayManager: DisplayManagerAdapter): void;
+  addSubscriber(subscriber: SubscriberAdapter): void;
+  removeSubscriber(subscriber: SubscriberAdapter): void;
+  fold<I>(args: GloveFoldArgs<I>): IGloveRunnable;
+  defineHook(name: string, handler: HookHandler): IGloveRunnable;
+  defineSkill(args: DefineSkillArgs): IGloveRunnable;
+  defineSubAgent(args: DefineSubAgentArgs): IGloveRunnable;
+  /** Re-bind to a new store post-construction. Equivalent to .build(store). */
+  rebuild(store?: StoreAdapter): IGloveRunnable;
+  readonly displayManager: DisplayManagerAdapter;
+  readonly model: ModelAdapter;
+  readonly serverMode: boolean;
+}
+```
+
+The `built` throw was removed. Tools that need to register more tools at runtime (e.g. the `discovermcp` subagent's `activate`) read `glove` from `do(input, display, glove, signal?)` and call `glove.fold(...)`.
+
+### Tool result summaries
+
+Per-tool compression of older tool results. Off by default — opt in by passing `enableToolResultSummary: true` to `new Glove({...})` and supplying `generateToolSummary` on the tools you want to shrink. The fields involved:
+
+```ts
+interface ToolResultData {
+  status: "success" | "error" | "aborted";
+  data: unknown;                 // sent to the model
+  message?: string;
+  renderData?: unknown;          // client-only, stripped by model adapters
+  summary?: string;              // populated by the Executor from generateSummary(args)
+  generateSummaryArgs?: unknown; // opaque payload the tool's do() hands to its summary handler
+}
+
+interface GloveFoldArgs<I> {
+  // ...all existing fields...
+  generateToolSummary?: (summaryArgs?: unknown) => Promise<string>;
+}
+
+interface Tool<I> {
+  // ...all existing fields...
+  generateSummary?: (args: unknown) => Promise<string>;
+}
+```
+
+Flow:
+
+1. The tool's `do()` returns a `ToolResultData` with `generateSummaryArgs` set to whatever its summary handler needs.
+2. After `do()` resolves, `Executor` checks `tool.generateSummary && result.generateSummaryArgs` — if both, it awaits `tool.generateSummary(result.generateSummaryArgs)` and assigns the returned string to `result.summary`. Both `data` and `summary` are stored on the result.
+3. On every call to `PromptMachine.run`, when the `Glove` was constructed with `enableToolResultSummary: true`, the messages array is passed through `summarizeOlderToolResults` before being sent to the model. That method finds the index of the latest non-tool user message (i.e. a `Message` with `sender: "user"` and no `tool_results`). For every message with `tool_results` at or before that index, it returns a shallow copy where each result's `data` is replaced with its `summary` (when `summary` is a non-empty string). Tool results from the current turn are untouched.
+
+Concrete example — a `read_file` tool:
+
+```ts
+const readFile: GloveFoldArgs<{ path: string; from?: number; to?: number }> = {
+  name: "read_file",
+  description: "Read a slice of a file.",
+  inputSchema: z.object({ path: z.string(), from: z.number().optional(), to: z.number().optional() }),
+  async do(input) {
+    const slice = await fs.readFile(input.path, "utf8");
+    return {
+      status: "success",
+      data: slice,
+      generateSummaryArgs: { path: input.path, from: input.from, to: input.to, lineCount: slice.split("\n").length },
+    };
+  },
+  async generateToolSummary(args) {
+    const { path, from, to, lineCount } = args as { path: string; from?: number; to?: number; lineCount: number };
+    const range = from != null || to != null ? ` lines ${from ?? 1}-${to ?? "EOF"}` : "";
+    return `Read ${path}${range} (${lineCount} lines).`;
+  },
+};
+```
+
+Older `read_file` results in context arrive at the model as `"Read src/lib/auth.ts lines 40-120 (81 lines)."` while the current turn keeps the full slice.
+
+Behavioural details:
+
+- Off by default — set `enableToolResultSummary: true` on `GloveConfig` to enable.
+- Tools that omit `generateToolSummary`, or omit `generateSummaryArgs` on a particular call, leave `summary` unset. The pruner only substitutes when `summary` is truthy, so partially-instrumented tool catalogues still work.
+- The store keeps full `data` and `summary` on every result — only the messages handed to the model adapter are rewritten. Transcript renderers, history snapshots, and analytics all see the full record.
+- Carried through `Glove.rebuild(store?)` — the new `PromptMachine` is constructed with the same `enableToolResultSummary` flag.
+- Composes with compaction: tool summaries shrink the per-turn payload going to the model, delaying the point at which the Observer needs to compact. Compaction still fires when the instrumented context eventually grows past `CONTEXT_COMPACTION_LIMIT`.
+
+`PromptMachine` constructor signature picks up an optional fourth arg: `new PromptMachine(model, ctx, systemPrompt, enableToolResultSummary?: boolean)`. Default is `false`.
+
+### GloveConfig — serverMode
+
+```ts
+interface GloveConfig {
+  store: StoreAdapter;
+  model: ModelAdapter;
+  displayManager: DisplayManagerAdapter;
+  systemPrompt: string;
+  serverMode?: boolean;                  // new — canonical "I am headless" flag
+  maxRetries?: number;
+  maxConsecutiveErrors?: number;
+  compaction_config: CompactionConfig;
+  enableToolResultSummary?: boolean;     // opt-in older-tool-result compression. See "Tool result summaries".
+}
+```
+
+Drives default permission-gating on bridged MCP tools (always-off in serverMode) and default discovery ambiguity policy (`auto-pick-best` in serverMode, `interactive` otherwise). Treat as the canonical headless flag for any future server-vs-UI behavioral splits.
+
+---
+
+## glove-memory
+
+Storage-agnostic memory layer. Four sibling subsystems (entity / episodic / resources / context) with reader / curator tool surfaces and BYO storage adapters. Reference `InMemory*` adapters for dev/test. Draft v0.1 — companion storage backends (`glove-memory-sqlite`, `glove-memory-postgres`) not yet released.
+
+### Subpath exports
+
+| Import | Contents |
+|--------|----------|
+| `glove-memory` | Barrel — re-exports core / entity / episodic / resources / context plus tool helpers and in-memory adapters |
+| `glove-memory/core` | Shared types — `Provenance`, `Link`, `EmbeddingAdapter`, `MemorySchema`, errors |
+| `glove-memory/entity` | `EntityMemoryAdapter`, `MemoryNode`, `MemoryEdge`, query DSL |
+| `glove-memory/episodic` | `EpisodicMemoryAdapter`, `Episode`, semantic-search opts |
+| `glove-memory/resources` | `ResourceFsAdapter`, `ResourceFile`, POSIX path helpers |
+| `glove-memory/context` | `ContextAdapter`, `ContextEntry`, default markdown rendering |
+| `glove-memory/tools` | Auto-registered read/write tool factories and `useMemory*` / `useEpisodic*` / `useResources*` / `useContext` helpers |
+| `glove-memory/in-memory` | Reference in-process adapters |
+
+### MemorySchema
+
+Shared ontology object passed to every adapter. Schema lives in code only — package does not persist or migrate it.
+
+```ts
+import { MemorySchema } from "glove-memory/core";
+
+class MemorySchema {
+  defineNodeClass<P>(def: NodeClassDef<P>): this;
+  defineRelationship<P>(def: RelationshipDef<P>): this;
+  defineEpisodeKind<P>(def: EpisodeKindDef<P>): this;
+  defineResourceRoot(def: ResourceRootDef): this;
+
+  // Lookups
+  getNodeClass(name: string): NodeClassDef<any> | undefined;
+  requireNodeClass(name: string): NodeClassDef<any>;
+  getRelationship(type: string): RelationshipDef<any> | undefined;
+  requireRelationship(type: string): RelationshipDef<any>;
+  getEpisodeKind(name: string): EpisodeKindDef<any> | undefined;
+  getResourceRoot(path: string): ResourceRootDef | undefined;
+
+  // Listings (used by tool descriptions)
+  listNodeClasses(): NodeClassDef<any>[];
+  listRelationships(): RelationshipDef<any>[];
+  listEpisodeKinds(): EpisodeKindDef<any>[];
+  listResourceRoots(): ResourceRootDef[];
+}
+
+interface NodeClassDef<P = unknown> {
+  name: string;
+  schema: z.ZodType<P>;
+  /** Multi-set: any matching set folds the write into the same node. */
+  identityKeys?: Array<Array<keyof P & string>>;
+  /** Indexed for fuzzy / contains search. */
+  searchableProperties?: Array<keyof P & string>;
+}
+
+interface RelationshipDef<P = unknown> {
+  type: string;
+  from: string;                     // node class name
+  to: string;                       // node class name
+  propertiesSchema?: z.ZodType<P>;
+  /** When true, multiple edges of this type can exist between the same pair. Default false. */
+  multi?: boolean;
+}
+
+interface EpisodeKindDef<P = unknown> {
+  name: string;
+  description?: string;
+  propertiesSchema?: z.ZodType<P>;
+}
+
+interface ResourceRootDef {
+  path: string;                     // absolute POSIX path
+  description?: string;
+  /** Default true. False skips embedding lifecycle for files under this root. */
+  semanticSearch?: boolean;
+}
+```
+
+### Provenance + Link
+
+```ts
+import type { Provenance, Link } from "glove-memory/core";
+import { ProvenanceSchema, LinkSchema } from "glove-memory/core";
+
+interface Provenance {
+  source: string;     // "conversation:<id>/turn:<n>", "manual", "import:<kind>:<id>"
+  actor: string;      // "curator-run-xyz", "user:don", "system"
+  timestamp: string;  // ISO 8601
+  note?: string;
+}
+
+interface Link {
+  kind: "entity" | "episode" | "resource";
+  id: string;
+  relation?: string;
+}
+```
+
+Provenance is required on every write and append-only per record. Link targets are not validated by adapters — that's the orchestrator's job.
+
+### EmbeddingAdapter
+
+```ts
+interface EmbeddingAdapter {
+  /** Adapters must reject `setEmbedding` with mismatched-dimension vectors. */
+  dimensions: number;
+  /** Returned vectors match input order. */
+  embed(texts: string[]): Promise<number[][]>;
+}
+```
+
+Out-of-band lifecycle: writes mark records `embeddingStatus: "missing" | "stale"` and return immediately; an external loop calls `findEpisodesNeedingEmbedding` / `findFilesNeedingEmbedding` → `embed` → `setEmbedding`.
+
+### Error hierarchy
+
+All extend `MemoryError extends Error` with a `code: string`.
+
+```ts
+class MemoryError extends Error { code: string }
+class MemoryNotFoundError extends MemoryError {}              // code: "not_found"
+
+class MemorySchemaError extends MemoryError {}                // codes:
+type MemorySchemaErrorCode =
+  | "unknown_class" | "unknown_relationship" | "unknown_kind"
+  | "unknown_resource_root" | "schema_mismatch";
+
+class MemoryQueryError extends MemoryError { operator?: string }   // codes:
+type MemoryQueryErrorCode = "invalid_query" | "operator_not_supported";
+
+class MemoryWriteError extends MemoryError { matchedIds?: string[] }   // codes:
+type MemoryWriteErrorCode =
+  | "validation_failed" | "provenance_required" | "identity_ambiguous";
+// matchedIds set on identity_ambiguous — orchestrator merges those then retries.
+
+class EpisodicMemoryError extends MemoryError {}              // codes:
+type EpisodicMemoryErrorCode =
+  | "embedding_unavailable" | "semantic_search_unsupported" | "invalid_time_range";
+
+class ResourceFsError extends MemoryError {}                  // codes:
+type ResourceFsErrorCode =
+  | "path_not_found" | "path_already_exists" | "not_a_directory" | "not_a_file"
+  | "directory_not_empty" | "edit_string_not_unique" | "edit_string_not_found"
+  | "body_not_editable" | "binary_not_supported" | "semantic_search_unsupported"
+  | "invalid_path" | "invalid_range";
+
+class ContextError extends MemoryError {}                     // codes:
+type ContextErrorCode =
+  | "entry_not_found" | "invalid_section" | "expired" | "render_failed";
+```
+
+### EntityMemoryAdapter
+
+```ts
+import type { EntityMemoryAdapter } from "glove-memory/entity";
+
+interface EntityMemoryAdapter {
+  identifier: string;
+  schema: MemorySchema;
+
+  // Nodes
+  addNode(className: string, props: unknown, provenance: Provenance): Promise<NodeWriteResult>;
+  getNode(id: string): Promise<MemoryNode | null>;
+  updateNode(id: string, props: Record<string, unknown>, provenance: Provenance): Promise<void>;
+  mergeNodes(keepId: string, mergeId: string, provenance: Provenance): Promise<void>;
+
+  // Edges
+  connect(
+    fromId: string, toId: string, relType: string,
+    props: unknown | undefined, provenance: Provenance,
+  ): Promise<EdgeWriteResult>;
+  disconnect(edgeId: string, provenance: Provenance): Promise<void>;
+
+  // Query
+  findNodes(className: string, where: NodeFilter, opts?: FindNodesOpts): Promise<MemoryNode[]>;
+  getNodeWithNeighbours(id: string): Promise<NodeWithNeighbours | null>;
+  query(spec: QuerySpec): Promise<QueryResult>;
+}
+
+interface FindNodesOpts {
+  /** When true, string `eq` filters opportunistically run as fuzzy on `searchableProperties`. */
+  fuzzy?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+interface MemoryNode {
+  id: string;
+  className: string;
+  props: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  provenance: Provenance[];
+}
+
+interface MemoryEdge {
+  id: string;
+  fromId: string;
+  toId: string;
+  type: string;
+  props?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  provenance: Provenance[];
+}
+
+interface NodeWriteResult {
+  id: string;
+  /** False when the write matched an existing node via identity keys. */
+  created: boolean;
+  /** Present if dedup folded this write into an existing node. */
+  mergedInto?: string;
+}
+
+interface EdgeWriteResult {
+  id: string;
+  /** False when an existing (fromId, toId, type) edge was updated rather than created. */
+  created: boolean;
+}
+
+interface NodeWithNeighbours {
+  node: MemoryNode;
+  neighbours: NodeNeighbour[];
+}
+
+interface NodeNeighbour {
+  edgeId: string;
+  edgeType: string;
+  direction: "out" | "in";
+  nodeId: string;
+  className: string;
+  edgeProps?: Record<string, unknown>;
+}
+```
+
+Identity behaviour: `addNode` matches against `identityKeys` deterministically — no fuzzy on the write path. If any identity key set matches an existing node, returns `created: false`. If two distinct existing nodes match different identity sets in the same write, throws `MemoryWriteError("identity_ambiguous", ..., matchedIds)` — the orchestrator merges first then retries.
+
+### Query DSL
+
+```ts
+import type { QuerySpec, NodeFilter, FilterOp, ExpandSpec, QueryResult } from "glove-memory/entity";
+import { FilterOpSchema, NodeFilterSchema, ExpandSpecSchema, QuerySpecSchema, FILTER_OP_KEYS } from "glove-memory/entity";
+
+type FilterOp =
+  | { eq: unknown } | { neq: unknown } | { in: unknown[] } | { not_in: unknown[] }
+  | { exists: boolean } | { fuzzy: string } | { contains: string }
+  | { starts_with: string } | { ends_with: string }
+  | { gt: number | string } | { gte: number | string }
+  | { lt: number | string } | { lte: number | string }
+  | { between: [unknown, unknown] };
+
+type NodeFilter = { [propertyName: string]: FilterOp | FilterOp[] };
+
+interface ExpandSpec {
+  [relationshipType: string]: {
+    select?: string[];
+    where?: NodeFilter;
+    expand?: ExpandSpec;
+    limit?: number;
+    orderBy?: string;
+  };
+}
+
+interface QuerySpec {
+  from: string;                // root node class
+  where?: NodeFilter;
+  expand?: ExpandSpec;
+  select?: string[];           // root property allowlist
+  orderBy?: string;            // "propertyName:asc" | "propertyName:desc"
+  limit?: number;
+  offset?: number;
+}
+
+interface QueryResult { rows: QueryRow[] }
+interface QueryRow {
+  id: string;
+  className: string;
+  props: Record<string, unknown>;
+  expanded?: Record<string, QueryRow[]>;
+}
+```
+
+The operator set is closed. Adapters that can't implement an operator throw `MemoryQueryError("operator_not_supported", message, op)` rather than degrading silently.
+
+### EpisodicMemoryAdapter
+
+```ts
+import type { EpisodicMemoryAdapter } from "glove-memory/episodic";
+
+interface EpisodicMemoryAdapter {
+  identifier: string;
+  schema: MemorySchema;
+  /** Drives whether `glove_episodic_search` is registered by `useEpisodicReader`. */
+  supportsSemanticSearch: boolean;
+
+  recordEpisode(ep: EpisodeInput, provenance: Provenance): Promise<{ id: string }>;
+  getEpisode(id: string): Promise<Episode | null>;
+  updateEpisode(id: string, patch: EpisodePatch, provenance: Provenance): Promise<void>;
+  deleteEpisode(id: string, provenance: Provenance): Promise<void>;
+
+  findEpisodes(spec: EpisodeQuerySpec): Promise<Episode[]>;
+  episodesForEntity(entityId: string, opts?: EpisodeListOpts): Promise<Episode[]>;
+  episodesBetween(start: string, end: string, opts?: EpisodeListOpts): Promise<Episode[]>;
+
+  /** Bulk participant rewrite — used by orchestrators to reconcile after entity merge. */
+  replaceParticipantId(oldId: string, newId: string, provenance: Provenance): Promise<{ updated: number }>;
+
+  // Embedding lifecycle
+  findEpisodesNeedingEmbedding(opts?: { limit?: number }): Promise<Array<{ id: string; content: string }>>;
+  setEmbedding(id: string, vector: number[]): Promise<void>;
+
+  // Only callable when supportsSemanticSearch === true
+  searchEpisodes?(query: string, opts?: SemanticSearchOpts): Promise<EpisodeSearchResult[]>;
+}
+
+interface Episode {
+  id: string;
+  occurredAt: string | { start: string; end: string };
+  content: string;
+  kind: string;                       // registered episode kind
+  participants: Array<{ entityId: string; role?: string }>;
+  properties?: Record<string, unknown>;
+  embeddingStatus: "missing" | "fresh" | "stale";
+  createdAt: string;
+  updatedAt: string;
+  provenance: Provenance[];
+}
+
+type EpisodeInput = Omit<Episode,
+  "id" | "createdAt" | "updatedAt" | "provenance" | "embeddingStatus">;
+
+type EpisodePatch = Partial<
+  Pick<Episode, "content" | "kind" | "participants" | "properties" | "occurredAt">
+>;
+
+interface EpisodeQuerySpec {
+  where?: {
+    kind?: string | string[];
+    participantIds?: string[];        // matches if any participant ID is in the set
+    properties?: NodeFilter;          // reuses entity-side closed operator set
+  };
+  timeRange?: { start?: string; end?: string };
+  orderBy?:
+    | "occurredAt:asc" | "occurredAt:desc"
+    | "createdAt:asc"  | "createdAt:desc";
+  limit?: number;
+  offset?: number;
+}
+
+interface EpisodeListOpts {
+  limit?: number;
+  offset?: number;
+  orderBy?: "occurredAt:asc" | "occurredAt:desc";
+  kind?: string | string[];
+}
+
+interface SemanticSearchOpts {
+  limit?: number;
+  filter?: {
+    participantIds?: string[];
+    kind?: string | string[];
+    timeRange?: { start?: string; end?: string };
+  };
+  /** 0 = pure semantic, 1 = pure recency. Default 0.2. */
+  recencyWeight?: number;
+}
+
+interface EpisodeSearchResult {
+  episode: Episode;
+  /** Blended semantic + recency score (higher is better). */
+  score: number;
+  /** Raw embedding distance, for debugging. */
+  distance: number;
+}
+
+// helpers
+function occurredAtStart(occurredAt: Episode["occurredAt"]): Date;
+function occurredAtEnd(occurredAt: Episode["occurredAt"]): Date;
+```
+
+In-memory adapter detail: `updateEpisode` flips `embeddingStatus: "stale"` only when `content` changes — kind / participant / property / occurredAt patches don't re-embed. The recency blend uses `recencyScore = exp(-ln(2) * ageMs / halfLifeMs)` with `halfLifeMs = 30 days`.
+
+### ResourceFsAdapter
+
+```ts
+import type { ResourceFsAdapter } from "glove-memory/resources";
+
+interface ResourceFsAdapter {
+  identifier: string;
+  schema: MemorySchema;
+  supportsSemanticSearch: boolean;
+
+  // Read
+  list(path: string, opts?: { recursive?: boolean; limit?: number }): Promise<DirectoryEntry[]>;
+  /** Default range [1, 50]; pass [start, -1] for start-to-EOF. */
+  read(path: string, opts?: { range?: [number, number] }): Promise<ResourceFile>;
+  stat(path: string): Promise<ResourceStat | null>;
+  exists(path: string): Promise<boolean>;
+
+  // Search
+  grep(spec: GrepSpec): Promise<GrepMatch[]>;
+  glob(pattern: string, opts?: { path?: string; limit?: number }): Promise<string[]>;
+  searchSemantic?(query: string, opts?: ResourceSemanticSearchOpts): Promise<SemanticMatch[]>;
+
+  // Write
+  write(path: string, body: ResourceBody, metadata: ResourceMetadata, provenance: Provenance): Promise<void>;
+  /** Throws if `oldStr` matches zero or more than once. */
+  edit(path: string, oldStr: string, newStr: string, provenance: Provenance): Promise<void>;
+  mkdir(path: string, provenance: Provenance): Promise<void>;
+  move(fromPath: string, toPath: string, provenance: Provenance): Promise<void>;
+  remove(path: string, recursive: boolean, provenance: Provenance): Promise<void>;
+  setMetadata(path: string, patch: Partial<ResourceMetadata>, provenance: Provenance): Promise<void>;
+
+  // Reverse linking + bulk rewrite
+  linksFor(targetKind: "entity" | "episode" | "resource", targetId: string): Promise<string[]>;
+  replaceLinkTarget(
+    fromKind: "entity" | "episode" | "resource",
+    fromId: string, toId: string, provenance: Provenance,
+  ): Promise<{ updated: number }>;
+
+  // Embedding lifecycle (only when supportsSemanticSearch === true)
+  findFilesNeedingEmbedding?(opts?: { limit?: number }): Promise<Array<{ path: string; content: string }>>;
+  setEmbedding?(path: string, vector: number[]): Promise<void>;
+}
+
+type ResourceBody =
+  | { type: "text"; text: string }
+  | { type: "markdown"; text: string }
+  | { type: "url"; url: string; cachedText?: string };
+
+interface ResourceMetadata {
+  summary?: string;
+  tags: string[];
+  links: Link[];
+  [key: string]: unknown;             // free-form consumer fields
+}
+
+interface ResourceFile {
+  path: string;
+  body: ResourceBody;
+  metadata: ResourceMetadata;
+  embeddingStatus: "missing" | "fresh" | "stale";
+  createdAt: string;
+  updatedAt: string;
+  provenance: Provenance[];
+}
+
+interface DirectoryEntry {
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+  // file-only
+  contentType?: "text" | "markdown" | "url";
+  size?: number;
+  summary?: string;
+  tags?: string[];
+  updatedAt?: string;
+}
+
+interface ResourceStat {
+  path: string;
+  kind: "file" | "directory";
+  size?: number;
+  contentType?: "text" | "markdown" | "url";
+  metadata?: ResourceMetadata;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface GrepSpec {
+  query: string;
+  regex?: boolean;                    // default false (literal substring)
+  caseSensitive?: boolean;            // default false
+  path?: string;                      // restrict to subtree, default "/"
+  contentTypes?: Array<"text" | "markdown" | "url">;
+  contextLines?: number;              // default 2
+  limit?: number;
+}
+
+interface GrepMatch {
+  path: string;
+  line: number;
+  text: string;
+  context?: { before: string[]; after: string[] };
+}
+
+interface SemanticMatch {
+  path: string;
+  summary?: string;
+  score: number;
+  distance: number;
+}
+
+interface ResourceSemanticSearchOpts {
+  limit?: number;
+  path?: string;                      // restrict to subtree
+  contentTypes?: Array<"text" | "markdown" | "url">;
+  /** 0 = pure semantic, 1 = pure recency. Default 0 (no recency bias for resources). */
+  recencyWeight?: number;
+}
+
+// path helpers
+function normalisePath(input: string): string;
+function parentDir(path: string): string;
+function basename(path: string): string;
+function isWithin(parent: string, child: string): boolean;
+function matchGlob(pattern: string, path: string): boolean;
+
+// content helpers
+function searchableText(body: ResourceBody): string | null;
+function bodySize(body: ResourceBody): number | undefined;
+```
+
+Both curator and user can write directly via this adapter — provenance disambiguates them.
+
+### ContextAdapter
+
+```ts
+import type { ContextAdapter } from "glove-memory/context";
+
+interface ContextAdapter {
+  identifier: string;
+  schema: MemorySchema;
+
+  // Read
+  list(section?: string): Promise<ContextEntry[]>;
+  get(id: string): Promise<ContextEntry | null>;
+  /** Markdown block to inject into the system prompt. Pinned entries by default; expired entries silently filtered. */
+  render(opts?: ContextRenderOpts): Promise<string>;
+
+  // Write
+  set(entry: ContextEntryInput, provenance: Provenance): Promise<{ id: string }>;
+  update(id: string, patch: ContextEntryPatch, provenance: Provenance): Promise<void>;
+  unset(id: string, provenance: Provenance): Promise<void>;
+  /** Bulk replace all entries in a section — common "user updated their preferences pane" flow. */
+  setSection(
+    section: string,
+    entries: Array<Omit<ContextEntryInput, "section">>,
+    provenance: Provenance,
+  ): Promise<void>;
+  unsetSection(section: string, provenance: Provenance): Promise<void>;
+}
+
+interface ContextEntry {
+  id: string;
+  section: string;          // free-form: "identity", "preferences", "glossary", "current_task", ...
+  title?: string;
+  content: string;          // markdown body
+  pinned: boolean;          // true = always injected at turn start; false = read on demand
+  expiresAt?: string;       // optional ISO 8601; expired entries filtered from render/list
+  links?: Link[];
+  createdAt: string;
+  updatedAt: string;
+  provenance: Provenance[];
+}
+
+type ContextEntryInput = Omit<ContextEntry, "id" | "createdAt" | "updatedAt" | "provenance">;
+type ContextEntryPatch = Partial<Omit<ContextEntry, "id" | "createdAt" | "updatedAt" | "provenance">>;
+
+interface ContextRenderOpts {
+  /** Default false. */
+  includeUnpinned?: boolean;
+  /** Default: all sections. */
+  sections?: string[];
+}
+
+// Zod schemas
+const ContextEntryInputSchema: z.ZodType<ContextEntryInput>;
+const ContextEntryPatchSchema: z.ZodType<ContextEntryPatch>;
+```
+
+### `use*` helpers
+
+All seven take `(glove, adapter)` and return the same `glove` for chaining. The first six use the bare `FoldTarget` signature; `useContext` requires the richer `ContextEnableTarget` because it also wraps `processRequest`.
+
+```ts
+import {
+  useMemoryReader, useMemoryCurator,
+  useEpisodicReader, useEpisodicCurator,
+  useResourcesReader, useResourcesCurator,
+  useContext,
+  type FoldTarget, type ContextEnableTarget,
+} from "glove-memory";
+
+type FoldTarget = {
+  fold: <I>(args: GloveFoldArgs<I>) => unknown;
+};
+
+interface ContextEnableTarget {
+  fold: <I>(args: GloveFoldArgs<I>) => unknown;
+  getSystemPrompt(): string;
+  setSystemPrompt(prompt: string): void;
+  processRequest(
+    request: string | ContentPart[],
+    signal?: AbortSignal,
+  ): Promise<ModelPromptResult | Message>;
+}
+
+function useMemoryReader<G extends FoldTarget>(glove: G, adapter: EntityMemoryAdapter): G;
+function useMemoryCurator<G extends FoldTarget>(glove: G, adapter: EntityMemoryAdapter): G;
+function useEpisodicReader<G extends FoldTarget>(glove: G, adapter: EpisodicMemoryAdapter): G;
+function useEpisodicCurator<G extends FoldTarget>(glove: G, adapter: EpisodicMemoryAdapter): G;
+function useResourcesReader<G extends FoldTarget>(glove: G, adapter: ResourceFsAdapter): G;
+function useResourcesCurator<G extends FoldTarget>(glove: G, adapter: ResourceFsAdapter): G;
+function useContext<G extends ContextEnableTarget>(glove: G, adapter: ContextAdapter): G;
+```
+
+`useContext` snapshots the developer-supplied system prompt at registration time, then on every subsequent `processRequest` it calls `adapter.render()` and composes `<base>\n\n<rendered>` (rendered context goes **after** developer guardrails). Multiple `useContext` calls stack — each captures the then-current base prompt.
+
+### Lower-level tool factories
+
+For consumers who want to build their own tool surface composition. Each factory returns one `GloveFoldArgs<T>`; the `useXxxReader` / `useXxxCurator` helpers just call all of these in turn and `fold` them.
+
+```ts
+// Entity
+function buildFindNodesTool(adapter: EntityMemoryAdapter): GloveFoldArgs<...>;
+function buildGetNodeTool(adapter: EntityMemoryAdapter): GloveFoldArgs<...>;
+function buildQueryTool(adapter: EntityMemoryAdapter): GloveFoldArgs<...>;
+function buildAddNodeTool(adapter: EntityMemoryAdapter): GloveFoldArgs<...>;
+function buildUpdateNodeTool(adapter: EntityMemoryAdapter): GloveFoldArgs<...>;
+function buildConnectTool(adapter: EntityMemoryAdapter): GloveFoldArgs<...>;
+function buildDisconnectTool(adapter: EntityMemoryAdapter): GloveFoldArgs<...>;
+function buildMergeNodesTool(adapter: EntityMemoryAdapter): GloveFoldArgs<...>;
+function buildEntityReaderTools(adapter: EntityMemoryAdapter): GloveFoldArgs<any>[];
+function buildEntityCuratorTools(adapter: EntityMemoryAdapter): GloveFoldArgs<any>[];
+function renderEntitySchemaSection(schema: MemorySchema): string;
+
+// Episodic
+function buildEpisodicFindTool(adapter: EpisodicMemoryAdapter): GloveFoldArgs<...>;
+function buildEpisodicTimelineTool(adapter: EpisodicMemoryAdapter): GloveFoldArgs<...>;
+function buildEpisodicSearchTool(adapter: EpisodicMemoryAdapter): GloveFoldArgs<...>;     // skipped when !supportsSemanticSearch
+function buildEpisodicRecordTool(adapter: EpisodicMemoryAdapter): GloveFoldArgs<...>;
+function buildEpisodicUpdateTool(adapter: EpisodicMemoryAdapter): GloveFoldArgs<...>;
+function buildEpisodicDeleteTool(adapter: EpisodicMemoryAdapter): GloveFoldArgs<...>;
+function buildEpisodicReaderTools(adapter: EpisodicMemoryAdapter): GloveFoldArgs<any>[];
+function buildEpisodicCuratorTools(adapter: EpisodicMemoryAdapter): GloveFoldArgs<any>[];
+function renderEpisodeKindsSection(schema: MemorySchema): string;
+
+// Resources
+function buildResourcesLsTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesReadTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesStatTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesGrepTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesGlobTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesSearchTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;        // skipped when !supportsSemanticSearch
+function buildResourcesLinksForTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesWriteTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesEditTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesMkdirTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesMoveTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesRemoveTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesSetMetadataTool(adapter: ResourceFsAdapter): GloveFoldArgs<...>;
+function buildResourcesReaderTools(adapter: ResourceFsAdapter): GloveFoldArgs<any>[];
+function buildResourcesCuratorTools(adapter: ResourceFsAdapter): GloveFoldArgs<any>[];
+function renderResourceRootsSection(schema: MemorySchema): string;
+
+// Context
+function buildContextGetTool(adapter: ContextAdapter): GloveFoldArgs<...>;
+function buildContextSetTool(adapter: ContextAdapter): GloveFoldArgs<...>;
+function buildContextUpdateTool(adapter: ContextAdapter): GloveFoldArgs<...>;
+function buildContextUnsetTool(adapter: ContextAdapter): GloveFoldArgs<...>;
+function buildContextTools(adapter: ContextAdapter): GloveFoldArgs<any>[];
+```
+
+### Reference in-memory adapter constructors
+
+```ts
+import {
+  InMemoryEntityAdapter,
+  InMemoryEpisodicAdapter,
+  InMemoryResourcesAdapter,
+  InMemoryContextAdapter,
+} from "glove-memory";
+
+new InMemoryEntityAdapter({
+  schema: MemorySchema;
+  identifier?: string;          // default: `in-memory-entity-${Date.now()}`
+});
+
+new InMemoryEpisodicAdapter({
+  schema: MemorySchema;
+  identifier?: string;
+  /** When provided, supportsSemanticSearch becomes true and naive cosine similarity is used. */
+  embedder?: EmbeddingAdapter;
+});
+
+new InMemoryResourcesAdapter({
+  schema: MemorySchema;
+  identifier?: string;
+  embedder?: EmbeddingAdapter;
+});
+
+new InMemoryContextAdapter({
+  schema: MemorySchema;
+  identifier?: string;
+});
+```
+
+Process-local — data is lost on restart. Companion adapters (`glove-memory-sqlite`, `glove-memory-postgres`) ship production-shaped implementations.
+
+---
+
+## glove-mesh
+
+Inter-agent messaging on top of the inbox primitive. Behaviorally additive to `glove-core` (agent loop, executor, store contracts unchanged) with one minimal runtime API addition: a `readonly store: StoreAdapter` accessor on `IGloveRunnable`. `mountMesh` reads `glove.store` through that accessor to write resolved inbox items directly, without going through the model's tool path. Ships from `glove-mesh` (barrel), with subpath exports `glove-mesh/core`, `glove-mesh/tools`, `glove-mesh/in-memory`.
+
+### mountMesh
+
+```ts
+import { mountMesh } from "glove-mesh";
+import type { MeshMountTarget, MountMeshConfig } from "glove-mesh";
+
+interface MountMeshConfig {
+  /** Per-agent adapter. Implements registration, transport, and inbound subscription. */
+  adapter: MeshAdapter;
+  /** This agent's identity, announced to the network on mount. */
+  identity: AgentIdentity;
+}
+
+type MeshMountTarget = {
+  fold: <I>(args: GloveFoldArgs<I>) => unknown;
+  readonly store: StoreAdapter;
+};
+
+function mountMesh(
+  glove: MeshMountTarget,
+  config: MountMeshConfig,
+): Promise<void>;
+```
+
+`IGloveRunnable` satisfies `MeshMountTarget` (the `store` accessor was added on the runnable for this purpose). Throws `MeshStoreUnsupportedError` if `glove.store` does not implement all four inbox methods.
+
+### MeshAdapter
+
+```ts
+interface MeshAdapter {
+  identifier: string;
+
+  // Identity / registration
+  register(identity: AgentIdentity): Promise<void>;
+  unregister(): Promise<void>;
+  listAgents(): Promise<AgentIdentity[]>;
+  getAgent(id: string): Promise<AgentIdentity | null>;
+
+  // Outbound
+  send(message: MeshMessage): Promise<void>;
+  broadcast(message: Omit<MeshMessage, "to">): Promise<void>;
+  acknowledge(messageId: string, note?: string): Promise<void>;
+
+  // Inbound — framework registers ONE handler per agent
+  subscribe(handler: (msg: IncomingMeshMessage) => Promise<void>): () => void;
+}
+```
+
+### Identity, message, and incoming types
+
+```ts
+interface AgentIdentity {
+  id: string;
+  name: string;
+  description: string;
+  capabilities?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+interface MeshMessage {
+  id: string;                    // sender-generated
+  from: string;                  // sender-claimed; unverified in v1
+  to?: string;                   // omitted on broadcast
+  in_reply_to?: string;
+  content: string;
+  created_at: string;            // ISO-8601
+  blocking?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+interface IncomingMeshMessage extends MeshMessage {
+  kind: "direct" | "broadcast" | "ack";
+  ack_of?: string;               // when kind === "ack"
+  ack_note?: string;
+}
+```
+
+### The four tools
+
+| Tool | Input schema | Output `data` |
+|------|--------------|---------------|
+| `glove_mesh_send_message` | `{ to: string, content: string, in_reply_to?: string, blocking?: boolean }` | `{ message_id, to, blocking }` |
+| `glove_mesh_broadcast` | `{ content: string, blocking?: boolean }` | `{ message_id, blocking }` |
+| `glove_mesh_list_agents` | `{ filter?: { capability?, name_contains? } }` | `{ agents: AgentSummary[], count }` |
+| `glove_mesh_acknowledge` | `{ message_id: string, note?: string }` | `{ acknowledged: string }` |
+
+`AgentSummary` is `{ id, name, description, capabilities }`. All tools return `{ status: "success" \| "error", data, message? }`.
+
+### MeshNetwork + InMemoryMeshAdapter
+
+In-process reference implementation under `glove-mesh/in-memory`.
+
+```ts
+class MeshNetwork {
+  constructor(opts?: { senderTableCapacity?: number }); // default 1024
+
+  registerAgent(id: string, identity: AgentIdentity): void;
+  unregisterAgent(id: string): void;
+  listAgents(): AgentIdentity[];
+  getAgent(id: string): AgentIdentity | null;
+
+  attachHandler(agentId: string, h: Handler): () => void;
+
+  deliverDirect(msg: MeshMessage): Promise<void>;
+  deliverBroadcast(msg: MeshMessage): Promise<void>;
+  deliverAck(originalSenderId: string, ackOf: string, fromId: string, note?: string): Promise<void>;
+
+  resolveSenderFor(messageId: string): string | null;
+}
+
+class InMemoryMeshAdapter implements MeshAdapter {
+  constructor(network: MeshNetwork, agentId: string);
+}
+```
+
+### Inbox tag convention
+
+Mesh-originated inbox items use namespaced tags:
+
+| Tag prefix | Direction | Meaning |
+|------------|-----------|---------|
+| `mesh:from:<sender>` | inbound | direct message |
+| `mesh:broadcast:from:<sender>` | inbound | broadcast |
+| `mesh:waiting:<msg_id>` | local | pending blocking item for an outbound send |
+
+### Error classes
+
+```ts
+class MeshError extends Error { code: string }
+class MeshNotRegisteredError extends MeshError {}
+class MeshUnknownAgentError extends MeshError {}
+class MeshUnknownMessageError extends MeshError {}
+class MeshStoreUnsupportedError extends MeshError {}
+```
+
+### Individual tool builders
+
+For consumers who want to fold tools manually without going through `mountMesh`:
+
+```ts
+import {
+  buildMeshSendTool,
+  buildMeshBroadcastTool,
+  buildMeshListAgentsTool,
+  buildMeshAcknowledgeTool,
+} from "glove-mesh";
+
+// Each takes a ToolContext { adapter, identity, store, pending: PendingMap }
+// and returns a GloveFoldArgs<I> ready to pass to glove.fold(...).
+```
+
+Most consumers should use `mountMesh` instead — it wires the inbound subscriber, the closure-captured pending map, and the identity registration in one call.
+
+---
+
+## glove-continuum-signal
+
+Subprocess-based runtime substrate for agent collaboration across time. Modeled on station-signal; agent-shaped (Glove instances as the unit of execution, persistent stores as the unit of continuity across wakeups). Ships from `glove-continuum-signal` (single entry, no subpaths in v1).
+
+### agent() builder
+
+```ts
+import { agent, z } from "glove-continuum-signal";
+import type {
+  Agent,
+  AnyAgent,
+  TriggeredAgent,
+  ConcurrentAgent,
+  AgentBuilder,
+  TriggeredAgentBuilder,
+  ConcurrentAgentBuilder,
+  AgentFactoryContext,
+  AgentRuntimeControls,
+} from "glove-continuum-signal";
+
+function agent(name: string): AgentBuilder;
+```
+
+`AgentBuilder<TInput, TOutput>` setters (all return a fresh clone — immutable builder):
+
+| Method | Purpose |
+|--------|---------|
+| `.input(zod)` | Zod schema for trigger/notify input. Carries `TInput` forward. |
+| `.output(zod)` | Zod schema for processRequest's extracted output. Carries `TOutput` forward. |
+| `.timeout(ms)` | Per-run timeout. Parent enforces via SIGTERM for triggered; per-notify for concurrent. Default 5min. |
+| `.concurrency(n)` | Per-agent run budget (triggered only — concurrent agents are 1-per-name). |
+| `.env({...})` | Extra env vars forwarded to spawned subprocesses. Loader-critical vars (`NODE_OPTIONS`, `LD_PRELOAD`, …) are stripped. |
+| `.store(name => StoreAdapter)` | Persistent store factory. Runtime invokes per wakeup; passes the result to the factory via `ctx.store`. |
+| `.triggered()` | Forks into `TriggeredAgentBuilder<TInput, TOutput>`. |
+| `.concurrent()` | Forks into `ConcurrentAgentBuilder<TInput, TOutput>`. |
+
+`TriggeredAgentBuilder<TInput, TOutput>` adds triggered-only setters:
+
+| Method | Purpose |
+|--------|---------|
+| `.retries(n)` | Total attempts = n + 1 (matches station-signal). Default no retry. |
+| `.every("5m")` | Recurring schedule. Interval grammar: `100ms`, `30s`, `5m`, `1h`, `2d`, `1w`. |
+| `.withInput(default)` | Default input for the recurring schedule. |
+| `.onComplete((output, input) => …)` | Post-run hook. Errors here emit `onCompleteError` but don't fail the run. |
+| `.factory(async ctx => Glove)` | Terminal. Returns `TriggeredAgent<TInput, TOutput>` (branded). |
+
+`ConcurrentAgentBuilder<TInput, TOutput>` mirrors the common setters and exposes `.onComplete(…)` and `.factory(…)`. The built `ConcurrentAgent<TInput, TOutput>` has `.notify(input)` in addition to `.trigger(input)` (both enqueue `kind: "notify"`).
+
+```ts
+interface AgentFactoryContext {
+  name: string;
+  runId: string;                // per-wakeup for triggered; "warmup" for concurrent factory setup
+  mode: "triggered" | "concurrent";
+  store: StoreAdapter | null;   // built from `.store(factory)` or null
+  subscriber: SubscriberAdapter; // IPC-forwarding; bootstrap re-attaches defensively
+  controls: AgentRuntimeControls;
+}
+
+interface AgentRuntimeControls {
+  emit(event: { type: string; data?: Record<string, unknown> }): void;
+  signal: AbortSignal;          // fires on graceful stop / restart / terminal fail
+}
+
+interface Agent<TInput, TOutput> {
+  readonly name: string;
+  readonly mode: "triggered" | "concurrent";
+  readonly inputSchema: z.ZodType<TInput>;
+  readonly outputSchema?: z.ZodType<TOutput>;
+  readonly factory: (ctx: AgentFactoryContext) => Promise<IGloveRunnable>;
+  // ... + storeFactory, onCompleteHandler, timeout, maxAttempts, maxConcurrency, env, interval?, recurringInput?
+  trigger(input: TInput): Promise<string>;
+  notify?(input: TInput): Promise<string>;   // ConcurrentAgent only
+}
+
+const AGENT_BRAND = Symbol.for("glove-continuum-agent");
+function isAgent(value: unknown): value is AnyAgent;
+```
+
+### ContinuumRunner
+
+```ts
+import { ContinuumRunner } from "glove-continuum-signal";
+import type { ContinuumRunnerOptions } from "glove-continuum-signal";
+
+interface ContinuumRunnerOptions {
+  agentsDir?: string;
+  adapter?: ContinuumAdapter;                                    // default: MemoryAdapter
+  pollIntervalMs?: number;                                       // default 1000
+  maxAttempts?: number;                                          // fallback for agents w/o their own
+  subscribers?: ContinuumSubscriber[];
+  maxConcurrent?: number;                                        // triggered-run budget, default 5
+  retryBackoffMs?: number;                                       // base for exp. backoff, default 1000
+  warmRestartPolicy?: { maxRestarts: number; backoffMs: number }; // default { 5, 1000 }
+}
+
+class ContinuumRunner {
+  static create(agentsDir: string, options?: Omit<ContinuumRunnerOptions, "agentsDir">): ContinuumRunner;
+
+  start(): Promise<void>;
+  stop(options?: { graceful?: boolean; timeoutMs?: number }): Promise<void>;
+  notify(name: string, input: unknown): Promise<string>;
+  cancel(runId: string): Promise<boolean>;
+  waitForRun(runId: string, opts?: { pollMs?: number; timeoutMs?: number; waitForExistence?: boolean }): Promise<Run | null>;
+  getRun(id: string): Promise<Run | null>;
+  listRuns(agentName: string): Promise<Run[]>;
+  listAgents(): Array<{ name: string; mode: AgentMode; filePath: string }>;
+  hasAgent(name: string): boolean;
+  subscribe(s: ContinuumSubscriber): this;
+  registerAgent(a: AnyAgent, filePath: string): this;
+  getAdapter(): ContinuumAdapter;
+}
+```
+
+`start()`: discovers branded agents from `agentsDir` (recursive readdir, `await import`, scan `Object.values` for `isAgent`), pre-warms concurrent ones, installs SIGINT/SIGTERM, enters the tick loop. `stop({ graceful: true })` sends `stop` IPC to warm agents, awaits children, kills any stragglers after `timeoutMs`.
+
+### ContinuumAdapter
+
+```ts
+import type { ContinuumAdapter, Run, RunPatch, RunStatus, RunKind } from "glove-continuum-signal";
+
+type RunKind = "trigger" | "recurring" | "notify";
+type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+interface Run {
+  id: string;
+  agentName: string;
+  kind: RunKind;
+  input: string;           // JSON
+  output?: string;         // JSON
+  error?: string;
+  status: RunStatus;
+  attempts: number;
+  maxAttempts: number;
+  timeout: number;
+  interval?: string;
+  nextRunAt?: Date;
+  lastRunAt?: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+  createdAt: Date;
+}
+
+interface ContinuumAdapter {
+  addRun(run: Run): Promise<void>;
+  removeRun(id: string): Promise<void>;
+  getRunsDue(): Promise<Run[]>;
+  getRunsRunning(): Promise<Run[]>;
+  getRun(id: string): Promise<Run | null>;
+  updateRun(id: string, patch: RunPatch): Promise<void>;
+  listRuns(agentName: string): Promise<Run[]>;
+  hasRunWithStatus(agentName: string, statuses: RunStatus[]): Promise<boolean>;
+  purgeRuns(olderThan: Date, statuses: RunStatus[]): Promise<number>;
+  generateId(): string;
+  ping(): Promise<boolean>;
+  close?(): Promise<void>;
+}
+```
+
+`MemoryAdapter` (default) — in-process Map, ~10% eviction of terminal runs at the 10k cap. Does NOT implement `SerializableAdapter`. Steps are deliberately dropped from the station-signal contract — the Glove turn IS the unit of work, and fine-grained observability lives on the forwarded subscriber event stream.
+
+### ContinuumSubscriber
+
+```ts
+import type { ContinuumSubscriber, AgentEventEnvelope } from "glove-continuum-signal";
+
+interface ContinuumSubscriber {
+  // Discovery / supervisor lifecycle
+  onAgentDiscovered?(e: { agentName: string; mode: AgentMode; filePath: string }): void;
+  onAgentSpawned?(e: { agentName: string; mode: AgentMode; pid: number; startedAt: Date }): void;
+  onAgentReady?(e: { agentName: string }): void;     // concurrent only
+  onAgentTerminated?(e: { agentName: string; reason: string; restartScheduled: boolean }): void;
+  onAgentRestarted?(e: { agentName: string; restartCount: number }): void;
+
+  // Per-run lifecycle (covers both kind: "trigger" and kind: "notify" — distinguish via run.kind)
+  onRunDispatched?(e: { run: Run }): void;
+  onRunStarted?(e: { run: Run }): void;
+  onRunCompleted?(e: { run: Run; output?: string }): void;
+  onRunFailed?(e: { run: Run; error?: string }): void;
+  onRunTimeout?(e: { run: Run }): void;
+  onRunRetry?(e: { run: Run; attempt: number; maxAttempts: number }): void;
+  onRunCancelled?(e: { run: Run }): void;
+  onRunSkipped?(e: { run: Run; reason: string }): void;
+  onRunRescheduled?(e: { run: Run; nextRunAt: Date }): void;
+  onNotifyDelivered?(e: { run: Run }): void;
+  onCompleteError?(e: { run: Run; error: string }): void;
+  onLogOutput?(e: { run: Run | null; agentName: string; level: "stdout" | "stderr"; message: string }): void;
+
+  // Forwarded Glove events from any child subprocess
+  onAgentEvent?(envelope: AgentEventEnvelope): void;
+}
+
+interface AgentEventEnvelope<T extends SubscriberEvent["type"] = SubscriberEvent["type"]> {
+  agentName: string;
+  runId: string | null;           // null for ambient warm-agent events
+  mode: AgentMode;
+  event_type: T;
+  data: SubscriberEventDataMap[T];
+  timestamp: string;
+}
+```
+
+`ConsoleSubscriber` ships as a default implementation — useful out of the box. Custom subscribers narrow on `envelope.event_type` to handle specific Glove events.
+
+### IPC wire shape
+
+```ts
+import type {
+  ParentToChildMessage,
+  ChildToParentMessage,
+  IPCMessage,
+} from "glove-continuum-signal";
+
+type ParentToChildMessage =
+  | { type: "notify"; runId: string; input: unknown }
+  | { type: "stop"; reason?: string };
+
+type ChildToParentMessage =
+  | { type: "ready"; agentName: string }                                                   // concurrent only
+  | { type: "run:started"; runId; agentName; timestamp }
+  | { type: "run:completed"; runId; agentName; output?; timestamp }
+  | { type: "run:failed"; runId; agentName; error; retryable; timestamp }
+  | { type: "notify:started"; runId; agentName; timestamp }
+  | { type: "notify:completed"; runId; agentName; output?; timestamp }
+  | { type: "notify:failed"; runId; agentName; error; timestamp }
+  | { type: "onComplete:error"; runId; agentName; error }
+  | { type: "agent:event"; agentName; runId: string | null; event_type; data; timestamp };
+
+type IPCMessage = ChildToParentMessage; // station-signal naming compatibility
+```
+
+Split `run:*` vs `notify:*` so subscribers can distinguish without inspecting `Run.kind`. No mesh-specific envelope slots — mesh runs entirely inside the subprocess against the consumer's `MeshAdapter`.
+
+### Remote trigger
+
+```ts
+import { configure, HttpTriggerAdapter } from "glove-continuum-signal";
+
+configure({ endpoint: "https://continuum.example.com", apiKey: "..." });
+// or directly:
+configure({ triggerAdapter: new HttpTriggerAdapter({ endpoint, apiKey }) });
+```
+
+When a `TriggerAdapter` is configured, `agent.trigger(input)` POSTs to `${endpoint}/api/v1/trigger` with `{ agentName, input }` instead of writing locally. Env-var auto-config: `CONTINUUM_ENDPOINT` + `CONTINUUM_API_KEY`.
+
+### Error classes
+
+`AgentValidationError`, `AgentNotFoundError`, `AgentTimeoutError`, `AgentTerminatedError`, `ContinuumRemoteError` — all carry a `.code` discriminator.
+
+### Quick reference
+
+| Need | Symbol |
+|------|--------|
+| Define an agent | `agent("name").input(zod).triggered()\|.concurrent().factory(ctx => glove)` |
+| Run agents | `new ContinuumRunner({ agentsDir, adapter, subscribers, ... })` |
+| Push to a warm agent | `runner.notify(name, input)` or `concurrentAgent.notify(input)` |
+| Wait for a run | `runner.waitForRun(runId, { timeoutMs })` |
+| Persistence contract | `ContinuumAdapter` |
+| Default adapter | `MemoryAdapter` |
+| Remote trigger | `configure({ endpoint, apiKey })` + `HttpTriggerAdapter` |
+| Observability | `ContinuumSubscriber`, `ConsoleSubscriber`, `AgentEventEnvelope` |
+| Brand | `AGENT_BRAND`, `isAgent(v)` |
+| Interval parsing | `parseInterval("5m")` from `glove-continuum-signal` |
+| Re-exported from glove-core | `IGloveRunnable`, `StoreAdapter`, `SubscriberAdapter`, `SubscriberEvent`, `SubscriberEventDataMap` |
+| Re-exported from zod | `z` |
+
+---
+
+## glovebox
+
+Authoring entry point and `glovebox build` CLI. Wraps a built Glove agent into a deployable Glovebox artifact.
+
+### glovebox.wrap
+
+```ts
+import { glovebox } from "glovebox-core";
+
+function wrap<R>(runnable: R, config?: GloveboxConfig): GloveboxApp;
+
+interface GloveboxApp {
+  readonly __glovebox: 1;
+  readonly runnable: unknown;          // your built IGloveRunnable
+  readonly config: ResolvedGloveboxConfig;
+}
+```
+
+Opaque marker; the build CLI and the kit both type-check via `__glovebox === 1`.
+
+### GloveboxConfig
+
+```ts
+interface GloveboxConfig {
+  name?: string;                       // default "glovebox-app"
+  version?: string;                    // default "0.1.0"
+  base?: BaseImage;                    // default "glovebox/base"
+  packages?: PackageSpec;              // { apt?, pip?, npm? }
+  fs?: Record<string, FsMount>;        // default DEFAULT_FS — work/input/output
+  env?: Record<string, EnvVarSpec>;    // declared, validated at boot
+  storage?: { inputs?: StoragePolicy; outputs?: StoragePolicy };
+  limits?: Limits;                     // { cpu?, memory?, timeout? }
+}
+
+type BaseImage =
+  | "glovebox/base"
+  | "glovebox/media"
+  | "glovebox/docs"
+  | "glovebox/python"
+  | "glovebox/browser"
+  | (string & {});                     // custom registry/image:tag
+
+interface FsMount     { path: string; writable: boolean }
+interface EnvVarSpec  { required: boolean; secret?: boolean; default?: string; description?: string }
+interface PackageSpec { apt?: string[]; pip?: string[]; npm?: string[] }
+interface Limits      { cpu?: string; memory?: string; timeout?: string }
+```
+
+`DEFAULT_FS`, `DEFAULT_INPUTS_POLICY`, `DEFAULT_OUTPUTS_POLICY` are exported from `glovebox` for inspection.
+
+### Storage DSL
+
+```ts
+import { rule, composite } from "glovebox-core";
+
+const rule = {
+  inline: (opts?: { below?: string; above?: string }) => Rule,
+  localServer: (opts?: { ttl?: string; below?: string; above?: string }) => Rule,
+  s3: (opts: { bucket: string; region?: string; prefix?: string; below?: string; above?: string }) => Rule,
+  url: (opts?: { below?: string; above?: string }) => Rule,
+};
+
+function composite(rules: Rule[]): StoragePolicyEncoded;
+```
+
+Sizes accept `"B" | "KB" | "MB" | "GB"` suffixes (parsed by `parseSize` in `glovebox-kit`). Earlier rules win; the policy must end in a terminal rule (`always` or `default`) for outputs.
+
+### StoragePolicyEncoded (wire shape)
+
+```ts
+type StoragePolicyEncoded = {
+  rules: Array<{
+    use: { adapter: string; options?: Record<string, unknown> };
+    when: {
+      sizeAbove?: string;
+      sizeBelow?: string;
+      always?: boolean;
+      default?: boolean;
+    };
+  }>;
+};
+
+type StoragePolicy = StoragePolicyEncoded | { __rules: StoragePolicyEncoded["rules"] };
+```
+
+### FileRef
+
+```ts
+type FileRef =
+  | { kind: "inline"; name: string; mime: string; data: string }    // base64
+  | { kind: "url";    name: string; mime?: string; url: string; headers?: Record<string, string> }
+  | { kind: "server"; name: string; mime: string; size: number; id: string; url: string }
+  | { kind: "s3";     name: string; mime?: string; bucket: string; key: string; region?: string }
+  | { kind: "gcs";    name: string; mime?: string; bucket: string; object: string };
+```
+
+### Wire messages
+
+```ts
+type ClientMessage =
+  | { type: "prompt"; id: string; text: string; inputs?: Record<string, FileRef>; outputs_policy?: OutputsPolicyOverride }
+  | { type: "abort"; id: string }
+  | { type: "display_resolve"; slot_id: string; value: unknown }
+  | { type: "display_reject"; slot_id: string; error: unknown }
+  | { type: "ping"; ts: number };
+
+type ServerMessage =
+  | { type: "event"; id: string; event_type: SubscriberEventType; data: unknown }
+  | { type: "display_push"; slot: WireSlot }
+  | { type: "display_clear"; slot_id: string }
+  | { type: "complete"; id: string; message: string; outputs: Record<string, FileRef> }
+  | { type: "error"; id: string; error: { code: string; message: string } }
+  | { type: "pong"; ts: number };
+
+type OutputsPolicyOverride = {
+  inline_below?: string;
+  s3?: { bucket: string; region?: string; prefix?: string };
+  server_ttl?: string;
+};
+```
+
+`SubscriberEventType` mirrors `glove-core`'s 1:1: `text_delta | tool_use | model_response | model_response_complete | tool_use_result | compaction_start | compaction_end`.
+
+### Manifest
+
+```ts
+interface Manifest {
+  name: string;
+  version: string;
+  base: string;
+  fs: Record<string, { path: string; writable: boolean }>;
+  env: Record<string, { required: boolean; secret?: boolean; default?: string; description?: string }>;
+  limits?: { cpu?: string; memory?: string; timeout?: string };
+  key_fingerprint: string;             // SHA-256 prefix shaped "<8>...<4>"
+  storage_policy: { inputs: StoragePolicyEncoded; outputs: StoragePolicyEncoded };
+  packages: { apt?: string[]; pip?: string[]; npm?: string[] };
+  protocol_version: 1;
+}
+```
+
+### CLI
+
+```
+glovebox build <entry> [--out <dir>] [--name <name>]
+```
+
+`<entry>` must default-export a `GloveboxApp` (i.e., the result of `glovebox.wrap(...)`). The CLI emits `dist/Dockerfile`, `dist/nixpacks.toml`, `dist/server/{index.js,package.json,glovebox.json}`, `dist/glovebox.json`, `dist/glovebox.key`, `dist/.env.example`. Re-runs reuse the existing key file.
+
+`resolveBaseImage(base)`:
+- Pass-through for explicit refs (`quay.io/me/img:tag`, `glovebox/media:custom`).
+- Otherwise `${GLOVEBOX_REGISTRY ?? "ghcr.io/porkytheblack"}/${base}:${KNOWN_BASE_TAGS[base] ?? "latest"}`.
+
+---
+
+## glovebox-kit
+
+In-container runtime. Bundled by `glovebox build` — you don't install it yourself.
+
+### startGlovebox
+
+```ts
+import { startGlovebox } from "glovebox-kit";
+
+function startGlovebox(opts: StartOptions): Promise<RunningGlovebox>;
+
+interface StartOptions {
+  app: GloveboxApp;                                 // your wrap module's default export
+  port: number;                                     // GLOVEBOX_PORT (default 8080)
+  key: string;                                      // GLOVEBOX_KEY (required)
+  manifestPath: string;                             // resolved from import.meta.url in the bundled entry
+  publicBaseUrl?: string;                           // GLOVEBOX_PUBLIC_URL — needed for `server`-kind FileRefs
+  adapters?: Record<string, StorageAdapter>;        // merged into the default registry by name
+}
+
+interface RunningGlovebox {
+  http: import("node:http").Server;
+  wss: import("ws").WebSocketServer;
+  close(): Promise<void>;
+}
+```
+
+Validates `GLOVEBOX_KEY` against `manifest.key_fingerprint`, validates declared required env vars, runs `applyInjections`, prepends `buildEnvironmentBlock(config)` to the agent's existing system prompt, and starts the HTTP+WS server.
+
+### Storage adapters
+
+```ts
+import {
+  InlineStorage,
+  UrlStorage,
+  LocalServerStorage,
+  S3Storage,
+  type StorageAdapter,
+  type FileMeta,
+  pickAdapter,
+} from "glovebox-kit";
+
+interface StorageAdapter {
+  readonly name: string;
+  put(meta: FileMeta, bytes: Uint8Array): Promise<FileRef>;
+  get(ref: FileRef): Promise<Uint8Array>;
+  release?(requestId: string): Promise<void>;
+}
+
+interface FileMeta { name: string; mime: string; size: number; requestId: string }
+
+interface S3AdapterOptions {
+  bucket: string;
+  region?: string;
+  prefix?: string;
+  uploadObject:   (params: { bucket: string; key: string; body: Uint8Array; contentType: string }) => Promise<void>;
+  downloadObject: (params: { bucket: string; key: string }) => Promise<Uint8Array>;
+}
+```
+
+`S3Storage` is "deferred" — no `@aws-sdk/client-s3` baked into the runtime image. Pass your own thunks.
+
+`LocalServerStorage` keeps a SQLite manifest (`/var/glovebox/files.db`) and stores files under `/var/glovebox/files/<uuid>`. Files are served by the `/files/:id` HTTP route (Bearer-auth'd, supports `?consume=1`). A sweeper deletes expired rows every 5 minutes.
+
+### Injection helpers
+
+```ts
+import { applyInjections, buildEnvironmentBlock, type RequestExfilState } from "glovebox-kit";
+
+interface RequestExfilState { extraOutputs: Set<string> }
+
+function applyInjections(
+  runnable: IGloveRunnable,
+  config: ResolvedGloveboxConfig,
+  resolveExfilState: () => RequestExfilState | undefined,
+): IGloveRunnable;
+
+function buildEnvironmentBlock(config: ResolvedGloveboxConfig): string;
+```
+
+Adds the `environment` and `workspace` skills, the `/output` and `/clear-workspace` hooks, and returns a static "[Glovebox environment]" block that the kit prepends to the existing system prompt.
+
+### Subscriber + display bridge
+
+```ts
+import { WsSubscriber, attachDisplayBridge } from "glovebox-kit";
+```
+
+`WsSubscriber` translates Glove subscriber events to `event`-typed wire messages tagged with the current request id. `attachDisplayBridge(displayManager, subscriber)` wires `display_push` / `display_clear` to the WS and returns a detach function; `display_resolve` / `display_reject` from the client map back to `displayManager.resolve` / `.reject`.
+
+---
+
+## glovebox-client
+
+Browser- and Node-compatible client SDK. Picks `globalThis.WebSocket` in browsers and falls back to `ws` in Node.
+
+### GloveboxClient
+
+```ts
+import { GloveboxClient } from "glovebox-client";
+
+class GloveboxClient {
+  static make(opts: GloveboxClientOptions): GloveboxClient;
+  box(name: string): Box;
+  close(): Promise<void>;
+}
+
+interface GloveboxClientOptions {
+  endpoints: Record<string, BoxEndpoint>;
+  storage?: ClientStorage;             // default DefaultClientStorage
+}
+
+interface BoxEndpoint { url: string; key: string }
+```
+
+### Box
+
+```ts
+class Box {
+  constructor(opts: BoxOptions);
+  prompt(text: string, opts?: PromptOptions): PromptResult;
+  environment(): Promise<BoxEnvironment>;        // cached after first call
+  onSendError(listener: (err: unknown) => void): () => void;
+  close(): Promise<void>;
+  readonly bearer: string;
+}
+
+interface BoxOptions {
+  endpoint: BoxEndpoint;
+  storage?: ClientStorage;
+  reconnectAttempts?: number;          // default 3, exponential 500/1000/2000ms
+}
+
+interface PromptOptions {
+  files?: Record<string, { mime?: string; bytes: Uint8Array }>;     // wrapped via ClientStorage.put
+  inputs?: Record<string, FileRef>;                                  // pre-built refs (merged in)
+}
+
+interface PromptResult {
+  events: AsyncIterable<SubscriberEvent>;
+  display: AsyncIterable<DisplayEvent>;
+  message: Promise<string>;
+  outputs: Promise<Record<string, FileRef>>;
+  read(name: string): Promise<Uint8Array>;
+  resolve(slot_id: string, value: unknown): void;
+  reject(slot_id: string, error: unknown): void;
+  abort(): void;
+}
+
+interface SubscriberEvent { request_id: string; event_type: SubscriberEventType; data: unknown }
+interface DisplayEvent    { type: "push" | "clear"; slot?: WireSlot; slot_id?: string }
+
+interface BoxEnvironment {
+  name: string;
+  version: string;
+  base: string;
+  fs: Record<string, { path: string; writable: boolean }>;
+  packages: { apt?: string[]; pip?: string[]; npm?: string[] };
+  limits?: { cpu?: string; memory?: string; timeout?: string };
+  protocol_version: 1;
+}
+```
+
+### ClientStorage
+
+```ts
+import { DefaultClientStorage, type ClientStorage } from "glovebox-client";
+
+interface ClientStorage {
+  put(name: string, mime: string, bytes: Uint8Array): Promise<FileRef>;
+  get(ref: FileRef, opts?: { bearer?: string }): Promise<Uint8Array>;
+}
+
+interface DefaultClientStorageOptions { inlineMaxBytes?: number }
+```
+
+`DefaultClientStorage`:
+- `put(...)` → `{ kind: "inline", data: base64(bytes) }`. Throws if `bytes.length > inlineMaxBytes`.
+- `get(ref)` handles `inline` (decode), `url` (fetch + optional `headers`), and `server` (fetch with `Authorization: Bearer <opts.bearer>`). Other kinds throw — replace with a custom `ClientStorage` to support `s3` / `gcs` on the client side.

@@ -487,6 +487,8 @@ class BridgeSubscriber implements SubscriberAdapter {
 
 ## Pattern: Permission-Gated Destructive Tools
 
+### Always gate (boolean form)
+
 ```typescript
 const DESTRUCTIVE_TOOLS = new Set(["write_file", "edit_file", "bash"]);
 
@@ -502,6 +504,38 @@ glove.fold({
   },
 });
 ```
+
+Each distinct `command` prompts independently (the default `MemoryStore`
+keys decisions on `(toolName, JSON.stringify(input))`), so granting
+`{ command: "ls" }` doesn't silently authorise `{ command: "rm -rf /" }`.
+After the first approval for a given command, identical re-calls reuse
+the cached decision.
+
+### Gate per-input (function form) — read-only escape hatch
+
+When the gate itself depends on input — e.g. you want `bash` to ask
+before writes but never before reads — pass `requiresPermission` as a
+function. Returning `false` skips the store lookup entirely; returning
+`true` runs the normal `getPermission(name, input)` flow:
+
+```typescript
+const READ_ONLY = /^(ls|cat|head|tail|pwd|echo|grep|find|wc)\b/;
+
+glove.fold({
+  name: "bash",
+  description: "Execute a shell command",
+  inputSchema: z.object({ command: z.string(), timeout: z.number().optional() }),
+  // Skip the prompt for obviously read-only commands; gate everything else.
+  requiresPermission: (input) => !READ_ONLY.test(input.command),
+  async do(input) {
+    // ... same as above
+  },
+});
+```
+
+The gate runs on every call before the store is consulted, so a write
+command always prompts even if a previous read command was allowed
+through silently.
 
 ---
 
@@ -938,6 +972,140 @@ const { inbox } = useGlove({ tools, sessionId });
 **Blocking vs non-blocking:**
 - `blocking: false` (default) — agent continues, result arrives later
 - `blocking: true` — agent is told it cannot proceed until resolved (soft enforcement via prompt)
+
+---
+
+## Pattern: Mesh — two-agent in-process messaging
+
+`glove-mesh` reuses the inbox primitive to wire agents together. Each agent keeps its own `StoreAdapter`; `mountMesh` registers identity, subscribes to inbound, and folds four `glove_mesh_*` tools.
+
+```typescript
+import { Glove, MemoryStore, Displaymanager, createAdapter } from "glove-core";
+import { mountMesh, MeshNetwork, InMemoryMeshAdapter } from "glove-mesh";
+
+// One shared bus for the in-process demo.
+const network = new MeshNetwork();
+
+async function makeAgent(id: string, name: string, description: string) {
+  const store = new MemoryStore(id);
+  const glove = new Glove({
+    store,
+    model: createAdapter({ provider: "anthropic" }),
+    displayManager: new Displaymanager(),
+    systemPrompt: `You are ${name}. ${description} You can send messages to other agents via glove_mesh_*. Use glove_mesh_list_agents to see who's available.`,
+    serverMode: true,
+    compaction_config: { compaction_instructions: "Summarize the conversation." },
+  }).build(store);
+
+  await mountMesh(glove, {
+    adapter: new InMemoryMeshAdapter(network, id),
+    identity: { id, name, description, capabilities: ["chat"] },
+  });
+
+  return glove;
+}
+
+const planner = await makeAgent("planner", "Planner", "Plans tasks for the team.");
+const worker  = await makeAgent("worker",  "Worker",  "Executes assigned tasks.");
+
+await planner.processRequest("Find a worker and ask them to summarise the latest deploy. Block until they respond.");
+// planner calls glove_mesh_send_message({ to: "worker", content: "...", blocking: true })
+// → pending blocking InboxItem in planner's store (tag: mesh:waiting:<msg_id>)
+// → resolved InboxItem in worker's store (tag: mesh:from:planner)
+
+await worker.processRequest("Check your inbox and respond to any waiting messages.");
+// worker sees the [Inbox: 1 item(s) resolved] banner with the message body
+// → calls glove_mesh_send_message({ to: "planner", content: "...", in_reply_to: <id> })
+//   (reply implies ack, so planner's pending item resolves)
+
+await planner.processRequest("Continue.");
+// planner sees the resolved [Inbox: ...] banner with worker's reply
+```
+
+**Key contract points:**
+- `mountMesh` is async (must await) and not chainable; mirrors `mountMcp`.
+- `mountMesh` throws `MeshStoreUnsupportedError` if `glove.store` lacks the four inbox methods.
+- Sender ids are unverified — sign on `send` / verify on `subscribe` if you need auth.
+- Broadcast blocking resolves on the FIRST ack from any peer; later acks arrive as ordinary inbox items.
+
+---
+
+## Pattern: Mesh — BYO transport (Redis pub/sub sketch)
+
+For cross-process / distributed setups, implement `MeshAdapter` directly. The adapter is the only seam — the rest of the package is reusable.
+
+```typescript
+import type { MeshAdapter, MeshMessage, IncomingMeshMessage, AgentIdentity } from "glove-mesh";
+import type { Redis } from "ioredis";
+
+export class RedisMeshAdapter implements MeshAdapter {
+  identifier: string;
+
+  constructor(private redis: Redis, private agentId: string) {
+    this.identifier = `redis-mesh-${agentId}`;
+  }
+
+  async register(identity: AgentIdentity) {
+    await this.redis.hset("mesh:agents", this.agentId, JSON.stringify(identity));
+  }
+  async unregister() {
+    await this.redis.hdel("mesh:agents", this.agentId);
+  }
+  async listAgents(): Promise<AgentIdentity[]> {
+    const raw = await this.redis.hgetall("mesh:agents");
+    return Object.values(raw).map((s) => JSON.parse(s));
+  }
+  async getAgent(id: string) {
+    const raw = await this.redis.hget("mesh:agents", id);
+    return raw ? (JSON.parse(raw) as AgentIdentity) : null;
+  }
+
+  async send(msg: MeshMessage) {
+    // Remember sender so acks can route back.
+    await this.redis.set(`mesh:msg:${msg.id}:sender`, msg.from, "EX", 3600);
+    await this.redis.publish(`mesh:agent:${msg.to}`, JSON.stringify({ ...msg, kind: "direct" }));
+  }
+  async broadcast(msg: Omit<MeshMessage, "to">) {
+    await this.redis.set(`mesh:msg:${msg.id}:sender`, this.agentId, "EX", 3600);
+    await this.redis.publish("mesh:broadcast", JSON.stringify({ ...msg, kind: "broadcast", from: this.agentId }));
+  }
+  async acknowledge(messageId: string, note?: string) {
+    const sender = await this.redis.get(`mesh:msg:${messageId}:sender`);
+    if (!sender) throw new Error(`No record of message "${messageId}"`);
+    const ack = {
+      id: `ack_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      from: this.agentId,
+      to: sender,
+      content: note ?? "",
+      created_at: new Date().toISOString(),
+      kind: "ack" as const,
+      ack_of: messageId,
+      ack_note: note,
+    };
+    await this.redis.publish(`mesh:agent:${sender}`, JSON.stringify(ack));
+  }
+
+  subscribe(handler: (msg: IncomingMeshMessage) => Promise<void>) {
+    const sub = this.redis.duplicate();
+    sub.subscribe(`mesh:agent:${this.agentId}`, "mesh:broadcast");
+    sub.on("message", async (_chan, raw) => {
+      try {
+        await handler(JSON.parse(raw) as IncomingMeshMessage);
+      } catch (err) {
+        // Per adapter contract: handler errors must not bubble.
+        // eslint-disable-next-line no-console
+        console.warn("[mesh-redis] handler:", err);
+      }
+    });
+    return () => {
+      sub.unsubscribe();
+      sub.quit();
+    };
+  }
+}
+```
+
+Wire it up identically to the in-memory case — just pass a `RedisMeshAdapter` instead of `InMemoryMeshAdapter`. The four mesh tools and the inbox routing don't change.
 
 ---
 
@@ -2041,3 +2209,125 @@ The build CLI's synthetic entry awaits `adapters()` and forwards the result into
 The exact tool definitions for this example live in the repo at `examples/glovebox-pdf-extractor/src/` — see that directory for the agent code, system prompt, and shell helpers that drive `pdftotext` / `pdftk`.
 
 For long-running agents, a separate background task that proactively refreshes tokens before `expires_in` hits zero is usually cleaner — the agent never sees `auth_expired` in the happy path.
+
+## Pattern: Continuum runtime with two warm agents talking via filesystem-backed mesh
+
+Spins up a `ContinuumRunner` with two `.concurrent()` agents. Both mount `glove-mesh` against a shared filesystem network so each agent runs in its own subprocess but can still send each other messages without an external broker. Mirrors the package's own `tests/agent-to-agent-mesh.test.ts`.
+
+```typescript
+// agents/mesh-pair.ts — fixture both subprocesses load
+import { join } from "node:path";
+import { Displaymanager, Glove, MemoryStore } from "glove-core";
+import { mountMesh } from "glove-mesh";
+import { agent, z } from "glove-continuum-signal";
+import { FilesystemMeshAdapter } from "./fs-mesh-adapter.js"; // see package tests/fixtures/
+
+function meshRoot(): string {
+  const r = process.env.MESH_ROOT;
+  if (!r) throw new Error("MESH_ROOT env var not set");
+  return r;
+}
+
+function inboxCapableStore(name: string) {
+  // MemoryStore from glove-core already implements all four inbox methods.
+  // For persistence across runner restarts, swap for an inbox-capable
+  // file/SQLite-backed StoreAdapter.
+  return new MemoryStore(`mesh-${name}`);
+}
+
+export const meshSender = agent("mesh-sender")
+  .input(z.object({ to: z.string(), content: z.string() }))
+  .concurrent()
+  .timeout(15_000)
+  .store(inboxCapableStore)
+  .factory(async (ctx) => {
+    const glove = new Glove({
+      store: ctx.store ?? undefined,
+      model: createMyModelThatCallsMeshSend(), // e.g. real LLM or a test SendingModel
+      displayManager: new Displaymanager(),
+      systemPrompt:
+        "On every prompt, call glove_mesh_send_message with {to, content} parsed from the user input.",
+      compaction_config: { compaction_instructions: "n/a" },
+    }).build(ctx.store ?? undefined);
+
+    await mountMesh(glove, {
+      adapter: new FilesystemMeshAdapter({ root: meshRoot(), agentId: ctx.name }),
+      identity: { id: ctx.name, name: ctx.name, description: "Sends." },
+    });
+    return glove;
+  });
+
+export const meshReceiver = agent("mesh-receiver")
+  .input(z.object({ noop: z.string() }))
+  .concurrent()
+  .timeout(15_000)
+  .store(inboxCapableStore)
+  .factory(async (ctx) => {
+    const glove = new Glove({
+      store: ctx.store ?? undefined,
+      model: createMyEchoModel(),
+      displayManager: new Displaymanager(),
+      systemPrompt: "mesh-receiver",
+      compaction_config: { compaction_instructions: "n/a" },
+    }).build(ctx.store ?? undefined);
+
+    await mountMesh(glove, {
+      adapter: new FilesystemMeshAdapter({ root: meshRoot(), agentId: ctx.name }),
+      identity: { id: ctx.name, name: ctx.name, description: "Receives." },
+    });
+    return glove;
+  });
+```
+
+```typescript
+// runner.ts — entry point
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { ContinuumRunner, ConsoleSubscriber } from "glove-continuum-signal";
+import { meshSender, meshReceiver } from "./agents/mesh-pair.js";
+
+process.env.MESH_ROOT = mkdtempSync(`${tmpdir()}/my-mesh-`);
+
+const runner = new ContinuumRunner({
+  subscribers: [new ConsoleSubscriber()],
+  pollIntervalMs: 50,
+});
+runner.registerAgent(meshSender, new URL("./agents/mesh-pair.js", import.meta.url).pathname);
+runner.registerAgent(meshReceiver, new URL("./agents/mesh-pair.js", import.meta.url).pathname);
+
+await runner.start();
+
+// Both warm subprocesses spawn and mount mesh against the shared MESH_ROOT.
+// Send a message: notify the sender, its model emits a glove_mesh_send_message
+// tool call, the executor runs the mesh tool, the FilesystemMeshAdapter writes
+// to <MESH_ROOT>/inbox/mesh-receiver/<msgId>.json, and the receiver's polling
+// subscribe handler picks it up and writes to its inbox via mountMesh.
+const runId = await runner.notify("mesh-sender", {
+  to: "mesh-receiver",
+  content: "hello peer",
+});
+await runner.waitForRun(runId);
+
+// Inspect the receiver's store to confirm delivery.
+const receiverInbox = await runner.getAdapter(); // adapter holds the Run records, not the agent stores
+// (For inbox inspection, either back the receiver's store on disk and read the file,
+// or expose a read-only HTTP endpoint from inside the receiver agent.)
+
+await runner.stop({ graceful: true, timeoutMs: 5_000 });
+```
+
+What's happening end-to-end:
+
+1. `runner.notify("mesh-sender", input)` writes a `kind: "notify"` Run to the runner's adapter.
+2. The tick loop routes the run to `mesh-sender`'s warm subprocess via IPC.
+3. The bootstrap's notify chain calls `glove.processRequest('{"to":"mesh-receiver","content":"hello peer"}')`.
+4. The sender's model returns a `glove_mesh_send_message` tool call.
+5. The executor runs the tool, which calls `FilesystemMeshAdapter.send(...)`.
+6. The adapter writes `<MESH_ROOT>/inbox/mesh-receiver/<msgId>.json` atomically (tmp + rename).
+7. The receiver's subprocess polls its inbox directory (~100ms) and reads the new file.
+8. `mountMesh`'s subscribe handler runs in the receiver subprocess, dropping a resolved `InboxItem` into the receiver's store.
+9. Bootstrap sends `notify:completed` IPC; runner marks the sender's run completed.
+
+Two separate subprocesses, no shared memory, mesh as the only transport. For cross-machine deployments, swap `FilesystemMeshAdapter` for one backed by Redis pub/sub or NATS — the contract (`MeshAdapter`) is identical, the rest of the stack doesn't change.
+
+The `FilesystemMeshAdapter` source lives at `packages/glove-continuum-signal/tests/fixtures/fs-mesh-adapter.ts` — copy it into your own codebase as a starting point for a production adapter (it's deliberately tests-only in the package itself: no retention/compaction, single-writer assumption per `(root, agentId)`).
