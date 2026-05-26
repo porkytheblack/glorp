@@ -1,6 +1,6 @@
 import type { IGloveRunnable } from "glove-core/glove";
 import type { PermissionStatus } from "glove-core/core";
-import type { GlorpFleet } from "./station-bridge.ts";
+import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import type { GlorpStore } from "./store.ts";
 import type { CredentialsStore } from "./credentials.ts";
 import type { ModelCatalog } from "./model-catalog.ts";
@@ -14,7 +14,7 @@ export interface ExtensionCatalogue {
 
 export interface GlorpHandle {
   agent: IGloveRunnable;
-  fleet: GlorpFleet;
+  orchestrator: Orchestrator;
   store: GlorpStore;
   credentials: CredentialsStore;
   sessionId: string;
@@ -22,6 +22,8 @@ export interface GlorpHandle {
   title: string | null;
   extensions: ExtensionCatalogue;
   send(text: string): Promise<void>;
+  /** Run the plan phase then a build phase for a complex request. */
+  planAndBuild(prompt: string): Promise<void>;
   abort(): void;
   shutdown(): Promise<void>;
   swapProfile(profileId: string): Promise<void>;

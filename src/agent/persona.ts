@@ -23,7 +23,9 @@ export function buildGlorpSystemPrompt(opts: SystemPromptOptions): string {
   ].filter(Boolean).join("\n\n");
 }
 
-export function builtInAgentPrompt(name: "planner" | "researcher" | "reviewer" | "fleet-research"): string {
+export function builtInAgentPrompt(
+  name: "planner" | "researcher" | "reviewer" | "generator" | "evaluator" | "builder",
+): string {
   return readPrompt(`agents/${name}.md`);
 }
 

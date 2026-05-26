@@ -20,6 +20,7 @@ export interface ChatTurn {
   id: string;
   kind: "user" | "agent" | "tool" | "system" | "transmission";
   text?: string;
+  reasoning?: string;
   tool?: ToolEvent;
   meta?: Record<string, unknown>;
   createdAt: number;
@@ -50,15 +51,20 @@ export interface InboxEntry {
   resolvedAt: string | null;
 }
 
-export interface FleetJobEvent {
-  runId: string;
-  itemId: string;
-  tag: string;
-  name?: string;
-  kind: "research" | "edit-fanout" | "shell-fanout";
-  status: "running" | "resolved" | "error" | "cancelled";
-  startedAt: number;
-  endedAt?: number;
+export type OrchestratorPhase =
+  | "idle"
+  | "generating"
+  | "evaluating"
+  | "checkpoint"
+  | "terminated"
+  | "completed";
+
+export interface OrchestratorAgentEvent {
+  id: string;
+  label: string;
+  action: "spawned" | "stopped";
+  role?: string;
+  slot?: string;
 }
 
 export interface AgentStats {
@@ -66,6 +72,16 @@ export interface AgentStats {
   tokens_in: number;
   tokens_out: number;
   contextPct: number;
+}
+
+export interface RunnerAgentStats {
+  agentId: string;
+  label: string;
+  role: string;
+  phase: string;
+  turns: number;
+  tokensIn: number;
+  tokensOut: number;
 }
 
 export interface DisplaySlotEvent {
@@ -97,8 +113,13 @@ export type BridgeEvent =
   | { type: "plan"; plan: PlanDocument | null }
   | { type: "tasks"; tasks: TaskItem[] }
   | { type: "inbox"; items: InboxEntry[] }
-  | { type: "fleet"; job: FleetJobEvent }
+  | { type: "orchestrator_phase"; loopId: string; phase: OrchestratorPhase }
+  | { type: "orchestrator_verdict"; loopId: string; checkpoint: string; action: string; detail?: string }
+  | { type: "orchestrator_agent"; agent: OrchestratorAgentEvent }
+  | { type: "orchestrator_plan"; action: "created" | "accepted"; path: string; title?: string }
+  | { type: "orchestrator_slot"; promoted: string; demoted: string }
   | { type: "stats"; stats: AgentStats }
+  | { type: "runner_agent_stats"; agent: RunnerAgentStats }
   | { type: "compaction"; phase: "start" | "end" }
   | { type: "subagent"; name: string; phase: "start" | "end"; status?: "success" | "error"; message?: string }
   | { type: "transmission"; payload: string; severity: "low" | "medium" | "high" }

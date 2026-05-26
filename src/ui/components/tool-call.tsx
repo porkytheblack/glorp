@@ -84,6 +84,8 @@ function summarise(tool: ToolEvent): string {
       return `@${input.name} ${truncate(input.prompt as string, 60)}`;
     case "glove_invoke_skill":
       return `/${input.name as string}${input.args ? ` ${truncate(String(input.args), 50)}` : ""}`;
+    case "spawn_agent":
+      return `spawn ${input.role ?? "agent"} · ${truncate((input.label ?? input.task) as string, 55)}`;
     default:
       return `${tool.name} ${truncate(safeStringify(input), 70)}`;
   }

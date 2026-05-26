@@ -33,9 +33,9 @@ export function canonicalPermissionKey(toolName: string, input: unknown): string
       const paths = typeof patch === "string" ? [...new Set(extractPatchPaths(patch))].sort() : [];
       return `apply_patch:${paths.length ? paths.join("|") : "*"}`;
     }
-    case "dispatch_fleet": {
-      const kind = (input as { kind?: unknown } | undefined)?.kind;
-      return `dispatch_fleet:${typeof kind === "string" ? kind : "*"}`;
+    case "spawn_agent": {
+      const role = (input as { role?: unknown } | undefined)?.role;
+      return `spawn_agent:${typeof role === "string" ? role : "*"}`;
     }
     default:
       return defaultPermissionKey(toolName, input);

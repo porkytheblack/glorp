@@ -2,6 +2,7 @@ import type { Glove } from "glove-core/glove";
 
 export const HOOK_DESCRIPTIONS: Record<string, string> = {
   plan: "switch to plan-first mode for this turn",
+  build: "orchestrate a multi-agent plan-and-build flow",
   diff: "list files changed since last user message",
   compact: "force a context compaction now",
   clear: "clear and reset the working slate",
@@ -36,6 +37,14 @@ export function registerHooks(builder: Glove): void {
       },
     };
   });
+
+  // Registered for catalogue visibility only — /build is intercepted in
+  // glorp.send() before processRequest, so this hook never actually fires.
+  builder.defineHook("build", async () => ({
+    shortCircuit: {
+      message: { sender: "agent", text: "Starting orchestrated build…" },
+    },
+  }));
 
   builder.defineHook("transmissions", async () => ({
     shortCircuit: {

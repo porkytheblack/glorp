@@ -108,6 +108,7 @@ function messageTurn(message: Message, index: number, createdAt: number): ChatTu
     id: message.id ?? `m_hydrated_${index}`,
     kind: message.sender === "user" ? "user" : "agent",
     text: message.text,
+    reasoning: (message as { reasoning_content?: string }).reasoning_content || undefined,
     createdAt,
   };
 }

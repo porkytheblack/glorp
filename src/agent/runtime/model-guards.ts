@@ -1,10 +1,11 @@
 import type { Message, ModelAdapter, ModelPromptResult, SubscriberAdapter } from "glove-core/core";
+import { isAgentSender, isIntentOnlyText } from "./intent-detect.ts";
 
 const TASK_UPDATE_TOOL_NAME = "glove_update_tasks";
 const EMPTY_RESPONSE_RETRY_PROMPT =
   "[internal retry] Your previous completion produced no visible answer or tool call. Produce visible text or a tool call now.";
 const INTENT_ONLY_CONTINUATION_PROMPT =
-  "[internal continuation] Your previous completion only stated an intention to continue. Continue now with the concrete next tool call. If a blocking inbox item is obsolete, first call glove_update_inbox.";
+  "[internal continuation] You produced only narration (\"Let me…\", \"I'll…\") without calling a tool. Call the tool now — do not describe the action, perform it. If a blocking inbox item is obsolete, first call glove_update_inbox.";
 const TASK_UPDATE_CONTINUATION_PROMPT =
   "[internal continuation] You just updated the task list and at least one task is still pending or in_progress. Continue now with the next concrete tool call or, if blocked, state the blocker.";
 const TRAILING_TOOL_RESULT_PROMPT =
@@ -28,7 +29,7 @@ export function isVisibleTranscriptMessage(message: Message): boolean {
 export function modelResultHasVisibleAgentOutput(result: ModelPromptResult | Message): boolean {
   const messages = "messages" in result ? result.messages : [result];
   return messages.some((message) => {
-    if (message.sender !== "agent") return false;
+    if (!isAgentSender(message.sender)) return false;
     if ((message.tool_calls?.length ?? 0) > 0) return true;
     return visibleMessageText(message).trim().length > 0;
   });
@@ -43,7 +44,7 @@ export function modelResultIsIntentOnly(result: ModelPromptResult | Message): bo
   if (modelResultHasToolCall(result)) return false;
   const messages = "messages" in result ? result.messages : [result];
   const texts = messages
-    .filter((message) => message.sender === "agent")
+    .filter((message) => isAgentSender(message.sender))
     .map((message) => visibleMessageText(message).trim())
     .filter(Boolean);
   return texts.length > 0 && texts.every(isIntentOnlyText);
@@ -123,11 +124,11 @@ function latestMessageHasToolResults(messages: Message[]): boolean {
 }
 
 function modelResponseHasVisibleText(result: ModelPromptResult): boolean {
-  return result.messages.some((m) => m.sender === "agent" && visibleMessageText(m).trim().length > 0);
+  return result.messages.some((m) => isAgentSender(m.sender) && visibleMessageText(m).trim().length > 0);
 }
 
 function modelResponseIsToolOnly(result: ModelPromptResult): boolean {
-  const agent = result.messages.filter((m) => m.sender === "agent");
+  const agent = result.messages.filter((m) => isAgentSender(m.sender));
   if (agent.length === 0) return false;
   return agent.every(
     (m) => (m.tool_calls?.length ?? 0) > 0 && visibleMessageText(m).trim().length === 0,
@@ -135,17 +136,24 @@ function modelResponseIsToolOnly(result: ModelPromptResult): boolean {
 }
 
 export function withIntentOnlyContinuation(model: ModelAdapter): ModelAdapter {
+  const MAX_RETRIES = 2;
   return wrap(model, async (request, notify, signal) => {
-    const events: Array<{ eventType: string; data: unknown }> = [];
-    const buffered: SubscriberAdapter["record"] = async (eventType, data) => {
-      events.push({ eventType: eventType as string, data });
-    };
-    const first = await model.prompt(request, buffered, signal);
-    if (signal?.aborted || !modelResultIsIntentOnly(first)) {
-      await replay(notify, events);
-      return first;
+    let msgs = request.messages;
+    for (let i = 0; i < MAX_RETRIES; i++) {
+      const events: Array<{ eventType: string; data: unknown }> = [];
+      const buffered: SubscriberAdapter["record"] = async (eventType, data) => {
+        events.push({ eventType: eventType as string, data });
+      };
+      const result = await model.prompt({ ...request, messages: msgs }, buffered, signal);
+      if (signal?.aborted || !modelResultIsIntentOnly(result)) {
+        await replay(notify, events);
+        return result;
+      }
+      // Include the model's narration in context so the retry sees what it said
+      msgs = [...msgs, ...result.messages, internalUser(INTENT_ONLY_CONTINUATION_PROMPT)];
     }
-    return model.prompt({ ...request, messages: [...request.messages, internalUser(INTENT_ONLY_CONTINUATION_PROMPT)] }, notify, signal);
+    // All buffered retries exhausted; final attempt goes unbuffered
+    return model.prompt({ ...request, messages: msgs }, notify, signal);
   });
 }
 
@@ -189,20 +197,4 @@ async function replay(notify: SubscriberAdapter["record"], events: Array<{ event
   for (const event of events) await notify(event.eventType as any, event.data as any);
 }
 
-function isIntentOnlyText(text: string): boolean {
-  const normalized = text.replace(/[’‘]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
-  if (!normalized) return false;
-  const verbs = "(?:start|begin|check|inspect|look|read|open|review|edit|update|patch|fix|run|test|verify|investigate|continue|proceed|work|implement|make|add|wire|trace|debug|rewrite|write|create|generate|build|validate|resolve)";
-  const gerunds = "(?:checking|inspecting|reading|opening|reviewing|editing|updating|patching|fixing|running|testing|verifying|investigating|continuing|proceeding|implementing|adding|wiring|tracing|debugging|rewriting|writing|creating|generating|building|validating|resolving)";
-  return [
-    new RegExp(`\\bi'll\\s+${verbs}\\b`),
-    new RegExp(`\\bi will\\s+${verbs}\\b`),
-    new RegExp(`\\bi'm going to\\s+${verbs}\\b`),
-    new RegExp(`\\bi can\\s+${verbs}\\b`),
-    new RegExp(`\\blet me\\s+${verbs}\\b`),
-    new RegExp(`\\bnext,?\\s+i(?:'ll| will)\\s+${verbs}\\b`),
-    new RegExp(`\\bnow\\s+i(?:'ll| will)\\s+${verbs}\\b`),
-    new RegExp(`^${gerunds}\\b`),
-    new RegExp(`\\b${gerunds}\\s+(?:now|next|the|this|with|using)\\b`),
-  ].some((pattern) => pattern.test(normalized));
-}
+export { isIntentOnlyText } from "./intent-detect.ts";

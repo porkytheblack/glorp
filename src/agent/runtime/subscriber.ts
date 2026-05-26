@@ -66,7 +66,7 @@ export function createGlorpSubscriber(
           break;
         }
         case "model_response_complete": {
-          const d = data as { text: string };
+          const d = data as { text: string; reasoning_content?: string };
           if (streamingTextBuffer || d.text) {
             const finalText = d.text || streamingTextBuffer;
             bridge.emit({ type: "text_clear" });
@@ -77,6 +77,7 @@ export function createGlorpSubscriber(
                 id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
                 kind: "agent",
                 text: finalText,
+                reasoning: d.reasoning_content || undefined,
                 createdAt: Date.now(),
               },
             });
@@ -85,7 +86,7 @@ export function createGlorpSubscriber(
           break;
         }
         case "model_response": {
-          const d = data as { text: string };
+          const d = data as { text: string; reasoning_content?: string };
           if (!streamingTextBuffer && d.text) {
             bridge.emit({
               type: "turn",
@@ -93,6 +94,7 @@ export function createGlorpSubscriber(
                 id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
                 kind: "agent",
                 text: d.text,
+                reasoning: d.reasoning_content || undefined,
                 createdAt: Date.now(),
               },
             });

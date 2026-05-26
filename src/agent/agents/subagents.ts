@@ -1,8 +1,13 @@
+/**
+ * Built-in subagent factories for planner, researcher, and reviewer.
+ * Role configuration (prompt, tools, compaction) comes from the registry.
+ */
+
 import { Glove } from "glove-core/glove";
 import type { DefineSubAgentArgs } from "glove-core/extensions";
 import { GlorpStore } from "../store.ts";
-import { builtInAgentPrompt } from "../persona.ts";
 import { createToolRegistry, registerTools } from "../tools/registry.ts";
+import { roleDef, rolePrompt } from "../../orchestrator/role-registry.ts";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -11,65 +16,32 @@ interface SubAgentDeps {
   dataDir?: string;
 }
 
-interface BuiltInSubAgent {
-  name: "planner" | "researcher" | "reviewer";
-  description: string;
-  tools: readonly string[];
-  maxTurns: number;
-  compaction: string;
-}
-
-const BUILT_INS: Record<BuiltInSubAgent["name"], BuiltInSubAgent> = {
-  planner: {
-    name: "planner",
-    description:
-      "Designs an approach without writing code. Use for planning requests and architecture tradeoffs.",
-    tools: ["read", "grep", "glob", "ls"],
-    maxTurns: 6,
-    compaction: "Preserve the plan and open questions.",
-  },
-  researcher: {
-    name: "researcher",
-    description:
-      "Investigates code or docs and returns a tight answer with file:line citations.",
-    tools: ["read", "grep", "glob", "ls", "web_fetch"],
-    maxTurns: 12,
-    compaction: "Preserve findings and citations; drop search-step chatter.",
-  },
-  reviewer: {
-    name: "reviewer",
-    description:
-      "Second opinion reviewer that returns a punch-list for substantial code changes.",
-    tools: ["read", "grep", "glob"],
-    maxTurns: 8,
-    compaction: "Preserve findings; drop file-reading narration.",
-  },
-};
+/** Subagent roles available to the main agent via glove_invoke_subagent. */
+const SUBAGENT_ROLES = ["planner", "researcher", "reviewer"] as const;
+type SubAgentRole = (typeof SUBAGENT_ROLES)[number];
 
 export function plannerSubAgent(deps: SubAgentDeps): DefineSubAgentArgs {
-  return makeBuiltInSubAgent(BUILT_INS.planner, deps);
+  return buildSubAgent("planner", deps);
 }
 
 export function researcherSubAgent(deps: SubAgentDeps): DefineSubAgentArgs {
-  return makeBuiltInSubAgent(BUILT_INS.researcher, deps);
+  return buildSubAgent("researcher", deps);
 }
 
 export function reviewerSubAgent(deps: SubAgentDeps): DefineSubAgentArgs {
-  return makeBuiltInSubAgent(BUILT_INS.reviewer, deps);
+  return buildSubAgent("reviewer", deps);
 }
 
-function makeBuiltInSubAgent(
-  config: BuiltInSubAgent,
-  deps: SubAgentDeps,
-): DefineSubAgentArgs {
+function buildSubAgent(role: SubAgentRole, deps: SubAgentDeps): DefineSubAgentArgs {
+  const def = roleDef(role);
   return {
-    name: config.name,
-    description: config.description,
+    name: role,
+    description: def.description,
     factory: async ({ parentStore, parentControls }) => {
       const subStore =
-        (await parentStore.createSubAgentStore?.(config.name, false)) ??
+        (await parentStore.createSubAgentStore?.(role, false)) ??
         new GlorpStore(
-          `${config.name}_${Date.now()}`,
+          `${role}_${Date.now()}`,
           deps.dataDir ?? path.join(os.tmpdir(), "glorp-subagents"),
         );
       const child = new Glove({
@@ -77,13 +49,13 @@ function makeBuiltInSubAgent(
         model: parentControls.glove.model,
         displayManager: parentControls.displayManager,
         serverMode: true,
-        systemPrompt: builtInAgentPrompt(config.name),
+        systemPrompt: rolePrompt(role),
         compaction_config: {
-          compaction_instructions: config.compaction,
-          max_turns: config.maxTurns,
+          compaction_instructions: def.compaction,
+          max_turns: def.maxTurns,
         },
       });
-      registerTools(child, createToolRegistry(deps), config.tools);
+      registerTools(child, createToolRegistry(deps), def.tools);
       return child.build();
     },
   };

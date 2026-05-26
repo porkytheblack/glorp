@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { theme, BANNER } from "../theme.ts";
 import { GLORP_VERSION, GLORP_CODENAME } from "../../shared/version.ts";
-import type { ChatTurn } from "../../shared/events.ts";
+import type { ChatTurn, OrchestratorPhase } from "../../shared/events.ts";
 import { MessageRow, StreamingRow } from "./message.tsx";
 
 interface Props {
@@ -13,6 +13,9 @@ interface Props {
   busy: boolean;
   activeSubagents: string[];
   compacting: boolean;
+  loopPhase: OrchestratorPhase | null;
+  foregroundAgent: string | null;
+  showReasoning?: boolean;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -25,6 +28,9 @@ export function Transcript({
   workspace,
   busy,
   activeSubagents,
+  loopPhase,
+  foregroundAgent,
+  showReasoning,
 }: Props) {
   // Cast loosely because the OpenTUI scrollbox ref shape is renderable-
   // specific and we only touch `scrollTo` / `scrollHeight`.
@@ -106,13 +112,15 @@ export function Transcript({
           </box>
         )}
         {turns.map((t) => (
-          <MessageRow key={t.id} turn={t} />
+          <MessageRow key={t.id} turn={t} showReasoning={showReasoning} />
         ))}
         {streamingText && <StreamingRow text={streamingText} />}
         {showThinking && (
           <ThinkingRow
             frame={SPINNER_FRAMES[spinnerFrame]!}
             activeSubagents={activeSubagents}
+            loopPhase={loopPhase}
+            foregroundAgent={foregroundAgent}
           />
         )}
       </box>
@@ -120,25 +128,43 @@ export function Transcript({
   );
 }
 
+const PHASE_LABEL: Partial<Record<OrchestratorPhase, string>> = {
+  generating: "generating",
+  evaluating: "evaluating",
+  checkpoint: "at checkpoint",
+};
+
 function ThinkingRow({
   frame,
   activeSubagents,
+  loopPhase,
+  foregroundAgent,
 }: {
   frame: string;
   activeSubagents: string[];
+  loopPhase: OrchestratorPhase | null;
+  foregroundAgent: string | null;
 }) {
-  const label = activeSubagents.length > 0
-    ? `${activeSubagents.map((n) => `@${n}`).join(", ")} working…`
-    : "glorp is thinking…";
+  const phaseText = loopPhase ? PHASE_LABEL[loopPhase] : null;
+  let label: string;
+  if (phaseText && foregroundAgent) {
+    label = `${foregroundAgent} ${phaseText}…`;
+  } else if (phaseText) {
+    label = `orchestrator ${phaseText}…`;
+  } else if (activeSubagents.length > 0) {
+    label = `${activeSubagents.map((n) => `@${n}`).join(", ")} working…`;
+  } else {
+    label = "glorp is thinking…";
+  }
   return (
     <box flexDirection="row" marginBottom={1}>
       <box width={6} marginRight={1}>
-        <text fg={theme.warning}>
+        <text fg={phaseText ? theme.loopActive : theme.warning}>
           <strong>{frame}</strong>
         </text>
       </box>
       <box flexDirection="column" flexGrow={1}>
-        <text fg={theme.warning}>{label}</text>
+        <text fg={phaseText ? theme.loopActive : theme.warning}>{label}</text>
         <text fg={theme.textDim}>press ctrl-c to interrupt · esc also aborts</text>
       </box>
     </box>
