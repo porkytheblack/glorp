@@ -24,6 +24,9 @@ export {
   evaluatorBlueprint,
   researchBlueprint,
   builderBlueprint,
+  plannerBlueprint,
+  reviewerBlueprint,
+  blueprintForSpawn,
 } from "./blueprints.ts";
 export {
   ROLE_DEFS,

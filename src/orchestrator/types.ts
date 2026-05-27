@@ -52,6 +52,8 @@ export interface AgentBlueprint {
   id: AgentId;
   label: string;
   role: LoopRole | "autonomous";
+  /** Role registry key (e.g. "researcher", "builder"). Drives subprocess agent selection. */
+  registryRole?: string;
   systemPrompt: string;
   tools: string[];
   /** Capabilities advertised on the mesh network. */
@@ -61,7 +63,7 @@ export interface AgentBlueprint {
 /** Emitted to consumers whenever orchestrator state changes. */
 export type OrchestratorEvent =
   | { type: "agent_spawned"; agent: AgentSlot }
-  | { type: "agent_stopped"; id: AgentId; reason: string }
+  | { type: "agent_stopped"; id: AgentId; reason: string; runId?: string }
   | { type: "slot_switched"; promoted: AgentId; demoted: AgentId }
   | { type: "slot_forwarded"; slotId: string; renderer: string; input: unknown; agentId: string }
   | { type: "loop_phase"; loopId: string; phase: LoopPhase }
@@ -103,11 +105,20 @@ export interface OrchestratorConfig {
   /** Session-scoped mesh directory for inter-agent communication. */
   meshDir: string;
   model: ModelAdapter;
+  /** Resolved model config for subprocess agents — see runner.ts env propagation. */
+  subprocessModel?: {
+    providerId: string;
+    model: string;
+    baseURL?: string;
+    apiKey?: string;
+  };
   /** Context window size (tokens) inherited by loop agents for compaction. */
   contextLimit: number;
   resources: ResourceFsAdapter;
   /** Maximum concurrent agents (default 8). */
   maxAgents?: number;
+  /** Per-agent timeout in milliseconds (default 600_000 = 10 minutes). */
+  agentTimeoutMs?: number;
   /** Factory for subscribers attached to loop agents for UI observability. */
   loopSubscriberFactory?: () => SubscriberAdapter;
 }

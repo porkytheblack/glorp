@@ -69,39 +69,20 @@ export function withEmptyResponseRetry(model: ModelAdapter): ModelAdapter {
   });
 }
 
-/**
- * Block the "agent ends on a tool result" anti-pattern. When the most
- * recent message in the prompt is a tool result (the loop just executed
- * tools), the model MUST emit at least one user-visible text run — either
- * a summary of what the tool said or a clear handoff to the next step.
- *
- * Without this, the UI sees the tool result land and the agent go silent
- * — looks like a freeze, and reading the transcript later there's no
- * narrative tying the tool outputs to a decision. We buffer the first
- * attempt's events; if the model produced ONLY tool calls (no text) AND
- * there is no further tool work pending, ask for the text wrap-up and
- * use whatever the model returns on the retry.
- */
+/** If the model ends on a tool result with no follow-up text, retry once asking for a wrap-up. */
 export function withTrailingToolResultGuard(model: ModelAdapter): ModelAdapter {
   return wrap(model, async (request, notify, signal) => {
     if (!latestMessageHasToolResults(request.messages)) {
       return model.prompt(request, notify, signal);
     }
-    const events: Array<{ eventType: string; data: unknown }> = [];
-    const buffered: SubscriberAdapter["record"] = async (eventType, data) => {
-      events.push({ eventType: eventType as string, data });
-    };
+    const { buffered, replayStructural } = streamingBuffer(notify);
     const first = await model.prompt(request, buffered, signal);
     if (signal?.aborted) {
-      await replay(notify, events);
+      await replayStructural();
       return first;
     }
-    // If the first response includes ANY visible text, we're good — replay
-    // the buffered events and return. If it only contains tool calls, that
-    // is fine too: the loop will execute those and we'll get a chance to
-    // wrap up later on the resulting prompt.
     if (modelResponseHasVisibleText(first) || modelResponseIsToolOnly(first)) {
-      await replay(notify, events);
+      await replayStructural();
       return first;
     }
     // Empty response after a tool result — actively ask for a wrap-up.
@@ -140,13 +121,10 @@ export function withIntentOnlyContinuation(model: ModelAdapter): ModelAdapter {
   return wrap(model, async (request, notify, signal) => {
     let msgs = request.messages;
     for (let i = 0; i < MAX_RETRIES; i++) {
-      const events: Array<{ eventType: string; data: unknown }> = [];
-      const buffered: SubscriberAdapter["record"] = async (eventType, data) => {
-        events.push({ eventType: eventType as string, data });
-      };
+      const { buffered, replayStructural } = streamingBuffer(notify);
       const result = await model.prompt({ ...request, messages: msgs }, buffered, signal);
       if (signal?.aborted || !modelResultIsIntentOnly(result)) {
-        await replay(notify, events);
+        await replayStructural();
         return result;
       }
       // Include the model's narration in context so the retry sees what it said
@@ -160,13 +138,10 @@ export function withIntentOnlyContinuation(model: ModelAdapter): ModelAdapter {
 export function withTaskUpdateContinuation(model: ModelAdapter): ModelAdapter {
   return wrap(model, async (request, notify, signal) => {
     if (!messageHasOpenTaskUpdate(request.messages.at(-1))) return model.prompt(request, notify, signal);
-    const events: Array<{ eventType: string; data: unknown }> = [];
-    const buffered: SubscriberAdapter["record"] = async (eventType, data) => {
-      events.push({ eventType: eventType as string, data });
-    };
+    const { buffered, replayStructural } = streamingBuffer(notify);
     const first = await model.prompt(request, buffered, signal);
     if (signal?.aborted || modelResultHasToolCall(first)) {
-      await replay(notify, events);
+      await replayStructural();
       return first;
     }
     return model.prompt({ ...request, messages: [...request.messages, internalUser(TASK_UPDATE_CONTINUATION_PROMPT)] }, notify, signal);
@@ -193,8 +168,24 @@ function internalUser(text: string): Message {
   return { sender: "user", text, is_skill_injection: true };
 }
 
-async function replay(notify: SubscriberAdapter["record"], events: Array<{ eventType: string; data: unknown }>) {
-  for (const event of events) await notify(event.eventType as any, event.data as any);
+/** Forward text_delta immediately for real-time streaming; buffer the rest. */
+function streamingBuffer(notify: SubscriberAdapter["record"]): {
+  buffered: SubscriberAdapter["record"];
+  replayStructural: () => Promise<void>;
+} {
+  const structural: Array<{ eventType: string; data: unknown }> = [];
+  return {
+    buffered: async (eventType, data) => {
+      if (eventType === "text_delta") {
+        await notify(eventType, data);
+      } else {
+        structural.push({ eventType: eventType as string, data });
+      }
+    },
+    async replayStructural() {
+      for (const e of structural) await notify(e.eventType as any, e.data as any);
+    },
+  };
 }
 
 export { isIntentOnlyText } from "./intent-detect.ts";

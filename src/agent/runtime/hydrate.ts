@@ -1,6 +1,7 @@
 import type { Message, ToolResultData } from "glove-core/core";
 import type { BridgeEvent, ChatTurn, ToolEvent } from "../../shared/events.ts";
 import type { GlorpStore } from "../store.ts";
+import type { AgentRecord } from "../../orchestrator/agent-state.ts";
 
 interface Bridge {
   emit(event: BridgeEvent): void;
@@ -117,6 +118,18 @@ function skipMessage(message: Message): boolean {
   if (message.is_compaction || message.is_compaction_request || message.is_skill_injection) return true;
   if (message.tool_results?.length) return true;
   return message.text.startsWith("[internal task continuation]") || message.text.startsWith("[Inbox:");
+}
+
+/** Emit orchestrator_agent events for agent records persisted on disk. */
+export function hydrateAgentRecords(records: AgentRecord[], bridge: Bridge): void {
+  for (const rec of records) {
+    if (rec.status === "completed" || rec.status === "stopped") continue;
+    const action = rec.status === "running" ? "interrupted" : rec.status;
+    bridge.emit({
+      type: "orchestrator_agent",
+      agent: { id: rec.id, label: rec.label, action, role: rec.role, slot: rec.slot },
+    });
+  }
 }
 
 function resultText(result: ToolResultData): string | undefined {

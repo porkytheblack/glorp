@@ -92,19 +92,26 @@ export async function buildAgentFromBlueprint(
  * The role registry determines the system prompt, tool set, and compaction config.
  * Used for subprocess-isolated background work.
  */
+const DEFAULT_AGENT_TIMEOUT_MS = 600_000;
+
 export function defineOrchestratorAgent(
   role: string,
-  config: { dataDir: string; workspace: string; meshDir: string },
+  config: { dataDir: string; workspace: string; meshDir: string; agentTimeoutMs?: number },
 ): TriggeredAgent<AgentInputType, void> {
   const def = roleDef(role);
+  const timeoutMs = config.agentTimeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
   return agent(role)
     .input(AgentInput)
     .triggered()
-    .timeout(300_000)
-    .retries(1)
-    .store((agentName: string) => new GlorpStore(agentName, config.dataDir))
+    .timeout(timeoutMs)
+    .retries(0)
+    .store((agentName: string) => {
+      const uid = `${agentName}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+      return new GlorpStore(uid, config.dataDir);
+    })
     .factory(async (ctx) => {
-      const store = ctx.store ?? new GlorpStore(ctx.name, config.dataDir);
+      const uid = `${ctx.name}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+      const store = ctx.store ?? new GlorpStore(uid, config.dataDir);
       const display = new NoopDisplayManager();
       const builder = new Glove({
         store,

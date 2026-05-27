@@ -4,7 +4,7 @@ import { GlorpStore } from "./store.ts";
 import { getBridge } from "../shared/bridge.ts";
 import { Orchestrator } from "../orchestrator/orchestrator.ts";
 import { parseBuildCommand, runOrchestratorBuild } from "./runtime/build-flow.ts";
-import { CredentialsStore } from "./credentials.ts";
+import { CredentialsStore, effectiveProviderId } from "./credentials.ts";
 import { ModelCatalog } from "./model-catalog.ts";
 import { loadProjectConfig } from "./project-config.ts";
 import { discoverExtensions } from "./extensions-loader.ts";
@@ -12,7 +12,7 @@ import { bridgeDisplaySlots } from "./runtime/display-bridge.ts";
 import { createRefreshers } from "./runtime/refresh.ts";
 import { continueOpenTasks, continueIfIntentOnly } from "./runtime/continuation.ts";
 import { makeInboxContext } from "./runtime/context.ts";
-import { hydrateUiSession } from "./runtime/hydrate.ts";
+import { hydrateUiSession, hydrateAgentRecords } from "./runtime/hydrate.ts";
 import { createGlorpSubscriber } from "./runtime/subscriber.ts";
 import { createSessionResources } from "./runtime/resources.ts";
 import { buildExtensionCatalogue } from "./runtime/catalogue.ts";
@@ -22,22 +22,17 @@ import { wrapGlorpModel } from "./runtime/model-guards.ts";
 import { VerificationTracker } from "./runtime/verification-tracker.ts";
 import { assembleAgent, wireOrchestratorToBridge } from "./runtime/assemble.ts";
 import { teardownAgentMesh } from "../orchestrator/mesh-setup.ts";
+import { agentId as toAgentId } from "../orchestrator/types.ts";
 import type { BuildGlorpOptions, GlorpHandle } from "./glorp-types.ts";
-import type { Context } from "glove-core/core";
-import * as path from "node:path";
-import * as os from "node:os";
+import type { ContentPart, Context } from "glove-core/core";
+import type { PickedModel } from "./model-picker.ts";
+import type { OrchestratorConfig } from "../orchestrator/types.ts";
+import * as path from "node:path"; import * as os from "node:os";
 
 export type { BuildGlorpOptions, ExtensionCatalogue, GlorpHandle } from "./glorp-types.ts";
 export { cleanSessionTitle, generateSessionTitle };
-export {
-  messageHasOpenTaskUpdate,
-  modelResultHasToolCall,
-  modelResultHasVisibleAgentOutput,
-  modelResultIsIntentOnly,
-  withEmptyResponseRetry,
-  withIntentOnlyContinuation,
-  withTaskUpdateContinuation,
-} from "./runtime/model-guards.ts";
+export { messageHasOpenTaskUpdate, modelResultHasToolCall, modelResultHasVisibleAgentOutput,
+  modelResultIsIntentOnly, withEmptyResponseRetry, withIntentOnlyContinuation, withTaskUpdateContinuation } from "./runtime/model-guards.ts";
 
 const TITLE_MODEL_TIMEOUT_MS = 15_000;
 
@@ -49,8 +44,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const catalog = new ModelCatalog(dataDir);
   const projectConfig = loadProjectConfig(opts.workspace);
   let picked = await pickModel({ provider: opts.provider, model: opts.model, credentials, catalog, projectConfig });
-  let contextLimit = picked.contextLimit;
-  let modelLabel = picked.label;
+  let contextLimit = picked.contextLimit; let modelLabel = picked.label;
   const bridge = getBridge();
   const titleScheduler = createTitleScheduler({ store, bridge, model: picked.titleAdapter, initialTitle: await store.getTitle(), timeoutMs: TITLE_MODEL_TIMEOUT_MS });
   const displayManager = new Displaymanager();
@@ -61,11 +55,12 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const verification = new VerificationTracker();
   store.setVerificationTracker(verification);
   const refresh = createRefreshers(store, bridge, () => contextLimit);
-
   const meshDir = path.join(dataDir, "mesh", opts.sessionId);
-  const loopRefresh = { stats: async () => {}, plan: async () => {}, tasks: async () => {}, inbox: async () => {} };
+  const noop = async () => {};
+  const loopRefresh = { stats: noop, plan: noop, tasks: noop, inbox: noop };
   const orchestrator = new Orchestrator(
     { workspace: opts.workspace, dataDir, meshDir, model: wrapGlorpModel(picked.adapter),
+      subprocessModel: buildSubprocessModelConfig(picked, credentials),
       contextLimit, resources, loopSubscriberFactory: () => createGlorpSubscriber(bridge, loopRefresh) },
     displayManager,
   );
@@ -84,8 +79,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   let assembled = await assembleAgent(assembleArgs());
   let agent = assembled.agent;
 
-  void refresh.all();
-  void catalog.refresh();
+  void refresh.all(); void catalog.refresh();
 
   return {
     get agent() { return agent; },
@@ -97,16 +91,13 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     onLabelChange(fn) { labelListeners.add(fn); return () => void labelListeners.delete(fn); },
     async hydrateUi() {
       await hydrateUiSession(store, bridge, contextLimit);
+      hydrateAgentRecords(await orchestrator.loadPersistedAgents(), bridge);
       await titleScheduler.refreshTitle();
       titleScheduler.schedule();
     },
     resolveSlot(slotId, value) {
-      if (orchestrator.hasForwardedSlot(slotId)) {
-        orchestrator.resolveForwardedSlot(slotId, value);
-        bridge.emit({ type: "display_slot_resolved", slotId });
-      } else {
-        resolveDisplaySlot(displayManager, bridge, slotId, value);
-      }
+      if (orchestrator.hasForwardedSlot(slotId)) { orchestrator.resolveForwardedSlot(slotId, value); bridge.emit({ type: "display_slot_resolved", slotId }); }
+      else resolveDisplaySlot(displayManager, bridge, slotId, value);
     },
     rejectSlot(slotId, reason) {
       if (orchestrator.hasForwardedSlot(slotId)) {
@@ -117,13 +108,11 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       bridge.emit({ type: "display_slot_resolved", slotId });
     },
     resolvePermission(slotId, allow) {
-      if (orchestrator.hasForwardedSlot(slotId)) {
-        orchestrator.resolveForwardedSlot(slotId, allow);
-        bridge.emit({ type: "display_slot_resolved", slotId });
-      } else {
-        resolveDisplaySlot(displayManager, bridge, slotId, allow);
-      }
+      if (orchestrator.hasForwardedSlot(slotId)) { orchestrator.resolveForwardedSlot(slotId, allow); bridge.emit({ type: "display_slot_resolved", slotId }); }
+      else resolveDisplaySlot(displayManager, bridge, slotId, allow);
     },
+    async stopAgent(id, reason) { await orchestrator.stopAgent(toAgentId(id), reason); },
+    promoteAgent(id) { return orchestrator.promoteAgent(toAgentId(id)); },
     clearPermission(toolName) { return store.clearAllPermissionsFor(toolName); },
     clearPermissionKey(key) { return store.clearPermissionKey(key); },
     listPermissions() { return store.listPermissions(); },
@@ -141,20 +130,21 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       credentials.setActive(profileId);
       for (const fn of labelListeners) fn(modelLabel);
     },
-    async send(text) {
+    async send(text, images) {
       abortController?.abort();
       await titleScheduler.cancel();
       verification.onUserTurn();
       abortController = new AbortController();
       titleScheduler.setRequestInFlight(true);
       bridge.emit({ type: "busy", busy: true });
-      bridge.emit({ type: "turn", turn: userTurn(text) });
+      bridge.emit({ type: "turn", turn: userTurn(text, images?.length) });
       try {
         const buildPrompt = parseBuildCommand(text);
         if (buildPrompt) {
           await runOrchestratorBuild(orchestrator, bridge, opts.workspace, buildPrompt, abortController.signal);
         } else {
-          await agent.processRequest(text, abortController.signal);
+          const request = buildRequest(text, images);
+          await agent.processRequest(request, abortController.signal);
           await continueIfIntentOnly({ agent, store, signal: abortController.signal });
           await continueOpenTasks({ agent, store, signal: abortController.signal });
         }
@@ -183,14 +173,28 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   };
 }
 
-function userTurn(text: string) {
-  return { id: `u_${Date.now().toString(36)}`, kind: "user" as const, text, createdAt: Date.now() };
+function userTurn(text: string, imageCount?: number) {
+  return { id: `u_${Date.now().toString(36)}`, kind: "user" as const, text, createdAt: Date.now(),
+    ...(imageCount ? { meta: { imageCount } } : {}) };
 }
 function systemTurn(text: string) {
   return { id: `s_${Date.now().toString(36)}`, kind: "system" as const, text, createdAt: Date.now() };
 }
 
+function buildRequest(text: string, images?: Array<{ data: string; media_type: string }>): string | ContentPart[] {
+  if (!images?.length) return text;
+  const label = images.length === 1 ? "1 image attached" : `${images.length} images attached`;
+  const parts: ContentPart[] = [{ type: "text", text: `[${label} — examine before responding]\n\n${text}` }];
+  for (const img of images) parts.push({ type: "image", source: { type: "base64", media_type: img.media_type, data: img.data } });
+  return parts;
+}
+
 function resolveDisplaySlot(dm: Displaymanager, bridge: ReturnType<typeof getBridge>, slotId: string, value: unknown): void {
   try { dm.resolve(slotId, value); } catch {}
   bridge.emit({ type: "display_slot_resolved", slotId });
+}
+
+function buildSubprocessModelConfig(picked: PickedModel, creds: CredentialsStore): OrchestratorConfig["subprocessModel"] {
+  const p = creds.getProvider(picked.providerId);
+  return { providerId: effectiveProviderId(picked.providerId, p), model: picked.model, baseURL: p?.baseURL, apiKey: p?.apiKey };
 }

@@ -62,7 +62,7 @@ export type OrchestratorPhase =
 export interface OrchestratorAgentEvent {
   id: string;
   label: string;
-  action: "spawned" | "stopped";
+  action: "spawned" | "stopped" | "interrupted";
   role?: string;
   slot?: string;
 }
