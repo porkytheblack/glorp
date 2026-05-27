@@ -28,12 +28,12 @@ describe("ROLE_DEFS", () => {
     expect(tools).toContain("bash");
   });
 
-  test("evaluator is read-only", () => {
+  test("evaluator has read + bash for verification", () => {
     const tools = ROLE_DEFS.evaluator.tools;
     expect(tools).toContain("read");
+    expect(tools).toContain("bash");
     expect(tools).not.toContain("write");
     expect(tools).not.toContain("edit");
-    expect(tools).not.toContain("bash");
   });
 
   test("researcher has web_fetch", () => {

@@ -50,6 +50,7 @@ export function createOrchestratorRunner(
     providerId?: string; modelName?: string;
     baseURL?: string; apiKey?: string;
     agentTimeoutMs?: number;
+    workspaceContext?: string;
   },
   emit: (event: OrchestratorEvent) => void,
 ): RunnerHandle {
@@ -82,6 +83,7 @@ export function createOrchestratorRunner(
   if (config.baseURL) process.env.GLORP_MODEL_BASE_URL = config.baseURL;
   if (config.apiKey) process.env.GLORP_MODEL_API_KEY = config.apiKey;
   process.env.GLORP_AGENT_TIMEOUT = String(timeoutMs);
+  if (config.workspaceContext) process.env.GLORP_WORKSPACE_CONTEXT = config.workspaceContext;
 
   return {
     async trigger(agentName, input) {
@@ -110,18 +112,8 @@ export function createOrchestratorRunner(
 
 function buildSubscriber(emit: (event: OrchestratorEvent) => void): ContinuumSubscriber {
   return {
-    onRunStarted({ run }) {
-      emit({
-        type: "agent_spawned",
-        agent: {
-          id: agentId(run.agentName),
-          role: "autonomous",
-          slot: "background",
-          phase: "generating",
-          label: run.agentName,
-        },
-      });
-    },
+    // onRunStarted intentionally omitted — the orchestrator emits agent_spawned
+    // with correct role/slot from spawnAgent(). The runner only tracks completion.
     onRunCompleted({ run }) {
       emit({
         type: "agent_stopped",

@@ -15,7 +15,7 @@ const POLL_MS = 100;
 
 export class FileMeshAdapter implements MeshAdapter {
   readonly identifier: string;
-  private baseDir: string;
+  readonly baseDir: string;
   private identity: AgentIdentity | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private handler: ((msg: IncomingMeshMessage) => Promise<void>) | null = null;
@@ -136,9 +136,14 @@ export class FileMeshAdapter implements MeshAdapter {
         const incoming: IncomingMeshMessage = { ...msg, kind };
         await this.handler(incoming);
         await fs.rm(path.join(dir, f), { force: true });
+        // Clean up sender record after successful delivery
+        await fs.rm(path.join(this.baseDir, "senders", `${msg.id}.txt`), { force: true }).catch(() => {});
         this.seen.delete(f);
       } catch (err) {
         console.error(`[mesh] failed to process ${f}:`, err);
+        // Remove corrupted/unparseable messages to prevent infinite retry
+        await fs.rm(path.join(dir, f), { force: true }).catch(() => {});
+        this.seen.delete(f);
       }
     }
   }
@@ -175,4 +180,16 @@ export async function mountAgentMesh(
 
 export async function teardownAgentMesh(adapter: FileMeshAdapter): Promise<void> {
   await adapter.unregister();
+  // Best-effort cleanup of any sender records this agent created
+  await pruneSenders(adapter.baseDir).catch(() => {});
+}
+
+/** Remove sender records whose corresponding inbox message no longer exists. */
+async function pruneSenders(baseDir: string): Promise<void> {
+  const dir = path.join(baseDir, "senders");
+  let files: string[];
+  try { files = await fs.readdir(dir); } catch { return; }
+  for (const f of files) {
+    await fs.rm(path.join(dir, f), { force: true }).catch(() => {});
+  }
 }

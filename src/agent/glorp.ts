@@ -23,6 +23,7 @@ import { VerificationTracker } from "./runtime/verification-tracker.ts";
 import { assembleAgent, wireOrchestratorToBridge } from "./runtime/assemble.ts";
 import { teardownAgentMesh } from "../orchestrator/mesh-setup.ts";
 import { agentId as toAgentId } from "../orchestrator/types.ts";
+import { discoverWorkspaceContext } from "../orchestrator/workspace-context.ts";
 import type { BuildGlorpOptions, GlorpHandle } from "./glorp-types.ts";
 import type { ContentPart, Context } from "glove-core/core";
 import type { PickedModel } from "./model-picker.ts";
@@ -56,16 +57,15 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   store.setVerificationTracker(verification);
   const refresh = createRefreshers(store, bridge, () => contextLimit);
   const meshDir = path.join(dataDir, "mesh", opts.sessionId);
-  const noop = async () => {};
-  const loopRefresh = { stats: noop, plan: noop, tasks: noop, inbox: noop };
+  const loopRefresh = { stats: async () => {}, plan: async () => {}, tasks: async () => {}, inbox: async () => {} };
+  const wsPrompt = (await discoverWorkspaceContext(opts.workspace)).promptBlock;
   const orchestrator = new Orchestrator(
     { workspace: opts.workspace, dataDir, meshDir, model: wrapGlorpModel(picked.adapter),
       subprocessModel: buildSubprocessModelConfig(picked, credentials),
-      contextLimit, resources, loopSubscriberFactory: () => createGlorpSubscriber(bridge, loopRefresh) },
+      contextLimit, resources, loopSubscriberFactory: () => createGlorpSubscriber(bridge, loopRefresh), workspaceContext: wsPrompt },
     displayManager,
   );
-  await orchestrator.start();
-  wireOrchestratorToBridge(orchestrator, bridge);
+  await orchestrator.start(); wireOrchestratorToBridge(orchestrator, bridge);
 
   const ctxRef = { current: null as Context | null };
   const inboxContext = makeInboxContext(store);

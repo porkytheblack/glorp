@@ -9,11 +9,12 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentId, Slot } from "./types.ts";
 
-/** Serializes all mutations so concurrent upsert/stop calls don't race. */
-let writeQueue: Promise<void> = Promise.resolve();
-function serialized<T>(fn: () => Promise<T>): Promise<T> {
-  const next = writeQueue.then(fn, fn);
-  writeQueue = next.then(() => {}, () => {});
+/** Per-meshDir write queues so concurrent upsert/stop calls don't race. */
+const writeQueues = new Map<string, Promise<void>>();
+function serialized<T>(meshDir: string, fn: () => Promise<T>): Promise<T> {
+  const prev = writeQueues.get(meshDir) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  writeQueues.set(meshDir, next.then(() => {}, () => {}));
   return next;
 }
 
@@ -57,7 +58,7 @@ export function upsertAgentRecord(
   meshDir: string,
   record: AgentRecord,
 ): Promise<void> {
-  return serialized(async () => {
+  return serialized(meshDir, async () => {
     const records = await loadAgentRecords(meshDir);
     const idx = records.findIndex((r) => r.id === record.id);
     if (idx >= 0) records[idx] = record;
@@ -71,7 +72,7 @@ export function markAgentStopped(
   id: AgentId,
   reason: string,
 ): Promise<void> {
-  return serialized(async () => {
+  return serialized(meshDir, async () => {
     const records = await loadAgentRecords(meshDir);
     const rec = records.find((r) => r.id === id);
     if (rec) {
@@ -85,7 +86,7 @@ export function markAgentStopped(
 
 /** Mark all running agents as interrupted (called during shutdown). */
 export function markAllInterrupted(meshDir: string): Promise<void> {
-  return serialized(async () => {
+  return serialized(meshDir, async () => {
     const records = await loadAgentRecords(meshDir);
     let changed = false;
     const now = Date.now();
@@ -106,7 +107,7 @@ export function pruneStaleRecords(
   meshDir: string,
   maxAge = 86_400_000,
 ): Promise<void> {
-  return serialized(async () => {
+  return serialized(meshDir, async () => {
     const records = await loadAgentRecords(meshDir);
     const cutoff = Date.now() - maxAge;
     const kept = records.filter((r) =>
