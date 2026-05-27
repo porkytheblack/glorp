@@ -54,6 +54,11 @@ export {
   type VerificationResult,
 } from "./verification.ts";
 export {
+  parseFailures,
+  formatFailureSummary,
+  type ParsedFailure,
+} from "./failure-parser.ts";
+export {
   type AgentId,
   type AgentBlueprint,
   type AgentSlot,

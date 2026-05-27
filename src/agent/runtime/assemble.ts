@@ -22,6 +22,7 @@ import { registerHooks } from "./hooks.ts";
 import { registerBuiltInSkills, registerDiskSkills } from "./skills.ts";
 import { createRefreshers } from "./refresh.ts";
 import { wrapGlorpModel } from "./model-guards.ts";
+import { withVerificationEnforcement } from "./verification-guard.ts";
 import { VerificationTracker } from "./verification-tracker.ts";
 import type { IGloveRunnable } from "glove-core/glove";
 import type { Context } from "glove-core/core";
@@ -50,7 +51,7 @@ export interface AssembleResult {
 }
 
 export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult> {
-  const model = wrapGlorpModel(args.picked.adapter);
+  const model = withVerificationEnforcement(wrapGlorpModel(args.picked.adapter), args.verification);
   const builder = new Glove({
     store: args.store,
     model,

@@ -5,6 +5,7 @@
  */
 import { spawn } from "node:child_process";
 import type { WorkspaceContext } from "./workspace-context.ts";
+import { parseFailures, formatFailureSummary, type ParsedFailure } from "./failure-parser.ts";
 
 export interface VerificationCommand {
   name: string;
@@ -26,6 +27,8 @@ export interface VerificationResult {
 export interface VerificationReport {
   allPassed: boolean;
   results: VerificationResult[];
+  /** Structured failures parsed from output (file, line, message). */
+  failures: ParsedFailure[];
   /** Short one-liner: "typecheck ✓, test ✗ (exit 1), lint ✓" */
   summary: string;
   /** Full detail block for evaluator prompt. */
@@ -138,12 +141,24 @@ export async function runVerification(
     }
   }
 
+  const allPassed = results.every((r) => r.passed);
+  const failures = allPassed ? [] : results
+    .filter((r) => !r.passed)
+    .flatMap((r) => parseFailures(r.output, nameToKind(r.name)));
+  const failureSummary = formatFailureSummary(failures);
+  const detail = formatDetailBlock(results);
   return {
-    allPassed: results.every((r) => r.passed),
-    results,
+    allPassed, results, failures,
     summary: formatSummary(results),
-    detailBlock: formatDetailBlock(results),
+    detailBlock: failureSummary ? `${detail}\n\n${failureSummary}` : detail,
   };
+}
+
+function nameToKind(name: string): ParsedFailure["kind"] {
+  if (/type/i.test(name)) return "type";
+  if (/test/i.test(name)) return "test";
+  if (/lint/i.test(name)) return "lint";
+  return "build";
 }
 
 /** Auto-detect verification commands from workspace context. */
