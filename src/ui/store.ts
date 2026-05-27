@@ -56,8 +56,20 @@ export function useUiState(): UiState {
         case "inbox":
           dispatchRef.current({ kind: "inbox", items: ev.items });
           break;
-        case "fleet":
-          dispatchRef.current({ kind: "fleet", job: ev.job });
+        case "orchestrator_agent":
+          dispatchRef.current({ kind: "orchestrator_agent", agent: ev.agent });
+          break;
+        case "orchestrator_phase":
+          dispatchRef.current({ kind: "orchestrator_phase", loopId: ev.loopId, phase: ev.phase });
+          break;
+        case "orchestrator_verdict":
+          dispatchRef.current({ kind: "orchestrator_verdict", loopId: ev.loopId, checkpoint: ev.checkpoint, verdictAction: ev.action, detail: ev.detail });
+          break;
+        case "orchestrator_plan":
+          dispatchRef.current({ kind: "orchestrator_plan_event", planAction: ev.action, path: ev.path, title: ev.title });
+          break;
+        case "orchestrator_slot":
+          dispatchRef.current({ kind: "orchestrator_slot_switch", promoted: ev.promoted, demoted: ev.demoted });
           break;
         case "stats":
           dispatchRef.current({ kind: "stats", stats: ev.stats });
@@ -76,6 +88,9 @@ export function useUiState(): UiState {
           break;
         case "skill":
           dispatchRef.current({ kind: "extension", ext: "skill", name: ev.name });
+          break;
+        case "runner_agent_stats":
+          dispatchRef.current({ kind: "runner_agent_stats", agent: ev.agent });
           break;
         case "display_slot_pushed":
           dispatchRef.current({ kind: "display_slot_pushed", slot: ev.slot });

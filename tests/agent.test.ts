@@ -7,7 +7,6 @@ import { z } from "zod";
 import { Glove } from "glove-core/glove";
 import { Displaymanager } from "glove-core/display-manager";
 import { GlorpStore } from "../src/agent/store.ts";
-import { createFleet } from "../src/agent/station-bridge.ts";
 import {
   buildGlorp,
   cleanSessionTitle,
@@ -232,150 +231,6 @@ describe("Glove tool continuation", () => {
 });
 
 // =====================================================================
-// Fleet — Station child-process executor
-// =====================================================================
-describe("Fleet (Station child processes)", () => {
-  test("parallel shell-fanout beats serial wall-clock despite child startup", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
-    const resolves: string[] = [];
-    fleet.setInboxResolver(async (id) => {
-      resolves.push(id);
-    });
-    await fleet.start();
-    const t0 = Date.now();
-    await Promise.all(
-      ["a", "b", "c", "d", "e"].map((id) =>
-        fleet.dispatch("shell-fanout", {
-          itemId: id,
-          tag: "parallel",
-          payload: "sleep 1 && echo done",
-        }),
-      ),
-    );
-    while (resolves.length < 5 && Date.now() - t0 < 7000) {
-      await new Promise((r) => setTimeout(r, 30));
-    }
-    const elapsed = Date.now() - t0;
-    expect(resolves.length).toBe(5);
-    // Serial sleep time alone is ~5000ms; Station child startup adds overhead
-    // but the work should still complete as a parallel batch.
-    expect(elapsed).toBeLessThan(5000);
-    await fleet.stop();
-  }, 9_000);
-
-  test("concurrency limiter caps in-flight to MAX_CONCURRENT (=6)", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
-    const resolves: string[] = [];
-    fleet.setInboxResolver(async (id) => {
-      resolves.push(id);
-    });
-    await fleet.start();
-    const t0 = Date.now();
-    const ids = Array.from({ length: 10 }, (_, i) => `j${i}`);
-    await Promise.all(
-      ids.map((id) =>
-        fleet.dispatch("shell-fanout", {
-          itemId: id,
-          tag: "limit",
-          payload: "sleep 0.3 && echo ok",
-        }),
-      ),
-    );
-    while (resolves.length < 10 && Date.now() - t0 < 6000) {
-      await new Promise((r) => setTimeout(r, 30));
-    }
-    const elapsed = Date.now() - t0;
-    expect(resolves.length).toBe(10);
-    // With limit 6, 10 jobs of ~300ms each run in 2 batches → ~600ms+.
-    // Without the limit they'd all run in ~300-400ms.
-    expect(elapsed).toBeGreaterThan(500);
-    await fleet.stop();
-  }, 10_000);
-
-  test("failing job is reported with status='error' to the resolver", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
-    let captured: { id: string; status: "resolved" | "error" } | null = null;
-    fleet.setInboxResolver(async (id, _resp, status) => {
-      captured = { id, status };
-    });
-    await fleet.start();
-    await fleet.dispatch("shell-fanout", {
-      itemId: "fail1",
-      tag: "errpath",
-      payload: "exit 7",
-    });
-    const t0 = Date.now();
-    while (!captured && Date.now() - t0 < 3000) {
-      await new Promise((r) => setTimeout(r, 30));
-    }
-    expect(captured).not.toBeNull();
-    expect(captured!.status).toBe("error");
-    await fleet.stop();
-  }, 6_000);
-
-  test("stop() kills active children promptly (no orphans, no hang)", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
-    await fleet.start();
-    await fleet.dispatch("shell-fanout", {
-      itemId: "longjob",
-      tag: "stop",
-      payload: "sleep 5",
-    });
-    // Give it a beat to actually spawn.
-    await new Promise((r) => setTimeout(r, 100));
-    const t0 = Date.now();
-    await fleet.stop();
-    const elapsed = Date.now() - t0;
-    // Should kill the 5s sleep within a couple of seconds.
-    expect(elapsed).toBeLessThan(2500);
-  }, 8_000);
-
-  test("invalid input throws synchronously and doesn't leak a slot", async () => {
-    const fleet = await createFleet({
-      workspace,
-      model: fakeModel,
-      systemPromptForSubagents: "",
-    });
-    await fleet.start();
-    await expect(
-      fleet.dispatch("shell-fanout", { itemId: 1 as any, tag: "x", payload: "y" }),
-    ).rejects.toThrow(/Invalid input/);
-    // Slot should not be held — a follow-up dispatch must work.
-    let resolved = false;
-    fleet.setInboxResolver(async () => {
-      resolved = true;
-    });
-    await fleet.dispatch("shell-fanout", {
-      itemId: "ok1",
-      tag: "x",
-      payload: "echo ok",
-    });
-    const t0 = Date.now();
-    while (!resolved && Date.now() - t0 < 2000) {
-      await new Promise((r) => setTimeout(r, 30));
-    }
-    expect(resolved).toBe(true);
-    await fleet.stop();
-  }, 5_000);
-});
-
-// =====================================================================
 // Subagent factories
 // =====================================================================
 describe("Subagent factories", () => {
@@ -431,7 +286,7 @@ describe("buildGlorp", () => {
       const required = [
         "apply_patch",
         "bash",
-        "dispatch_fleet",
+        "spawn_agent",
         "edit",
         "glob",
         "glove_invoke_skill",
@@ -784,7 +639,7 @@ describe("model empty-response guard", () => {
     );
 
     expect(seenRequests.length).toBe(2);
-    expect(seenRequests[1].messages.at(-1)?.text).toContain("only stated an intention");
+    expect(seenRequests[1].messages.at(-1)?.text).toContain("only narration");
     expect(emitted).toEqual(["tool:read"]);
     expect(result.messages.at(-1)?.tool_calls?.[0]?.tool_name).toBe("read");
   });

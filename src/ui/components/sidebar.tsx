@@ -1,6 +1,7 @@
 import React from "react";
 import { theme } from "../theme.ts";
 import type { UiState } from "../store.ts";
+import { AgentPanel, agentPanelTitle } from "./agent-panel.tsx";
 
 const TASK_MARK = {
   pending: "○",
@@ -14,22 +15,15 @@ const TASK_COLOR = {
   completed: theme.success,
 } as const;
 
-const FLEET_COLOR = {
-  running: theme.warning,
-  resolved: theme.success,
-  error: theme.error,
-  cancelled: theme.textMuted,
-} as const;
-
-export function Sidebar({ state, width }: { state: UiState; width: number }) {
+export function Sidebar({ state, width, collapsed }: { state: UiState; width: number; collapsed?: boolean }) {
+  if (collapsed) return <SidebarStrip state={state} />;
   const lane = Math.max(10, width - 4);
   const status = sessionStatus(state);
-  const runningFleet = state.fleetJobs.filter((j) => j.status === "running");
-  const activeAgents = state.activeSubagents.length + runningFleet.length;
+  const spawnedAgents = state.orchestratorAgents.filter((a) => a.action === "spawned");
+  const activeAgents = state.activeSubagents.length + spawnedAgents.length;
   const openTasks = state.tasks.filter((t) => t.status !== "completed").length;
   const pendingInbox = state.inbox.filter((i) => i.status === "pending");
   const blockingInbox = pendingInbox.filter((i) => i.blocking);
-  const recentFleet = [...runningFleet, ...state.fleetJobs.filter((j) => j.status !== "running").slice(-3)].slice(0, 5);
 
   return (
     <box flexDirection="column" width={width} padding={1} gap={1}>
@@ -80,16 +74,8 @@ export function Sidebar({ state, width }: { state: UiState; width: number }) {
         {blockingInbox.length > 0 && <text fg={theme.warning}>{blockingInbox.length} blocking</text>}
       </Panel>
 
-      <Panel title={`Agents ${activeAgents} active`} color={activeAgents ? theme.warning : theme.textMuted}>
-        {activeAgents === 0 && recentFleet.length === 0 && <text fg={theme.textDim}>No active agents</text>}
-        {state.activeSubagents.slice(0, 4).map((name, i) => (
-          <text key={`sub-${name}-${i}`} fg={theme.warning}>subagent  {clip(name, lane - 10)}</text>
-        ))}
-        {recentFleet.map((job) => (
-          <text key={job.runId} fg={FLEET_COLOR[job.status]}>
-            fleet     {clip(`${job.name ?? job.kind} · ${job.runId.slice(0, 4)}`, lane - 10)}
-          </text>
-        ))}
+      <Panel title={agentPanelTitle(state).title} color={agentPanelTitle(state).color}>
+        <AgentPanel state={state} lane={lane} />
       </Panel>
 
       <Panel title="Signals" color={theme.transmission}>
@@ -98,6 +84,31 @@ export function Sidebar({ state, width }: { state: UiState; width: number }) {
           <text key={i} fg={signalColor(signal.severity)}>{clip(signal.payload, lane)}</text>
         ))}
       </Panel>
+    </box>
+  );
+}
+
+export const SIDEBAR_STRIP_WIDTH = 8;
+
+/** Collapsed sidebar: narrow vertical strip with key metrics. */
+function SidebarStrip({ state }: { state: UiState }) {
+  const pct = state.stats.contextPct;
+  const spawned = state.orchestratorAgents.filter((a) => a.action === "spawned");
+  const agents = state.activeSubagents.length + spawned.length;
+  const tasks = state.tasks.filter((t) => t.status !== "completed").length;
+  const inbox = state.inbox.filter((i) => i.status === "pending").length;
+  const hasLoop = state.loopPhase && state.loopPhase !== "idle";
+  return (
+    <box flexDirection="column" width={SIDEBAR_STRIP_WIDTH} paddingX={1} gap={0}>
+      <text fg={theme.textDim}>{"─".repeat(SIDEBAR_STRIP_WIDTH - 2)}</text>
+      <text fg={contextColor(pct)}>{pct}%</text>
+      <text fg={theme.textMuted}>{state.stats.turns}t</text>
+      {agents > 0 && <text fg={theme.agent}>{agents}a</text>}
+      {tasks > 0 && <text fg={theme.warning}>{tasks}tk</text>}
+      {inbox > 0 && <text fg={theme.warning}>{inbox}in</text>}
+      {state.plan && <text fg={theme.accent}>P</text>}
+      {hasLoop && <text fg={theme.loopActive}>⚡</text>}
+      <text fg={theme.textDim}>◂</text>
     </box>
   );
 }
@@ -113,7 +124,9 @@ function Panel({ title, color, children }: { title: string; color: string; child
 
 function sessionStatus(state: UiState): { label: string; color: string } {
   if (state.lastError) return { label: "Error", color: theme.error };
-  if (state.activeSubagents.length > 0 || state.fleetJobs.some((j) => j.status === "running")) {
+  if (state.loopPhase === "generating") return { label: "Generating", color: theme.loopActive };
+  if (state.loopPhase === "evaluating") return { label: "Evaluating", color: theme.loopActive };
+  if (state.activeSubagents.length > 0 || state.orchestratorAgents.some((a) => a.action === "spawned")) {
     return { label: "Agents running", color: theme.warning };
   }
   if (state.busy && state.streamingText) return { label: "Responding", color: theme.accent };

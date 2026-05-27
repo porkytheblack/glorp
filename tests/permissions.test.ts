@@ -10,8 +10,8 @@ import { writeTool } from "../src/agent/tools/write.ts";
 import { editTool } from "../src/agent/tools/edit.ts";
 import { applyPatchTool } from "../src/agent/tools/apply-patch.ts";
 import { bashTool } from "../src/agent/tools/bash.ts";
-import { fleetDispatchTool } from "../src/agent/tools/fleet-dispatch.ts";
-import type { GlorpFleet } from "../src/agent/station-bridge.ts";
+import { spawnAgentTool } from "../src/orchestrator/spawn-tool.ts";
+import type { Orchestrator } from "../src/orchestrator/orchestrator.ts";
 
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? "sk-test";
 
@@ -62,9 +62,9 @@ describe("requiresPermission flags on tools", () => {
   test("apply_patch requires permission", () => {
     expect(applyPatchTool(workspace).requiresPermission).toBe(true);
   });
-  test("dispatch_fleet requires permission", () => {
-    const fakeFleet = {} as GlorpFleet;
-    const tool = fleetDispatchTool(fakeFleet, { current: null });
+  test("spawn_agent requires permission", () => {
+    const fakeOrch = {} as Orchestrator;
+    const tool = spawnAgentTool(fakeOrch, workspace);
     expect(tool.requiresPermission).toBe(true);
   });
   test("read does NOT require permission (read-only)", () => {
@@ -164,21 +164,23 @@ describe("input-keyed permission canonicalization (glove-core 3.0.6)", () => {
     }
   });
 
-  test("dispatch_fleet keys by kind", async () => {
-    const g = await buildGlorp({ workspace, sessionId: "perm-fleet-key", dataDir });
+  test("spawn_agent keys by role", async () => {
+    const g = await buildGlorp({ workspace, sessionId: "perm-spawn-key", dataDir });
     try {
-      await g.store.setPermission("dispatch_fleet", "granted", {
-        kind: "research",
-        jobs: [{ payload: "anything" }],
+      await g.store.setPermission("spawn_agent", "granted", {
+        role: "researcher",
+        label: "anything",
+        task: "research task",
       });
       expect(
-        await g.store.getPermission("dispatch_fleet", {
-          kind: "research",
-          jobs: [{ payload: "different" }],
+        await g.store.getPermission("spawn_agent", {
+          role: "researcher",
+          label: "different",
+          task: "other task",
         }),
       ).toBe("granted");
       expect(
-        await g.store.getPermission("dispatch_fleet", { kind: "shell-fanout", jobs: [] }),
+        await g.store.getPermission("spawn_agent", { role: "builder", label: "x", task: "y" }),
       ).toBe("unset");
     } finally {
       await g.shutdown();

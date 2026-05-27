@@ -1,6 +1,6 @@
 import type { IGloveRunnable } from "glove-core/glove";
-import type { PermissionStatus } from "glove-core/core";
-import type { GlorpFleet } from "./station-bridge.ts";
+import type { PermissionStatus, ContentPart } from "glove-core/core";
+import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import type { GlorpStore } from "./store.ts";
 import type { CredentialsStore } from "./credentials.ts";
 import type { ModelCatalog } from "./model-catalog.ts";
@@ -14,20 +14,26 @@ export interface ExtensionCatalogue {
 
 export interface GlorpHandle {
   agent: IGloveRunnable;
-  fleet: GlorpFleet;
+  orchestrator: Orchestrator;
   store: GlorpStore;
   credentials: CredentialsStore;
   sessionId: string;
   modelLabel: string;
   title: string | null;
   extensions: ExtensionCatalogue;
-  send(text: string): Promise<void>;
+  send(text: string, images?: Array<{ data: string; media_type: string }>): Promise<void>;
+  /** Run the plan phase then a build phase for a complex request. */
+  planAndBuild(prompt: string): Promise<void>;
   abort(): void;
   shutdown(): Promise<void>;
   swapProfile(profileId: string): Promise<void>;
   resolveSlot(slotId: string, value: unknown): void;
   rejectSlot(slotId: string, reason?: string): void;
   resolvePermission(slotId: string, allow: boolean): void;
+  /** Stop a running orchestrated agent by ID. */
+  stopAgent(agentId: string, reason?: string): Promise<void>;
+  /** Promote a background agent to foreground. Returns false if not found. */
+  promoteAgent(agentId: string): boolean;
   /** Sweep every persisted grant for a tool name (legacy "always allow X" UX). */
   clearPermission(toolName: string): Promise<void>;
   /** Surgically clear a single canonical permission key (e.g. `bash:git`). */

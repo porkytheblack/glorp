@@ -15,16 +15,18 @@
     "bench:conventions": "bun scripts/bench-conventions.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/",
+    "test:orchestrator": "bash scripts/test-orchestrator.sh",
     "ci": "bun run typecheck && bun run test"
   },
   "dependencies": {
     "@opentui/core": "latest",
     "@opentui/react": "latest",
+    "glove-continuum-signal": "latest",
     "glove-core": "^3.0.6",
     "glove-mcp": "latest",
     "glove-memory": "^0.1.0",
+    "glove-mesh": "latest",
     "react": "^19.0.0",
-    "station-signal": "latest",
     "tsx": "^4.22.3",
     "zod": "^4.0.0"
   },

@@ -23,6 +23,8 @@ export const theme = {
   diffDelText: "#f7768e",
   transmission: "#7dcfff",
   transmissionHigh: "#ff79c6",
+  agent: "#c0a0ff",
+  loopActive: "#7dcfff",
 } as const;
 
 export const BANNER = [

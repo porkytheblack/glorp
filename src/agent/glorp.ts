@@ -1,50 +1,38 @@
-import { Glove } from "glove-core/glove";
 import { Displaymanager } from "glove-core/display-manager";
-import { pickModel, type PickedModel } from "./model-picker.ts";
+import { pickModel } from "./model-picker.ts";
 import { GlorpStore } from "./store.ts";
-import { buildGlorpSystemPrompt, COMPACTION_INSTRUCTIONS } from "./persona.ts";
-import { MAIN_AGENT_TOOLS, createToolRegistry, registerTools } from "./tools/registry.ts";
-import { plannerSubAgent, researcherSubAgent, reviewerSubAgent } from "./subagents.ts";
-import { makeDiskSubAgent } from "./agents/disk-subagent.ts";
 import { getBridge } from "../shared/bridge.ts";
-import { createFleet } from "./station-bridge.ts";
-import { CredentialsStore } from "./credentials.ts";
+import { Orchestrator } from "../orchestrator/orchestrator.ts";
+import { parseBuildCommand, runOrchestratorBuild } from "./runtime/build-flow.ts";
+import { CredentialsStore, effectiveProviderId } from "./credentials.ts";
 import { ModelCatalog } from "./model-catalog.ts";
 import { loadProjectConfig } from "./project-config.ts";
-import { discoverExtensions, type ExtensionsBundle } from "./extensions-loader.ts";
+import { discoverExtensions } from "./extensions-loader.ts";
 import { bridgeDisplaySlots } from "./runtime/display-bridge.ts";
 import { createRefreshers } from "./runtime/refresh.ts";
-import { createGlorpSubscriber } from "./runtime/subscriber.ts";
-import { continueOpenTasks } from "./runtime/continuation.ts";
+import { continueOpenTasks, continueIfIntentOnly } from "./runtime/continuation.ts";
 import { makeInboxContext } from "./runtime/context.ts";
-import { foldContextTools } from "./runtime/glove-tools.ts";
-import { hydrateUiSession } from "./runtime/hydrate.ts";
-import { registerHooks } from "./runtime/hooks.ts";
-import { createSessionResources, foldResourceTools } from "./runtime/resources.ts";
-import { registerBuiltInSkills, registerDiskSkills } from "./runtime/skills.ts";
+import { hydrateUiSession, hydrateAgentRecords } from "./runtime/hydrate.ts";
+import { createGlorpSubscriber } from "./runtime/subscriber.ts";
+import { createSessionResources } from "./runtime/resources.ts";
 import { buildExtensionCatalogue } from "./runtime/catalogue.ts";
 import { generateSessionTitle, cleanSessionTitle } from "./runtime/title.ts";
 import { createTitleScheduler } from "./runtime/title-scheduler.ts";
 import { wrapGlorpModel } from "./runtime/model-guards.ts";
 import { VerificationTracker } from "./runtime/verification-tracker.ts";
+import { assembleAgent, wireOrchestratorToBridge } from "./runtime/assemble.ts";
+import { teardownAgentMesh } from "../orchestrator/mesh-setup.ts";
+import { agentId as toAgentId } from "../orchestrator/types.ts";
 import type { BuildGlorpOptions, GlorpHandle } from "./glorp-types.ts";
-import type { ModelAdapter } from "glove-core/core";
-import type { IGloveRunnable } from "glove-core/glove";
-import type { Context } from "glove-core/core";
-import * as path from "node:path";
-import * as os from "node:os";
+import type { ContentPart, Context } from "glove-core/core";
+import type { PickedModel } from "./model-picker.ts";
+import type { OrchestratorConfig } from "../orchestrator/types.ts";
+import * as path from "node:path"; import * as os from "node:os";
 
 export type { BuildGlorpOptions, ExtensionCatalogue, GlorpHandle } from "./glorp-types.ts";
 export { cleanSessionTitle, generateSessionTitle };
-export {
-  messageHasOpenTaskUpdate,
-  modelResultHasToolCall,
-  modelResultHasVisibleAgentOutput,
-  modelResultIsIntentOnly,
-  withEmptyResponseRetry,
-  withIntentOnlyContinuation,
-  withTaskUpdateContinuation,
-} from "./runtime/model-guards.ts";
+export { messageHasOpenTaskUpdate, modelResultHasToolCall, modelResultHasVisibleAgentOutput,
+  modelResultIsIntentOnly, withEmptyResponseRetry, withIntentOnlyContinuation, withTaskUpdateContinuation } from "./runtime/model-guards.ts";
 
 const TITLE_MODEL_TIMEOUT_MS = 15_000;
 
@@ -55,23 +43,10 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const credentials = opts.credentials ?? new CredentialsStore(dataDir);
   const catalog = new ModelCatalog(dataDir);
   const projectConfig = loadProjectConfig(opts.workspace);
-  const picked = await pickModel({
-    provider: opts.provider,
-    model: opts.model,
-    credentials,
-    catalog,
-    projectConfig,
-  });
-  let contextLimit = picked.contextLimit;
-  let modelLabel = picked.label;
+  let picked = await pickModel({ provider: opts.provider, model: opts.model, credentials, catalog, projectConfig });
+  let contextLimit = picked.contextLimit; let modelLabel = picked.label;
   const bridge = getBridge();
-  const titleScheduler = createTitleScheduler({
-    store,
-    bridge,
-    model: picked.titleAdapter,
-    initialTitle: await store.getTitle(),
-    timeoutMs: TITLE_MODEL_TIMEOUT_MS,
-  });
+  const titleScheduler = createTitleScheduler({ store, bridge, model: picked.titleAdapter, initialTitle: await store.getTitle(), timeoutMs: TITLE_MODEL_TIMEOUT_MS });
   const displayManager = new Displaymanager();
   const labelListeners = new Set<(label: string) => void>();
   const diskExtensions = discoverExtensions(opts.workspace);
@@ -80,58 +55,35 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const verification = new VerificationTracker();
   store.setVerificationTracker(verification);
   const refresh = createRefreshers(store, bridge, () => contextLimit);
-  const fleet = await createFleet({
-    workspace: opts.workspace,
-    model: wrapGlorpModel(picked.adapter),
-    dataDir,
-    provider: opts.provider,
-    selectedModel: opts.provider ? picked.model : undefined,
-    profileId: picked.profile?.id,
-    onJobUpdate: (job) => bridge.emit({ type: "fleet", job }),
-  });
-  await fleet.start();
+  const meshDir = path.join(dataDir, "mesh", opts.sessionId);
+  const noop = async () => {};
+  const loopRefresh = { stats: noop, plan: noop, tasks: noop, inbox: noop };
+  const orchestrator = new Orchestrator(
+    { workspace: opts.workspace, dataDir, meshDir, model: wrapGlorpModel(picked.adapter),
+      subprocessModel: buildSubprocessModelConfig(picked, credentials),
+      contextLimit, resources, loopSubscriberFactory: () => createGlorpSubscriber(bridge, loopRefresh) },
+    displayManager,
+  );
+  await orchestrator.start();
+  wireOrchestratorToBridge(orchestrator, bridge);
 
   const ctxRef = { current: null as Context | null };
   const inboxContext = makeInboxContext(store);
   ctxRef.current = inboxContext;
-  fleet.setContext(inboxContext);
-  fleet.setInboxResolver(async (itemId, response, status) => {
-    await store.updateInboxItem(itemId, {
-      status: "resolved",
-      response: status === "error" ? `[fleet error] ${response}` : response,
-      resolved_at: new Date().toISOString(),
-    });
-    void refresh.inbox();
-  });
+
+  const assembleArgs = () => ({ picked, contextLimit, workspace: opts.workspace, dataDir, meshDir,
+    store, resources, orchestrator, bridge, displayManager,
+    diskExtensions, refresh, ctxRef, inboxContext, verification });
 
   let abortController: AbortController | null = null;
-  let agent = assembleAgent({
-    picked,
-    contextLimit,
-    workspace: opts.workspace,
-    dataDir,
-    store,
-    resources,
-    fleet,
-    bridge,
-    displayManager,
-    diskExtensions,
-    refresh,
-    ctxRef,
-    inboxContext,
-    verification,
-  });
+  let assembled = await assembleAgent(assembleArgs());
+  let agent = assembled.agent;
 
-  void refresh.all();
-  void catalog.refresh();
+  void refresh.all(); void catalog.refresh();
 
   return {
     get agent() { return agent; },
-    fleet,
-    store,
-    credentials,
-    catalog,
-    projectConfig,
+    orchestrator, store, credentials, catalog, projectConfig,
     sessionId: opts.sessionId,
     get title() { return titleScheduler.title; },
     get extensions() { return buildExtensionCatalogue(agent); },
@@ -139,15 +91,28 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     onLabelChange(fn) { labelListeners.add(fn); return () => void labelListeners.delete(fn); },
     async hydrateUi() {
       await hydrateUiSession(store, bridge, contextLimit);
+      hydrateAgentRecords(await orchestrator.loadPersistedAgents(), bridge);
       await titleScheduler.refreshTitle();
       titleScheduler.schedule();
     },
-    resolveSlot(slotId, value) { resolveDisplaySlot(displayManager, bridge, slotId, value); },
+    resolveSlot(slotId, value) {
+      if (orchestrator.hasForwardedSlot(slotId)) { orchestrator.resolveForwardedSlot(slotId, value); bridge.emit({ type: "display_slot_resolved", slotId }); }
+      else resolveDisplaySlot(displayManager, bridge, slotId, value);
+    },
     rejectSlot(slotId, reason) {
-      try { displayManager.reject(slotId, reason); } catch {}
+      if (orchestrator.hasForwardedSlot(slotId)) {
+        orchestrator.rejectForwardedSlot(slotId, reason);
+      } else {
+        try { displayManager.reject(slotId, reason); } catch {}
+      }
       bridge.emit({ type: "display_slot_resolved", slotId });
     },
-    resolvePermission(slotId, allow) { resolveDisplaySlot(displayManager, bridge, slotId, allow); },
+    resolvePermission(slotId, allow) {
+      if (orchestrator.hasForwardedSlot(slotId)) { orchestrator.resolveForwardedSlot(slotId, allow); bridge.emit({ type: "display_slot_resolved", slotId }); }
+      else resolveDisplaySlot(displayManager, bridge, slotId, allow);
+    },
+    async stopAgent(id, reason) { await orchestrator.stopAgent(toAgentId(id), reason); },
+    promoteAgent(id) { return orchestrator.promoteAgent(toAgentId(id)); },
     clearPermission(toolName) { return store.clearAllPermissionsFor(toolName); },
     clearPermissionKey(key) { return store.clearPermissionKey(key); },
     listPermissions() { return store.listPermissions(); },
@@ -155,155 +120,81 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       const next = await pickModel({ profileId, credentials, catalog, projectConfig });
       abortController?.abort();
       await titleScheduler.cancel();
+      await teardownAgentMesh(assembled.meshAdapter).catch(() => {});
       titleScheduler.setModel(next.titleAdapter);
       contextLimit = next.contextLimit;
       modelLabel = next.label;
-      agent = assembleAgent({
-        picked: next,
-        contextLimit,
-        workspace: opts.workspace,
-        dataDir,
-        store,
-        resources,
-        fleet,
-        bridge,
-        displayManager,
-        diskExtensions,
-        refresh,
-        ctxRef,
-        inboxContext,
-        verification,
-      });
-      fleet.setModelConfig({
-        profileId: next.profile?.id,
-        provider: next.profile ? undefined : next.providerId,
-        model: next.profile ? undefined : next.model,
-      });
+      picked = next;
+      assembled = await assembleAgent(assembleArgs());
+      agent = assembled.agent;
       credentials.setActive(profileId);
       for (const fn of labelListeners) fn(modelLabel);
     },
-    async send(text) {
+    async send(text, images) {
       abortController?.abort();
       await titleScheduler.cancel();
-      // A new user message resets the "failed verification" context — the
-      // user has implicitly closed out the previous deliberation.
       verification.onUserTurn();
       abortController = new AbortController();
       titleScheduler.setRequestInFlight(true);
       bridge.emit({ type: "busy", busy: true });
-      bridge.emit({ type: "turn", turn: userTurn(text) });
-      // Watchdog: if processRequest hangs (network stall, unhandled
-      // rejection deeper in the stack), the input lockup is permanent
-      // because `busy: false` only fires in the finally. Belt-and-braces:
-      // schedule a hard timeout that forces the UI back to interactive
-      // and aborts the in-flight request. Long-running tasks are common
-      // for reasoning models so we set this generously (30 minutes).
-      const watchdog = setTimeout(() => {
-        try {
-          bridge.emit({
-            type: "error",
-            message: "Agent watchdog: no progress in 30 minutes — forcibly cleared the busy state. The agent may still be working in the background; press Ctrl-C if you want to fully cancel.",
-          });
-          bridge.emit({ type: "busy", busy: false });
-        } catch {}
-      }, 30 * 60 * 1000);
+      bridge.emit({ type: "turn", turn: userTurn(text, images?.length) });
       try {
-        await agent.processRequest(text, abortController.signal);
-        await continueOpenTasks({ agent, store, signal: abortController.signal });
+        const buildPrompt = parseBuildCommand(text);
+        if (buildPrompt) {
+          await runOrchestratorBuild(orchestrator, bridge, opts.workspace, buildPrompt, abortController.signal);
+        } else {
+          const request = buildRequest(text, images);
+          await agent.processRequest(request, abortController.signal);
+          await continueIfIntentOnly({ agent, store, signal: abortController.signal });
+          await continueOpenTasks({ agent, store, signal: abortController.signal });
+        }
       } catch (err: any) {
         if (err?.name === "AbortError") bridge.emit({ type: "turn", turn: systemTurn("aborted") });
         else bridge.emit({ type: "error", message: err?.message ?? String(err) });
       } finally {
-        clearTimeout(watchdog);
         titleScheduler.setRequestInFlight(false);
         bridge.emit({ type: "busy", busy: false });
         void refresh.all();
         titleScheduler.schedule();
       }
     },
-    abort() { abortController?.abort(); void titleScheduler.cancel(); void fleet.cancelAll(); titleScheduler.setRequestInFlight(false); },
-    async shutdown() { abortController?.abort(); await titleScheduler.cancel(); await fleet.stop(); },
+    async planAndBuild(prompt) {
+      bridge.emit({ type: "busy", busy: true });
+      try { await runOrchestratorBuild(orchestrator, bridge, opts.workspace, prompt); }
+      finally { bridge.emit({ type: "busy", busy: false }); }
+    },
+    abort() { abortController?.abort(); void titleScheduler.cancel(); titleScheduler.setRequestInFlight(false); },
+    async shutdown() {
+      abortController?.abort();
+      await titleScheduler.cancel();
+      await teardownAgentMesh(assembled.meshAdapter).catch(() => {});
+      await orchestrator.shutdown();
+    },
   };
 }
 
-interface AssembleArgs {
-  picked: PickedModel;
-  contextLimit: number;
-  workspace: string;
-  dataDir: string;
-  store: GlorpStore;
-  resources: ReturnType<typeof createSessionResources>;
-  fleet: Awaited<ReturnType<typeof createFleet>>;
-  bridge: ReturnType<typeof getBridge>;
-  displayManager: Displaymanager;
-  diskExtensions: ExtensionsBundle;
-  refresh: ReturnType<typeof createRefreshers>;
-  ctxRef: { current: Context | null };
-  inboxContext: Context;
-  verification: VerificationTracker;
+function userTurn(text: string, imageCount?: number) {
+  return { id: `u_${Date.now().toString(36)}`, kind: "user" as const, text, createdAt: Date.now(),
+    ...(imageCount ? { meta: { imageCount } } : {}) };
 }
-
-function assembleAgent(args: AssembleArgs): IGloveRunnable {
-  const model = wrapGlorpModel(args.picked.adapter);
-  const builder = new Glove({
-    store: args.store,
-    model,
-    displayManager: args.displayManager,
-    serverMode: true,
-    systemPrompt: buildGlorpSystemPrompt({
-      workspace: args.workspace,
-      contextLimit: args.contextLimit,
-      extensions: args.diskExtensions,
-    }),
-    compaction_config: {
-      compaction_instructions: COMPACTION_INSTRUCTIONS,
-      compaction_context_limit: args.contextLimit,
-      max_turns: 200,
-    },
-  });
-
-  builder.addSubscriber(createGlorpSubscriber(args.bridge, args.refresh, args.verification));
-  registerTools(
-    builder,
-    createToolRegistry({
-      workspace: args.workspace,
-      dataDir: args.dataDir,
-      store: args.store,
-      resources: args.resources,
-      fleet: args.fleet,
-      contextRef: args.ctxRef,
-    }),
-    MAIN_AGENT_TOOLS,
-  );
-  foldResourceTools(builder, args.resources);
-  builder
-    .defineSubAgent(plannerSubAgent({ workspace: args.workspace, dataDir: args.dataDir }))
-    .defineSubAgent(researcherSubAgent({ workspace: args.workspace, dataDir: args.dataDir }))
-    .defineSubAgent(reviewerSubAgent({ workspace: args.workspace, dataDir: args.dataDir }));
-  for (const sub of args.diskExtensions.subagents) {
-    builder.defineSubAgent(makeDiskSubAgent(sub, { workspace: args.workspace, dataDir: args.dataDir }));
-  }
-  registerHooks(builder);
-  // Disk skills first so workspace-local and home-installed skills win on
-  // a name collision; built-ins fill any name a disk skill did not claim.
-  registerDiskSkills(builder, args.diskExtensions.skills);
-  registerBuiltInSkills(builder, args.diskExtensions.skills);
-
-  const agent = builder.build();
-  (agent as any).promptMachine.enableToolResultSummary = true;
-  foldContextTools(agent, args.inboxContext);
-  return agent;
-}
-
-function userTurn(text: string) {
-  return { id: `u_${Date.now().toString(36)}`, kind: "user" as const, text, createdAt: Date.now() };
-}
-
 function systemTurn(text: string) {
   return { id: `s_${Date.now().toString(36)}`, kind: "system" as const, text, createdAt: Date.now() };
 }
 
-function resolveDisplaySlot(displayManager: Displaymanager, bridge: ReturnType<typeof getBridge>, slotId: string, value: unknown): void {
-  try { displayManager.resolve(slotId, value); } catch {}
+function buildRequest(text: string, images?: Array<{ data: string; media_type: string }>): string | ContentPart[] {
+  if (!images?.length) return text;
+  const label = images.length === 1 ? "1 image attached" : `${images.length} images attached`;
+  const parts: ContentPart[] = [{ type: "text", text: `[${label} — examine before responding]\n\n${text}` }];
+  for (const img of images) parts.push({ type: "image", source: { type: "base64", media_type: img.media_type, data: img.data } });
+  return parts;
+}
+
+function resolveDisplaySlot(dm: Displaymanager, bridge: ReturnType<typeof getBridge>, slotId: string, value: unknown): void {
+  try { dm.resolve(slotId, value); } catch {}
   bridge.emit({ type: "display_slot_resolved", slotId });
+}
+
+function buildSubprocessModelConfig(picked: PickedModel, creds: CredentialsStore): OrchestratorConfig["subprocessModel"] {
+  const p = creds.getProvider(picked.providerId);
+  return { providerId: effectiveProviderId(picked.providerId, p), model: picked.model, baseURL: p?.baseURL, apiKey: p?.apiKey };
 }

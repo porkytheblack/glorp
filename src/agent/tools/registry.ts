@@ -1,7 +1,7 @@
 import type { GloveFoldArgs } from "glove-core/glove";
 import type { Context } from "glove-core/core";
 import type { ResourceFsAdapter } from "glove-memory";
-import type { GlorpFleet } from "../station-bridge.ts";
+import type { Orchestrator } from "../../orchestrator/orchestrator.ts";
 import type { GlorpStore } from "../store.ts";
 import {
   askChoiceTool,
@@ -10,7 +10,6 @@ import {
   applyPatchTool,
   bashTool,
   editTool,
-  fleetDispatchTool,
   globTool,
   grepTool,
   inboxManageTool,
@@ -18,6 +17,7 @@ import {
   planTool,
   readTool,
   showInfoTool,
+  spawnAgentTool,
   transmissionTool,
   webFetchTool,
   writeTool,
@@ -35,7 +35,7 @@ export const MAIN_AGENT_TOOLS = [
   "ls",
   "web_fetch",
   "transmission",
-  "dispatch_fleet",
+  "spawn_agent",
   "ask_confirm",
   "show_info",
   "ask_choice",
@@ -57,7 +57,7 @@ export type ToolName =
   | "web_fetch"
   | "transmission"
   | "glove_update_inbox"
-  | "dispatch_fleet"
+  | "spawn_agent"
   | "ask_confirm"
   | "show_info"
   | "ask_choice"
@@ -68,7 +68,7 @@ export interface ToolRegistryDeps {
   dataDir?: string;
   store?: GlorpStore;
   resources?: ResourceFsAdapter;
-  fleet?: GlorpFleet;
+  orchestrator?: Orchestrator;
   contextRef?: { current: Context | null };
 }
 
@@ -88,10 +88,10 @@ export function createToolRegistry(deps: ToolRegistryDeps): Record<ToolName, Too
     web_fetch: () => webFetchTool,
     transmission: () => transmissionTool(requireDep(deps.dataDir, "dataDir")),
     glove_update_inbox: () => inboxManageTool(requireDep(deps.contextRef?.current, "context")),
-    dispatch_fleet: () =>
-      fleetDispatchTool(
-        requireDep(deps.fleet, "fleet"),
-        requireDep(deps.contextRef, "contextRef"),
+    spawn_agent: () =>
+      spawnAgentTool(
+        requireDep(deps.orchestrator, "orchestrator"),
+        deps.workspace,
       ),
     ask_confirm: () => askConfirmTool,
     show_info: () => showInfoTool,

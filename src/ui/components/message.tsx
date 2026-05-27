@@ -2,6 +2,8 @@ import React from "react";
 import type { ChatTurn } from "../../shared/events.ts";
 import { theme } from "../theme.ts";
 import { ToolCallRow } from "./tool-call.tsx";
+import { isOrchestratorTurn, OrchestratorRow } from "./orchestrator-row.tsx";
+import { ReasoningRow } from "./reasoning-row.tsx";
 
 const LABEL: Record<ChatTurn["kind"], string> = {
   user: "you",
@@ -19,7 +21,8 @@ const LABEL_COLOR: Record<ChatTurn["kind"], string> = {
   transmission: theme.transmission,
 };
 
-export function MessageRow({ turn }: { turn: ChatTurn }) {
+export function MessageRow({ turn, showReasoning }: { turn: ChatTurn; showReasoning?: boolean }) {
+  if (isOrchestratorTurn(turn)) return <OrchestratorRow turn={turn} />;
   if (turn.kind === "tool" && turn.tool) {
     return (
       <box flexDirection="row" marginBottom={0}>
@@ -43,6 +46,7 @@ export function MessageRow({ turn }: { turn: ChatTurn }) {
         </text>
       </box>
       <box flexDirection="column" flexGrow={1}>
+        {showReasoning && turn.reasoning && <ReasoningRow text={turn.reasoning} />}
         {text.split("\n").map((line, i) => (
           <text key={i} fg={turn.kind === "system" ? theme.textMuted : theme.text}>
             {line || " "}

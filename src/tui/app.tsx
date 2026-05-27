@@ -1,0 +1,188 @@
+import React, { useCallback, useEffect, useState } from "react";
+import { useTerminalDimensions, useKeyboard } from "@opentui/react";
+import { theme } from "./theme.ts";
+import { useUiState } from "./store.ts";
+import { Transcript } from "./components/transcript.tsx";
+import { ContextRail } from "./components/context-rail.tsx";
+import { StatusBar } from "./components/status-bar.tsx";
+import { ChromeBar } from "./components/chrome-bar.tsx";
+import { InputBar } from "./components/input-bar.tsx";
+import { ModelSwitcher } from "./model-switcher.tsx";
+import { SessionPicker } from "./session-picker.tsx";
+import { TransmissionsLog } from "./transmissions-log.tsx";
+import { PermissionsList } from "./permissions-list.tsx";
+import { HelpDialog } from "./help-dialog.tsx";
+import { AgentManager } from "./agent-manager.tsx";
+import { getSlotRenderer, UnknownSlot } from "./slot-renderers/index.tsx";
+import { EmptyHero } from "./empty-hero.tsx";
+import type { GlorpClient, ClientState } from "../client/client.ts";
+
+const NARROW = 90;
+const MEDIUM = 140;
+const WIDE = 200;
+
+type Overlay = null | "model" | "session" | "transmissions" | "permissions" | "help" | "agents";
+
+export function App({
+  client,
+  workspace,
+  onQuit,
+  onSwapSession,
+}: {
+  client: GlorpClient;
+  workspace: string;
+  onQuit: () => void;
+  onSwapSession?: (sessionId: string | null) => void;
+}) {
+  const { width, height } = useTerminalDimensions();
+  const state = useUiState(client);
+  const [overlay, setOverlay] = useState<Overlay>(null);
+  const [inputHeight, setInputHeight] = useState(4);
+  const [showReasoning, setShowReasoning] = useState(false);
+  const [railOpen, setRailOpen] = useState(true);
+  const [scrollDelta, setScrollDelta] = useState(0);
+  const [connState, setConnState] = useState<ClientState>(client.state);
+
+  useEffect(() => {
+    return client.onStateChange(setConnState);
+  }, [client]);
+
+  const handleInputHeight = useCallback((n: number) => {
+    setInputHeight((c) => c === n ? c : n);
+  }, []);
+
+  const onScrollConsumed = useCallback(() => setScrollDelta(0), []);
+
+  useKeyboard((key) => {
+    // Abort handling always active
+    if (isAbortKey(key) && state.busy) { client.abort(); return; }
+    // Permission slot keyboard — intercept y/n for inline permission prompts
+    const permSlot = state.displaySlots.find((s) => s.isPermissionRequest);
+    if (permSlot && !overlay) {
+      if (key.name === "y" || key.name === "a") {
+        client.resolvePermission(permSlot.slotId, true); return;
+      }
+      if (key.name === "n" || key.name === "d") {
+        client.resolvePermission(permSlot.slotId, false); return;
+      }
+      if (key.name === "escape") {
+        client.rejectSlot(permSlot.slotId, "cancelled"); return;
+      }
+    }
+    // Overlay owns keyboard when open
+    if (overlay) return;
+    // Non-permission display slot keyboard
+    const nonPermSlot = state.displaySlots.find((s) => !s.isPermissionRequest);
+    if (nonPermSlot) return; // let the slot renderer handle it
+    // Global shortcuts
+    if (key.name === "a" && key.ctrl) { setOverlay("agents"); return; }
+    if (key.name === "m" && key.ctrl) { setOverlay("model"); return; }
+    if (key.name === "s" && key.ctrl && onSwapSession) { setOverlay("session"); return; }
+    if (key.name === "t" && key.ctrl) { setOverlay("transmissions"); return; }
+    if (key.name === "p" && key.ctrl) { setOverlay("permissions"); return; }
+    if (key.name === "r" && key.ctrl) { setShowReasoning((v) => !v); return; }
+    if (key.name === "b" && key.ctrl) { setRailOpen((v) => !v); return; }
+    if ((key.sequence === "\x1f" || (key.name === "/" && key.ctrl)) || key.name === "?" && key.ctrl) {
+      setOverlay("help"); return;
+    }
+    // Keyboard scrolling
+    if (key.name === "up" && key.ctrl) { setScrollDelta((d) => d - 5); return; }
+    if (key.name === "down" && key.ctrl) { setScrollDelta((d) => d + 5); return; }
+    // Escape
+    if (key.name === "escape" && state.busy) { client.abort(); return; }
+  });
+
+  // Non-permission display slots render as full-screen overlays
+  const nonPermSlot = state.displaySlots.find((s) => !s.isPermissionRequest);
+  if (nonPermSlot) {
+    const Renderer = getSlotRenderer(nonPermSlot.renderer) ?? UnknownSlot;
+    return React.createElement(Renderer, {
+      slot: nonPermSlot,
+      onResolve: (v: unknown) => client.resolveSlot(nonPermSlot.slotId, v),
+      onReject: (r?: string) => client.rejectSlot(nonPermSlot.slotId, r ?? "cancelled"),
+    });
+  }
+
+  // Overlay rendering
+  if (overlay === "model") {
+    return (
+      <ModelSwitcher client={client}
+        activeProfileId={undefined}
+        onPick={(id) => { setOverlay(null); client.swapProfile(id); }}
+        onClose={() => setOverlay(null)} />
+    );
+  }
+  if (overlay === "session" && onSwapSession) {
+    return (
+      <SessionPicker client={client} workspace={workspace}
+        activeSessionId={client.currentSessionId ?? undefined}
+        onPick={(id) => { setOverlay(null); if (id !== client.currentSessionId) onSwapSession(id); }}
+        onNew={() => { setOverlay(null); onSwapSession(null); }}
+        onClose={() => setOverlay(null)} />
+    );
+  }
+  if (overlay === "transmissions") {
+    return <TransmissionsLog transmissions={state.transmissions} onClose={() => setOverlay(null)} />;
+  }
+  if (overlay === "permissions") {
+    return <PermissionsList client={client} onClose={() => setOverlay(null)} />;
+  }
+  if (overlay === "help") {
+    return <HelpDialog onClose={() => setOverlay(null)} />;
+  }
+  if (overlay === "agents") {
+    return <AgentManager client={client} state={state} onClose={() => setOverlay(null)} />;
+  }
+
+  // Empty state
+  if (state.turns.length === 0 && !state.streamingText) {
+    return (
+      <EmptyHero width={width} height={height}
+        modelLabel={state.modelLabel} workspace={workspace} busy={state.busy}
+        onSubmit={(t: string) => client.send(t)}
+        onAbort={() => client.abort()} onQuit={onQuit} />
+    );
+  }
+
+  // Layout computation
+  const railFits = width >= NARROW;
+  const railW = !railFits || !railOpen ? 0
+    : width >= WIDE ? 32 : width >= MEDIUM ? 28 : 20;
+  const mainW = width - railW;
+  const statusH = 1;
+  const chromeH = 1;
+  const inputH = Math.min(Math.max(4, inputHeight), Math.max(4, height - 4));
+  const transcriptH = Math.max(1, height - statusH - inputH - chromeH);
+
+  return (
+    <box flexDirection="column" width={width} height={height} backgroundColor={theme.bg}>
+      <StatusBar state={state} workspace={workspace} connectionState={connState} />
+      <box flexDirection="row" flexGrow={1}>
+        <box flexDirection="column" width={mainW} height={transcriptH}>
+          <Transcript
+            turns={state.turns} streamingText={state.streamingText}
+            width={mainW} height={transcriptH} busy={state.busy}
+            activeSubagents={state.activeSubagents} compacting={state.compacting}
+            loopPhase={state.loopPhase} foregroundAgent={state.foregroundAgent}
+            showReasoning={showReasoning}
+            pendingSlots={state.displaySlots.filter((s) => s.isPermissionRequest)}
+            scrollDelta={scrollDelta} onScrollConsumed={onScrollConsumed}
+          />
+        </box>
+        {railW > 0 && <ContextRail state={state} width={railW} />}
+      </box>
+      <InputBar busy={state.busy} width={width}
+        modelLabel={state.modelLabel}
+        onSubmit={(t, imgs) => client.send(t, imgs)}
+        onAbort={() => client.abort()} onQuit={onQuit}
+        onHeightChange={handleInputHeight} />
+      <ChromeBar modelLabel={state.modelLabel}
+        contextPct={state.stats.contextPct}
+        peerCount={state.peerCount} width={width} />
+    </box>
+  );
+}
+
+function isAbortKey(key: { sequence?: string; ctrl?: boolean; name?: string }): boolean {
+  return key.sequence === "" || (key.ctrl === true && key.name === "c");
+}

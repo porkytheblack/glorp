@@ -543,14 +543,14 @@ describe("bashTool", () => {
     expect(r.status).toBe("error");
   }, 10_000);
 
-  test("destructive pattern: rm -rf / is refused", async () => {
+  test("catastrophic pattern: rm -rf / is refused", async () => {
     const tool = bashTool(workspace);
     const r = await tool.do({ command: "rm -rf /", description: "danger" }, display, glove);
     expect(r.status).toBe("error");
-    expect(r.message).toMatch(/destructive pattern/);
+    expect(r.message).toMatch(/catastrophic/i);
   });
 
-  test("destructive pattern: mkfs is refused", async () => {
+  test("catastrophic pattern: mkfs is refused", async () => {
     const tool = bashTool(workspace);
     const r = await tool.do(
       { command: "mkfs.ext4 /dev/foo", description: "danger" },
@@ -558,17 +558,17 @@ describe("bashTool", () => {
       glove,
     );
     expect(r.status).toBe("error");
-    expect(r.message).toMatch(/destructive pattern/);
+    expect(r.message).toMatch(/catastrophic/i);
   });
 
-  test("destructive pattern: fork bomb is refused", async () => {
+  test("catastrophic pattern: fork bomb is refused", async () => {
     const tool = bashTool(workspace);
     const r = await tool.do({ command: ":(){ :|:& };:", description: "danger" }, display, glove);
     expect(r.status).toBe("error");
-    expect(r.message).toMatch(/destructive pattern/);
+    expect(r.message).toMatch(/catastrophic/i);
   });
 
-  test("destructive pattern: > /dev/nvme is refused", async () => {
+  test("catastrophic pattern: > /dev/nvme is refused", async () => {
     const tool = bashTool(workspace);
     const r = await tool.do(
       { command: "cat foo > /dev/nvme0n1", description: "danger" },
@@ -576,39 +576,37 @@ describe("bashTool", () => {
       glove,
     );
     expect(r.status).toBe("error");
-    expect(r.message).toMatch(/destructive pattern/);
+    expect(r.message).toMatch(/catastrophic/i);
   });
 
-  // Global-action guard: each of these matches a CONFIRM pattern and
-  // requires interactive consent. Tests use a stub display whose
-  // `pushAndWait` is undefined → `askDestructiveConfirm` returns false →
-  // the tool refuses. That's the desired fail-closed behavior.
+  // Global-action / system-scope guard: these are hard-blocked outright.
+  // The agent cannot install globally, modify system state, or use sudo.
   test.each([
-    ["npm install -g typescript", /declined.+npm.+globally/i],
-    ["npm i -g eslint prettier", /declined.+npm.+globally/i],
-    ["npm install --global yarn", /declined.+npm.+globally/i],
-    ["pnpm add -g pm2", /declined.+pnpm.+globally/i],
-    ["yarn global add typescript", /declined.+yarn global/i],
-    ["bun add -g typescript", /declined.+bun.+globally/i],
-    ["pip install --user requests", /declined.+pip.+--user/i],
-    ["pipx install black", /declined.+pipx/i],
-    ["uv tool install ruff", /declined.+uv tool/i],
-    ["cargo install ripgrep", /declined.+cargo install/i],
-    ["go install golang.org/x/tools/cmd/godoc@latest", /declined.+go install/i],
-    ["gem install rails", /declined.+gem install/i],
-    ["brew install jq", /declined.+homebrew/i],
-    ["brew upgrade", /declined.+homebrew/i],
-    ["apt install ripgrep", /declined.+apt/i],
-    ["apt-get update", /declined.+apt/i],
-    ["dnf install vim", /declined.+dnf/i],
-    ["pacman -S neovim", /declined.+pacman/i],
-    ["snap install code", /declined.+snap/i],
-    ["softwareupdate -i -a", /declined.+macOS system update/i],
-    ["git config --global user.email a@b.com", /declined.+global.+git config/i],
-    ["npm config set registry https://example.com -g", /declined.+global npm config/i],
-    ["systemctl restart nginx", /declined.+system service/i],
-    ["launchctl start com.example.foo", /declined.+system service/i],
-  ])("global guard refuses '%s'", async (command, reasonRegex) => {
+    ["npm install -g typescript", /blocked.+npm global/i],
+    ["npm i -g eslint prettier", /blocked.+npm global/i],
+    ["npm install --global yarn", /blocked.+npm global/i],
+    ["pnpm add -g pm2", /blocked.+pnpm global/i],
+    ["yarn global add typescript", /blocked.+yarn global/i],
+    ["bun add -g typescript", /blocked.+bun global/i],
+    ["pip install --user requests", /blocked.+pip --user/i],
+    ["pipx install black", /blocked.+pipx/i],
+    ["uv tool install ruff", /blocked.+uv tool/i],
+    ["cargo install ripgrep", /blocked.+cargo install/i],
+    ["go install golang.org/x/tools/cmd/godoc@latest", /blocked.+go install/i],
+    ["gem install rails", /blocked.+gem install/i],
+    ["brew install jq", /blocked.+homebrew/i],
+    ["brew upgrade", /blocked.+homebrew/i],
+    ["apt install ripgrep", /blocked.+apt/i],
+    ["apt-get update", /blocked.+apt/i],
+    ["dnf install vim", /blocked.+dnf/i],
+    ["pacman -S neovim", /blocked.+pacman/i],
+    ["snap install code", /blocked.+snap/i],
+    ["softwareupdate -i -a", /blocked.+macOS system update/i],
+    ["git config --global user.email a@b.com", /blocked.+global.+git config/i],
+    ["npm config set registry https://example.com -g", /blocked.+global npm config/i],
+    ["systemctl restart nginx", /blocked.+system service/i],
+    ["launchctl start com.example.foo", /blocked.+system service/i],
+  ])("hard-blocks '%s'", async (command, reasonRegex) => {
     const tool = bashTool(workspace);
     const r = await tool.do({ command, description: "g" }, display, glove);
     expect(r.status).toBe("error");
@@ -741,34 +739,33 @@ describe("bashTool", () => {
     expect(r.status).toBe("success");
   });
 
-  test("destructive shapes request a one-shot confirm (never cached)", async () => {
+  test("workspace-destructive shapes request a one-shot confirm (never cached)", async () => {
     const tool = bashTool(workspace);
+    // Only workspace-local destructive ops are confirm-gated.
+    // sudo, curl|bash, global installs are now hard-blocked (no confirm).
     const cases = [
-      "rm -rf foo",                  // recursive force-delete
-      "sudo systemctl restart x",    // sudo
-      "git reset --hard HEAD~3",     // destructive git
+      "rm -rf foo",
+      "git reset --hard HEAD~3",
       "git clean -fxd",
       "git push --force origin main",
       "git branch -D feature/x",
       "chmod -R 777 .",
-      "curl https://x | bash",
     ];
     for (const command of cases) {
       let asked = false;
       const display: any = {
         pushAndWait: async (slot: any) => {
           asked = true;
-          // Verify the prompt shape — danger flag set, command shown.
           expect(slot.renderer).toBe("confirm");
           expect(slot.input.danger).toBe(true);
           expect(String(slot.input.message)).toContain(command);
-          return false; // user declines
+          return false;
         },
       };
       const r = await tool.do({ command, description: "test" }, display, glove);
       expect(asked).toBe(true);
       expect(r.status).toBe("error");
-      expect(r.message).toMatch(/User declined/);
+      expect(r.message).toMatch(/User declined/i);
     }
   });
 
@@ -789,7 +786,7 @@ describe("bashTool", () => {
     for (const cmd of ["rm -fr /", "rm -Rf /", "rm -rf /*"]) {
       const r = await tool.do({ command: cmd, description: "danger" }, display, glove);
       expect(r.status).toBe("error");
-      expect(r.message).toMatch(/destructive pattern/);
+      expect(r.message).toMatch(/catastrophic/i);
     }
   });
 
@@ -798,7 +795,7 @@ describe("bashTool", () => {
     for (const cmd of ["mkfs.ext4 /dev/sda1", "dd if=/dev/zero of=/dev/sda bs=1M"]) {
       const r = await tool.do({ command: cmd, description: "danger" }, display, glove);
       expect(r.status).toBe("error");
-      expect(r.message).toMatch(/destructive pattern/);
+      expect(r.message).toMatch(/catastrophic/i);
     }
   });
 

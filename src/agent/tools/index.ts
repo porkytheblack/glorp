@@ -9,6 +9,6 @@ export { grepTool } from "./grep.ts";
 export { lsTool } from "./ls.ts";
 export { webFetchTool } from "./webfetch.ts";
 export { transmissionTool } from "./transmission.ts";
-export { fleetDispatchTool } from "./fleet-dispatch.ts";
 export { inboxManageTool } from "./inbox-manage.ts";
+export { spawnAgentTool } from "../../orchestrator/spawn-tool.ts";
 export { askConfirmTool, showInfoTool, askChoiceTool, askTextTool } from "./modals.ts";

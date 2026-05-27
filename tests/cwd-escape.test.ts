@@ -115,20 +115,20 @@ describe("commandEscapesWorkspace — outside-workspace commands flagged", () =>
 });
 
 // =====================================================================
-// End-to-end through bashTool — refused without a real display.
+// End-to-end through bashTool — workspace escapes are hard-blocked.
 // =====================================================================
-describe("bashTool — cwd-escape commands refused without consent", () => {
+describe("bashTool — cwd-escape commands hard-blocked", () => {
   test.each([
     "cat /etc/hostname",
     "cd /tmp && pwd",
     "cd ~/Documents",
     "echo x > ~/.zshrc",
     "cp src/foo.ts /tmp/leaked.ts",
-  ])("refuses '%s' without a display", async (cmd) => {
+  ])("hard-blocks '%s'", async (cmd) => {
     const tool = bashTool(workspace);
     const r = await tool.do({ command: cmd, description: "test" }, display, glove);
     expect(r.status).toBe("error");
-    expect(r.message ?? "").toMatch(/declined/i);
+    expect(r.message ?? "").toMatch(/blocked/i);
   });
 
   test("allowlisted /dev/null still works (no prompt path triggered)", async () => {
