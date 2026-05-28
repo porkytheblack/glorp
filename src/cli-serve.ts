@@ -28,6 +28,7 @@ export async function runServe(args: CliArgs): Promise<void> {
     token,
     provider: args.provider,
     model: args.model,
+    permissionMode: args.permissionMode,
   });
 
   console.error(`listening on http://127.0.0.1:${server.port}`);

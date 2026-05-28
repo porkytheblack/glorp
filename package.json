@@ -10,7 +10,8 @@
   "scripts": {
     "start": "bun run src/cli.ts",
     "dev": "bun run --watch src/cli.ts",
-    "build": "bun build src/cli.ts --compile --minify --target=bun --outfile=dist/glorp",
+    "prebuild": "bun scripts/embed-prompts.ts",
+    "build": "bun run prebuild && bun build src/cli.ts --compile --minify --target=bun --outfile=dist/glorp",
     "install-bin": "bash scripts/install.sh",
     "bench:conventions": "bun scripts/bench-conventions.ts",
     "typecheck": "tsc --noEmit",

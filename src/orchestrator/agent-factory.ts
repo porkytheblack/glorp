@@ -2,11 +2,15 @@
  * Agent factory for building Glove runnables from blueprints.
  * In-process agents for the gen-eval loop; continuum agents for background work.
  * Both paths read prompt and tool configuration from the role registry.
+ *
+ * The subprocess factory (defineOrchestratorAgent) is the SINGLE source of truth
+ * for agent construction — agent-entrypoint.ts re-exports these definitions.
  */
 
 import { agent, z } from "glove-continuum-signal";
 import type { TriggeredAgent } from "glove-continuum-signal";
 import { Glove } from "glove-core/glove";
+import { createAdapter } from "glove-core";
 import type { DisplayManagerAdapter } from "glove-core/display-manager";
 import type { IGloveRunnable } from "glove-core/glove";
 import type { ModelAdapter, SubscriberAdapter } from "glove-core/core";
@@ -32,6 +36,26 @@ export const AgentInput = z.object({
 });
 
 export type AgentInputType = z.infer<typeof AgentInput>;
+
+// --- Subprocess helpers (called inside factory, read from env set by runner) ---
+
+function buildSubprocessModel(): ModelAdapter {
+  const provider = process.env.GLORP_MODEL_PROVIDER ?? "openrouter";
+  const model = process.env.GLORP_MODEL_NAME;
+  const baseURL = process.env.GLORP_MODEL_BASE_URL;
+  const apiKey = process.env.GLORP_MODEL_API_KEY;
+  return createAdapter({
+    provider, stream: true,
+    ...(model ? { model } : {}),
+    ...(baseURL ? { baseURL } : {}),
+    ...(apiKey ? { apiKey } : {}),
+  });
+}
+
+function enrichWithContext(prompt: string): string {
+  const ctx = process.env.GLORP_WORKSPACE_CONTEXT;
+  return ctx ? `${prompt}\n\n${ctx}` : prompt;
+}
 
 /**
  * Build a Glove runnable in-process from a blueprint.
@@ -106,35 +130,34 @@ export function defineOrchestratorAgent(
     .timeout(timeoutMs)
     .retries(0)
     .store((agentName: string) => {
+      const dd = process.env.GLORP_DATA_DIR ?? config.dataDir;
       const uid = `${agentName}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      return new GlorpStore(uid, config.dataDir);
+      return new GlorpStore(uid, dd);
     })
     .factory(async (ctx) => {
+      const dataDir = process.env.GLORP_DATA_DIR ?? config.dataDir;
+      const workspace = process.env.GLORP_WORKSPACE ?? config.workspace;
+      const meshDir = process.env.GLORP_MESH_DIR ?? config.meshDir;
       const uid = `${ctx.name}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      const store = ctx.store ?? new GlorpStore(uid, config.dataDir);
-      const display = new NoopDisplayManager();
+      const store = ctx.store ?? new GlorpStore(uid, dataDir);
+      const model = buildSubprocessModel();
+
       const builder = new Glove({
-        store,
-        model: null as any, // subprocess constructs model from env
-        displayManager: display as any,
+        store, model,
+        displayManager: new NoopDisplayManager() as any,
         serverMode: true,
-        systemPrompt: rolePrompt(role),
-        compaction_config: {
-          compaction_instructions: def.compaction,
-          max_turns: def.maxTurns,
-        },
+        systemPrompt: enrichWithContext(rolePrompt(role)),
+        compaction_config: { compaction_instructions: def.compaction, max_turns: def.maxTurns },
       });
-      const registry = createToolRegistry({
-        workspace: config.workspace,
-        dataDir: config.dataDir,
-      });
+      const registry = createToolRegistry({ workspace, dataDir });
       registerTools(builder, registry, def.tools);
+      if (ctx.subscriber) builder.addSubscriber(ctx.subscriber);
       const runnable = builder.build();
       const meshId = `${ctx.name}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      const meshAdapter = await mountAgentMesh(runnable, meshId, config.meshDir, [...def.capabilities]);
-      const origProcess = runnable.processRequest.bind(runnable);
+      const meshAdapter = await mountAgentMesh(runnable, meshId, meshDir, [...def.capabilities]);
+      const orig = runnable.processRequest.bind(runnable);
       (runnable as any).processRequest = async (prompt: string, signal?: AbortSignal) => {
-        try { return await origProcess(prompt, signal); }
+        try { return await orig(prompt, signal); }
         finally { await teardownAgentMesh(meshAdapter).catch(() => {}); }
       };
       return runnable as any;
@@ -143,11 +166,17 @@ export function defineOrchestratorAgent(
 
 /**
  * Serialize a blueprint into the AgentInputType for background dispatch.
+ * When the blueprint has customContext (user-provided system_prompt via
+ * spawn_agent), it is prepended to the prompt since subprocess factories
+ * determine the base system prompt from the role registry at build time.
  */
 export function blueprintToInput(
   blueprint: AgentBlueprint,
   prompt: string,
   config: { workspace: string; dataDir: string },
 ): AgentInputType {
-  return { prompt, workspace: config.workspace, dataDir: config.dataDir };
+  const effectivePrompt = blueprint.customContext
+    ? `[Custom context for this task]\n${blueprint.customContext}\n\n${prompt}`
+    : prompt;
+  return { prompt: effectivePrompt, workspace: config.workspace, dataDir: config.dataDir };
 }

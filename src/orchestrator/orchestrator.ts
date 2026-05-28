@@ -1,7 +1,6 @@
 /** Orchestrator: main entry point for agent orchestration. Consumer-agnostic. */
 
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { DisplayManagerAdapter } from "glove-core/display-manager";
 import type {
   AgentBlueprint,
@@ -50,7 +49,7 @@ export class Orchestrator {
     this.runner = createOrchestratorRunner(
       { dataDir: config.dataDir, workspace: config.workspace, meshDir: this.meshDir,
         providerId: sm?.providerId, modelName: sm?.model, baseURL: sm?.baseURL, apiKey: sm?.apiKey,
-        agentTimeoutMs: config.agentTimeoutMs },
+        agentTimeoutMs: config.agentTimeoutMs, workspaceContext: config.workspaceContext },
       (e) => { this.eventBus.emit(e); this.handleRunnerEvent(e); },
     );
   }
@@ -132,10 +131,10 @@ export class Orchestrator {
     if (!agent) return;
     agent.abortController.abort();
     await this.runner.cancel(agent.runId).catch(() => {});
-    await fs.rm(path.join(this.meshDir, "agents", `${id}.json`), { force: true }).catch(() => {});
     this.scheduler.unregister(id);
     this.agents.delete(id);
-    void markAgentStopped(this.meshDir, id, reason).catch(() => {});
+    // Persist stopped state. Mesh identity file stays — future agents need it.
+    await markAgentStopped(this.meshDir, id, reason).catch(() => {});
     this.eventBus.emit({ type: "agent_stopped", id, reason });
   }
 
@@ -147,7 +146,7 @@ export class Orchestrator {
       workspace: this.config.workspace, dataDir: this.config.dataDir,
       meshDir: this.meshDir, resources: this.config.resources,
       trackForwardedSlot: (slotId: string, dm: ForwardingDisplayManager) => this.forwardedSlots.set(slotId, dm),
-      createSubscriber: this.config.loopSubscriberFactory, signal,
+      createSubscriber: this.config.loopSubscriberFactory, signal, workspaceContext: this.config.workspaceContext,
     };
   }
 

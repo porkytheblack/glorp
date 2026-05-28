@@ -9,6 +9,7 @@
 
 import { buildGlorp } from "../agent/glorp.ts";
 import type { GlorpHandle, BuildGlorpOptions } from "../agent/glorp-types.ts";
+import type { PermissionMode } from "../agent/runtime/permission-mode.ts";
 import { newSessionId } from "../agent/sessions.ts";
 import { getBridge } from "../shared/bridge.ts";
 import type { Bridge } from "../shared/bridge.ts";
@@ -29,6 +30,7 @@ export class SessionPool {
     private dataDir: string,
     private defaultProvider?: string,
     private defaultModel?: string,
+    private permissionMode?: PermissionMode,
   ) {}
 
   /**
@@ -56,6 +58,7 @@ export class SessionPool {
       dataDir: this.dataDir,
       provider: opts?.provider ?? this.defaultProvider,
       model: opts?.model ?? this.defaultModel,
+      permissionMode: this.permissionMode,
     };
 
     const handle = await buildGlorp(buildOpts);

@@ -15,7 +15,7 @@ const POLL_MS = 100;
 
 export class FileMeshAdapter implements MeshAdapter {
   readonly identifier: string;
-  private baseDir: string;
+  readonly baseDir: string;
   private identity: AgentIdentity | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private handler: ((msg: IncomingMeshMessage) => Promise<void>) | null = null;
@@ -37,8 +37,12 @@ export class FileMeshAdapter implements MeshAdapter {
   async unregister(): Promise<void> {
     if (!this.identity) return;
     this.stopPolling();
+    // Mark as completed instead of deleting — other agents and future
+    // processes must be able to discover what this agent was and read
+    // messages it left behind.
     const file = path.join(this.baseDir, "agents", `${this.identity.id}.json`);
-    await fs.rm(file, { force: true });
+    const tombstone = { ...this.identity, status: "completed", completedAt: new Date().toISOString() };
+    await atomicWrite(file, JSON.stringify(tombstone)).catch(() => {});
     this.identity = null;
   }
 
@@ -125,6 +129,7 @@ export class FileMeshAdapter implements MeshAdapter {
     } catch {
       return;
     }
+    const archiveDir = path.join(this.baseDir, "processed", this.identity.id);
     for (const f of files) {
       if (this.seen.has(f)) continue;
       this.seen.add(f);
@@ -135,10 +140,18 @@ export class FileMeshAdapter implements MeshAdapter {
         const kind = msg.content?.startsWith("ack:") ? "ack" as const : "direct" as const;
         const incoming: IncomingMeshMessage = { ...msg, kind };
         await this.handler(incoming);
-        await fs.rm(path.join(dir, f), { force: true });
+        // Archive instead of delete — messages must survive agent
+        // lifecycles so future agents can reconstruct history.
+        await fs.mkdir(archiveDir, { recursive: true });
+        await fs.rename(path.join(dir, f), path.join(archiveDir, f)).catch(() => {});
         this.seen.delete(f);
       } catch (err) {
         console.error(`[mesh] failed to process ${f}:`, err);
+        // Move corrupted messages to deadletter instead of deleting
+        const dlDir = path.join(this.baseDir, "deadletter", this.identity.id);
+        await fs.mkdir(dlDir, { recursive: true }).catch(() => {});
+        await fs.rename(path.join(dir, f), path.join(dlDir, f)).catch(() => {});
+        this.seen.delete(f);
       }
     }
   }
@@ -174,5 +187,8 @@ export async function mountAgentMesh(
 }
 
 export async function teardownAgentMesh(adapter: FileMeshAdapter): Promise<void> {
+  // Marks the agent as completed and stops polling.
+  // Does NOT delete inbox, processed messages, or sender records —
+  // those must survive so future agents can read the history.
   await adapter.unregister();
 }

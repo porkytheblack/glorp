@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useTerminalDimensions, useKeyboard } from "@opentui/react";
 import { theme } from "./theme.ts";
+import { nextPermissionMode } from "../agent/runtime/permission-mode.ts";
 import { useUiState } from "./store.ts";
 import { Transcript } from "./components/transcript.tsx";
 import { ContextRail } from "./components/context-rail.tsx";
@@ -80,6 +81,7 @@ export function App({
     if (key.name === "s" && key.ctrl && onSwapSession) { setOverlay("session"); return; }
     if (key.name === "t" && key.ctrl) { setOverlay("transmissions"); return; }
     if (key.name === "p" && key.ctrl) { setOverlay("permissions"); return; }
+    if (key.name === "y" && key.ctrl) { client.setPermissionMode(nextPermissionMode(state.permissionMode)); return; }
     if (key.name === "r" && key.ctrl) { setShowReasoning((v) => !v); return; }
     if (key.name === "b" && key.ctrl) { setRailOpen((v) => !v); return; }
     if ((key.sequence === "\x1f" || (key.name === "/" && key.ctrl)) || key.name === "?" && key.ctrl) {
@@ -178,7 +180,8 @@ export function App({
         onHeightChange={handleInputHeight} />
       <ChromeBar modelLabel={state.modelLabel}
         contextPct={state.stats.contextPct}
-        peerCount={state.peerCount} width={width} />
+        peerCount={state.peerCount} width={width}
+        permissionMode={state.permissionMode} />
     </box>
   );
 }

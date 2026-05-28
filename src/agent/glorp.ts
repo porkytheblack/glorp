@@ -21,8 +21,10 @@ import { createTitleScheduler } from "./runtime/title-scheduler.ts";
 import { wrapGlorpModel } from "./runtime/model-guards.ts";
 import { VerificationTracker } from "./runtime/verification-tracker.ts";
 import { assembleAgent, wireOrchestratorToBridge } from "./runtime/assemble.ts";
+import { PermissionDM } from "./runtime/permission-mode.ts";
 import { teardownAgentMesh } from "../orchestrator/mesh-setup.ts";
 import { agentId as toAgentId } from "../orchestrator/types.ts";
+import { discoverWorkspaceContext } from "../orchestrator/workspace-context.ts";
 import type { BuildGlorpOptions, GlorpHandle } from "./glorp-types.ts";
 import type { ContentPart, Context } from "glove-core/core";
 import type { PickedModel } from "./model-picker.ts";
@@ -30,6 +32,7 @@ import type { OrchestratorConfig } from "../orchestrator/types.ts";
 import * as path from "node:path"; import * as os from "node:os";
 
 export type { BuildGlorpOptions, ExtensionCatalogue, GlorpHandle } from "./glorp-types.ts";
+export type { PermissionMode } from "./runtime/permission-mode.ts";
 export { cleanSessionTitle, generateSessionTitle };
 export { messageHasOpenTaskUpdate, modelResultHasToolCall, modelResultHasVisibleAgentOutput,
   modelResultIsIntentOnly, withEmptyResponseRetry, withIntentOnlyContinuation, withTaskUpdateContinuation } from "./runtime/model-guards.ts";
@@ -47,32 +50,32 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   let contextLimit = picked.contextLimit; let modelLabel = picked.label;
   const bridge = getBridge();
   const titleScheduler = createTitleScheduler({ store, bridge, model: picked.titleAdapter, initialTitle: await store.getTitle(), timeoutMs: TITLE_MODEL_TIMEOUT_MS });
-  const displayManager = new Displaymanager();
+  const rawDM = new Displaymanager();
+  const permissionDM = new PermissionDM(rawDM, opts.permissionMode ?? "normal");
   const labelListeners = new Set<(label: string) => void>();
   const diskExtensions = discoverExtensions(opts.workspace);
 
-  bridgeDisplaySlots(displayManager, bridge);
+  bridgeDisplaySlots(rawDM, bridge);
   const verification = new VerificationTracker();
   store.setVerificationTracker(verification);
   const refresh = createRefreshers(store, bridge, () => contextLimit);
   const meshDir = path.join(dataDir, "mesh", opts.sessionId);
-  const noop = async () => {};
-  const loopRefresh = { stats: noop, plan: noop, tasks: noop, inbox: noop };
+  const loopRefresh = { stats: async () => {}, plan: async () => {}, tasks: async () => {}, inbox: async () => {} };
+  const wsPrompt = (await discoverWorkspaceContext(opts.workspace)).promptBlock;
   const orchestrator = new Orchestrator(
     { workspace: opts.workspace, dataDir, meshDir, model: wrapGlorpModel(picked.adapter),
       subprocessModel: buildSubprocessModelConfig(picked, credentials),
-      contextLimit, resources, loopSubscriberFactory: () => createGlorpSubscriber(bridge, loopRefresh) },
-    displayManager,
+      contextLimit, resources, loopSubscriberFactory: () => createGlorpSubscriber(bridge, loopRefresh), workspaceContext: wsPrompt },
+    rawDM,
   );
-  await orchestrator.start();
-  wireOrchestratorToBridge(orchestrator, bridge);
+  await orchestrator.start(); wireOrchestratorToBridge(orchestrator, bridge);
 
   const ctxRef = { current: null as Context | null };
   const inboxContext = makeInboxContext(store);
   ctxRef.current = inboxContext;
 
   const assembleArgs = () => ({ picked, contextLimit, workspace: opts.workspace, dataDir, meshDir,
-    store, resources, orchestrator, bridge, displayManager,
+    store, resources, orchestrator, bridge, displayManager: permissionDM,
     diskExtensions, refresh, ctxRef, inboxContext, verification });
 
   let abortController: AbortController | null = null;
@@ -88,6 +91,8 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     get title() { return titleScheduler.title; },
     get extensions() { return buildExtensionCatalogue(agent); },
     get modelLabel() { return modelLabel; },
+    get permissionMode() { return permissionDM.mode; },
+    setPermissionMode(mode) { permissionDM.mode = mode; bridge.emit({ type: "permission_mode_changed", mode }); },
     onLabelChange(fn) { labelListeners.add(fn); return () => void labelListeners.delete(fn); },
     async hydrateUi() {
       await hydrateUiSession(store, bridge, contextLimit);
@@ -97,19 +102,19 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     },
     resolveSlot(slotId, value) {
       if (orchestrator.hasForwardedSlot(slotId)) { orchestrator.resolveForwardedSlot(slotId, value); bridge.emit({ type: "display_slot_resolved", slotId }); }
-      else resolveDisplaySlot(displayManager, bridge, slotId, value);
+      else resolveDisplaySlot(rawDM, bridge, slotId, value);
     },
     rejectSlot(slotId, reason) {
       if (orchestrator.hasForwardedSlot(slotId)) {
         orchestrator.rejectForwardedSlot(slotId, reason);
       } else {
-        try { displayManager.reject(slotId, reason); } catch {}
+        try { rawDM.reject(slotId, reason); } catch {}
       }
       bridge.emit({ type: "display_slot_resolved", slotId });
     },
     resolvePermission(slotId, allow) {
       if (orchestrator.hasForwardedSlot(slotId)) { orchestrator.resolveForwardedSlot(slotId, allow); bridge.emit({ type: "display_slot_resolved", slotId }); }
-      else resolveDisplaySlot(displayManager, bridge, slotId, allow);
+      else resolveDisplaySlot(rawDM, bridge, slotId, allow);
     },
     async stopAgent(id, reason) { await orchestrator.stopAgent(toAgentId(id), reason); },
     promoteAgent(id) { return orchestrator.promoteAgent(toAgentId(id)); },
@@ -173,13 +178,8 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   };
 }
 
-function userTurn(text: string, imageCount?: number) {
-  return { id: `u_${Date.now().toString(36)}`, kind: "user" as const, text, createdAt: Date.now(),
-    ...(imageCount ? { meta: { imageCount } } : {}) };
-}
-function systemTurn(text: string) {
-  return { id: `s_${Date.now().toString(36)}`, kind: "system" as const, text, createdAt: Date.now() };
-}
+const userTurn = (text: string, n?: number) => ({ id: `u_${Date.now().toString(36)}`, kind: "user" as const, text, createdAt: Date.now(), ...(n ? { meta: { imageCount: n } } : {}) });
+const systemTurn = (text: string) => ({ id: `s_${Date.now().toString(36)}`, kind: "system" as const, text, createdAt: Date.now() });
 
 function buildRequest(text: string, images?: Array<{ data: string; media_type: string }>): string | ContentPart[] {
   if (!images?.length) return text;

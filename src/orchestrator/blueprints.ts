@@ -79,6 +79,7 @@ export function blueprintForSpawn(opts: {
     tools: opts.tools ? [...opts.tools] : [...def.tools],
     capabilities: [...def.capabilities],
     systemPrompt: opts.systemPrompt ?? rolePrompt(role),
+    ...(opts.systemPrompt ? { customContext: opts.systemPrompt } : {}),
   };
 }
 

@@ -1,5 +1,6 @@
 import type { Message, ModelAdapter, ModelPromptResult, SubscriberAdapter } from "glove-core/core";
 import { isAgentSender, isIntentOnlyText } from "./intent-detect.ts";
+import { withToolArgRepair } from "./tool-arg-repair.ts";
 
 const TASK_UPDATE_TOOL_NAME = "glove_update_tasks";
 const EMPTY_RESPONSE_RETRY_PROMPT =
@@ -151,7 +152,7 @@ export function withTaskUpdateContinuation(model: ModelAdapter): ModelAdapter {
 export function wrapGlorpModel(model: ModelAdapter): ModelAdapter {
   return withIntentOnlyContinuation(
     withTaskUpdateContinuation(
-      withTrailingToolResultGuard(withEmptyResponseRetry(model)),
+      withTrailingToolResultGuard(withEmptyResponseRetry(withToolArgRepair(model))),
     ),
   );
 }

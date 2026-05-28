@@ -16,6 +16,7 @@ import { buildAgentFromBlueprint } from "./agent-factory.ts";
 import { teardownAgentMesh } from "./mesh-setup.ts";
 import { ForwardingDisplayManager } from "./forwarding-display.ts";
 import { GlorpStore } from "../agent/store.ts";
+import { extractText, buildRetryPrompt, emitAgentStats, isAbort, withWorkspaceContext } from "./loop-utils.ts";
 
 const DEFAULT_MAX_RETRIES = 3;
 
@@ -34,6 +35,8 @@ export interface LoopDeps {
   createSubscriber?: () => SubscriberAdapter;
   /** Abort signal from the consumer — cancels model calls and rejects pending display slots. */
   signal?: AbortSignal;
+  /** Workspace context block to inject into agent system prompts. */
+  workspaceContext?: string;
 }
 
 /**
@@ -57,7 +60,7 @@ export async function runGenEvalLoop(
       return result;
     }
     if (result.action === "proceed" && result.note) {
-      currentPrompt = `Previous checkpoint (${checkpoint.name}) passed. Note: ${result.note}\n\nContinue with the next phase.`;
+      currentPrompt = `Previous checkpoint (${checkpoint.name}) passed. Note: ${result.note}\n\nOriginal task:\n${opts.initialPrompt}\n\nContinue with the next phase.`;
     }
   }
 
@@ -76,11 +79,11 @@ async function runCheckpoint(
   deps: LoopDeps,
   maxRetries: number,
 ): Promise<Verdict> {
+  const genBp = deps.workspaceContext ? withWorkspaceContext(opts.generatorBlueprint, deps.workspaceContext) : opts.generatorBlueprint;
   const genStore = new GlorpStore(`orch_${opts.generatorBlueprint.id}`, deps.dataDir);
-  const evalStore = new GlorpStore(`orch_${opts.evaluatorBlueprint.id}`, deps.dataDir);
   const display = makeDisplay("generator", opts.generatorBlueprint.id, opts, deps);
   const { runnable: generator, meshAdapter } = await buildAgentFromBlueprint(
-    opts.generatorBlueprint, {
+    genBp, {
       workspace: deps.workspace, dataDir: deps.dataDir, resources: deps.resources,
       model: deps.model, contextLimit: deps.contextLimit, display: display as any,
       meshDir: deps.meshDir, subscriber: deps.createSubscriber?.(), store: genStore,
@@ -94,13 +97,13 @@ async function runCheckpoint(
     while (attempt <= maxRetries) {
       deps.signal?.throwIfAborted();
       const result = await generator.processRequest(generatorPrompt, deps.signal);
-      await emitStats(genStore, opts.generatorBlueprint, "generating", deps);
+      await emitAgentStats(genStore, opts.generatorBlueprint, "generating", deps.emit);
       let artifact = extractText(result);
       if (opts.enrichArtifact) artifact = await opts.enrichArtifact(artifact);
       deps.emit({ type: "loop_phase", loopId: opts.loopId, phase: "evaluating" });
 
       deps.signal?.throwIfAborted();
-      const verdict = await runEvaluator(artifact, checkpoint, opts, deps, evalStore);
+      const verdict = await runEvaluator(artifact, checkpoint, opts, deps);
       deps.emit({ type: "loop_phase", loopId: opts.loopId, phase: "checkpoint" });
 
       if (verdict.action === "proceed" || verdict.action === "terminate") return verdict;
@@ -129,8 +132,9 @@ async function runEvaluator(
   checkpoint: Checkpoint,
   opts: GenEvalLoopOptions,
   deps: LoopDeps,
-  store: GlorpStore,
 ): Promise<Verdict> {
+  // Fresh store per evaluation so prior retry context doesn't bleed in.
+  const store = new GlorpStore(`orch_eval_${Date.now().toString(36)}`, deps.dataDir);
   const prompt = [
     formatCriteriaBlock(checkpoint),
     "",
@@ -138,27 +142,27 @@ async function runEvaluator(
     artifact,
     "",
     "Evaluate the output above against the checkpoint criteria.",
+    "Use bash to run verification commands (typecheck, tests, lint) to independently confirm claims.",
     "Respond with a JSON verdict: { action, note?, feedback?, reason? }",
   ].join("\n");
 
+  const evalBp = deps.workspaceContext ? withWorkspaceContext(opts.evaluatorBlueprint, deps.workspaceContext) : opts.evaluatorBlueprint;
   const display = makeDisplay("evaluator", opts.evaluatorBlueprint.id, opts, deps);
-  const { runnable, meshAdapter } = await buildAgentFromBlueprint(opts.evaluatorBlueprint, {
+  const { runnable, meshAdapter } = await buildAgentFromBlueprint(evalBp, {
     workspace: deps.workspace, dataDir: deps.dataDir, contextLimit: deps.contextLimit,
     model: deps.model, display: display as any, meshDir: deps.meshDir,
     subscriber: deps.createSubscriber?.(), store,
   });
   try {
     const result = await runnable.processRequest(prompt, deps.signal);
-    await emitStats(store, opts.evaluatorBlueprint, "evaluating", deps);
+    await emitAgentStats(store, opts.evaluatorBlueprint, "evaluating", deps.emit);
     return parseVerdict(extractText(result));
   } finally {
     if (meshAdapter) await teardownAgentMesh(meshAdapter).catch(() => {});
   }
 }
 
-/** Create a forwarding display manager for a loop agent.
- *  Foreground role forwards ALL slot types; background forwards permissions only.
- *  Abort signal auto-rejects pending slots so pushAndWait calls unblock. */
+/** Create a forwarding display manager for a loop agent. */
 function makeDisplay(
   role: "generator" | "evaluator",
   agentId: string,
@@ -172,27 +176,4 @@ function makeDisplay(
   }, isForeground);
   if (deps.signal) deps.signal.addEventListener("abort", () => void dm.clearStack(), { once: true });
   return dm;
-}
-
-function isAbort(err: unknown, signal?: AbortSignal): boolean {
-  return (err as any)?.name === "AbortError" || signal?.aborted === true;
-}
-
-function buildRetryPrompt(original: string, feedback: string, attempt: number, max: number): string {
-  return `[Retry ${attempt}/${max}]\n\nThe evaluator requested revisions:\n${feedback}\n\nOriginal task:\n${original}\n\nAddress the feedback above and produce an improved output.`;
-}
-
-async function emitStats(
-  store: GlorpStore, bp: AgentBlueprint, phase: LoopPhase, deps: LoopDeps,
-): Promise<void> {
-  const t = await store.getTokenCounts();
-  deps.emit({ type: "agent_stats", agentId: bp.id, label: bp.label, role: bp.role, phase, turns: await store.getTurnCount(), tokensIn: t.in, tokensOut: t.out });
-}
-
-function extractText(result: unknown): string {
-  if (result && typeof result === "object" && "messages" in result) {
-    const msgs = (result as { messages?: Array<{ text?: string }> }).messages ?? [];
-    return msgs.at(-1)?.text ?? "(no output)";
-  }
-  return (result as { text?: string })?.text ?? "(no output)";
 }

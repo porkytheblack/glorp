@@ -58,6 +58,8 @@ export interface AgentBlueprint {
   tools: string[];
   /** Capabilities advertised on the mesh network. */
   capabilities?: string[];
+  /** User-provided custom context to forward to subprocess (not the default role prompt). */
+  customContext?: string;
 }
 
 /** Emitted to consumers whenever orchestrator state changes. */
@@ -121,6 +123,8 @@ export interface OrchestratorConfig {
   agentTimeoutMs?: number;
   /** Factory for subscribers attached to loop agents for UI observability. */
   loopSubscriberFactory?: () => SubscriberAdapter;
+  /** Pre-computed workspace context block for agent prompt injection. */
+  workspaceContext?: string;
 }
 
 /** Convenience: mint an AgentId from a plain string. */

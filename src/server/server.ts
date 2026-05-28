@@ -24,6 +24,8 @@ import { GLORP_VERSION } from "../shared/version.ts";
 import { CredentialsStore } from "../agent/credentials.ts";
 import type { SendMessageRequest } from "../protocol/rest.ts";
 
+import type { PermissionMode } from "../agent/runtime/permission-mode.ts";
+
 export interface ServerConfig {
   workspace: string;
   dataDir: string;
@@ -31,6 +33,7 @@ export interface ServerConfig {
   token?: string;
   provider?: string;
   model?: string;
+  permissionMode?: PermissionMode;
 }
 
 const WS_PATH_RE = /^\/api\/v1\/sessions\/([^/]+)\/ws$/;
@@ -53,7 +56,7 @@ export async function startServer(
   config: ServerConfig,
 ): Promise<{ port: number; stop: () => Promise<void> }> {
   const port = config.port ?? DEFAULT_PORT;
-  const pool = new SessionPool(config.workspace, config.dataDir, config.provider, config.model);
+  const pool = new SessionPool(config.workspace, config.dataDir, config.provider, config.model, config.permissionMode);
   const broadcaster = new Broadcaster();
   const startedAt = Date.now();
   const credentials = new CredentialsStore(config.dataDir);

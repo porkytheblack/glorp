@@ -22,7 +22,9 @@ import { registerHooks } from "./hooks.ts";
 import { registerBuiltInSkills, registerDiskSkills } from "./skills.ts";
 import { createRefreshers } from "./refresh.ts";
 import { wrapGlorpModel } from "./model-guards.ts";
+import { withVerificationEnforcement } from "./verification-guard.ts";
 import { VerificationTracker } from "./verification-tracker.ts";
+import type { DisplayManagerAdapter } from "glove-core/display-manager";
 import type { IGloveRunnable } from "glove-core/glove";
 import type { Context } from "glove-core/core";
 
@@ -36,7 +38,8 @@ export interface AssembleArgs {
   resources: ReturnType<typeof createSessionResources>;
   orchestrator: Orchestrator;
   bridge: ReturnType<typeof getBridge>;
-  displayManager: Displaymanager;
+  /** The display manager to use — may already be wrapped (e.g. PermissionDM). */
+  displayManager: DisplayManagerAdapter;
   diskExtensions: ExtensionsBundle;
   refresh: ReturnType<typeof createRefreshers>;
   ctxRef: { current: Context | null };
@@ -50,7 +53,7 @@ export interface AssembleResult {
 }
 
 export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult> {
-  const model = wrapGlorpModel(args.picked.adapter);
+  const model = withVerificationEnforcement(wrapGlorpModel(args.picked.adapter), args.verification);
   const builder = new Glove({
     store: args.store,
     model,

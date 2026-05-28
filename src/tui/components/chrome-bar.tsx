@@ -6,10 +6,18 @@ interface Props {
   contextPct: number;
   peerCount: number;
   width: number;
+  permissionMode: "normal" | "auto" | "bypass";
 }
 
-export function ChromeBar({ modelLabel, contextPct, peerCount, width }: Props) {
+const MODE_DISPLAY: Record<string, { label: string; color: string }> = {
+  normal: { label: "normal", color: theme.textMuted },
+  auto:   { label: "auto",   color: theme.warning },
+  bypass: { label: "bypass", color: theme.error },
+};
+
+export function ChromeBar({ modelLabel, contextPct, peerCount, width, permissionMode }: Props) {
   const pctColor = contextPct >= 85 ? theme.error : contextPct >= 65 ? theme.warning : theme.success;
+  const mode = MODE_DISPLAY[permissionMode] ?? MODE_DISPLAY.normal;
   return (
     <box flexDirection="row" height={1} backgroundColor={theme.bgAccent} paddingX={1} width={width}>
       <text fg={theme.textMuted}>{truncate(modelLabel || "no model", 20)}</text>
@@ -32,6 +40,8 @@ export function ChromeBar({ modelLabel, contextPct, peerCount, width }: Props) {
         <span fg={theme.text}>^R</span> reasoning
         <span fg={theme.textDim}> · </span>
         <span fg={theme.text}>^B</span> rail
+        <span fg={theme.textDim}> · </span>
+        <span fg={theme.text}>^Y</span> <span fg={mode.color}>{mode.label}</span>
         <span fg={theme.textDim}> · </span>
         <span fg={theme.text}>^V</span> paste img
       </text>

@@ -43,13 +43,13 @@ export const ROLE_DEFS: Readonly<Record<string, RoleDef>> = {
   evaluator: {
     name: "Evaluator",
     description:
-      "Verifies generator output against checkpoint criteria. Read-only, returns a structured verdict.",
+      "Verifies generator output against checkpoint criteria. Read + bash for verification, returns a structured verdict.",
     promptKey: "agents/evaluator.md",
-    tools: [...READ],
+    tools: [...READ, "bash"],
     capabilities: ["evaluate", "verify"],
     compaction:
-      "Preserve all verdict decisions, checkpoint names, criteria checked, and feedback given. Drop file-reading output already reduced to findings.",
-    maxTurns: 10,
+      "Preserve all verdict decisions, checkpoint names, criteria checked, feedback given, and verification command outputs. Drop file-reading output already reduced to findings.",
+    maxTurns: 15,
   },
   researcher: {
     name: "Researcher",

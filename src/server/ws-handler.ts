@@ -52,6 +52,7 @@ export function handleWsOpen(ws: ServerWebSocket<WsData>): void {
     workspace: ctx.workspace,
     peer_count: ctx.broadcaster.clientCount,
     model_label: ctx.handle.modelLabel || undefined,
+    permission_mode: ctx.handle.permissionMode,
     seq: 0,
     ts: new Date().toISOString(),
   });

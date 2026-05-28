@@ -128,6 +128,7 @@ export type BridgeEvent =
   | { type: "skill"; name: string; source: "user" | "agent" }
   | { type: "display_slot_pushed"; slot: DisplaySlotEvent }
   | { type: "display_slot_resolved"; slotId: string }
+  | { type: "permission_mode_changed"; mode: string }
   | { type: "session_reset" };
 
 /** @deprecated kept for back-compat — replaced by DisplaySlotEvent + isPermissionRequest. */

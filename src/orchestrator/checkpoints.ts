@@ -39,6 +39,31 @@ export const ITERATION_DONE: Checkpoint = {
   ],
 };
 
+/** Checkpoint: code compiles and critical paths exist. */
+export const IMPLEMENTATION_COMPLETE: Checkpoint = {
+  name: "implementation_complete",
+  description: "Code changes are complete, compilable, and structurally sound.",
+  criteria: [
+    "All files from the plan are created or modified",
+    "Code compiles without type errors",
+    "No placeholder implementations, TODOs, or mock data",
+    "Error handling covers expected failure modes",
+    "Follows existing project conventions and patterns",
+  ],
+};
+
+/** Checkpoint: automated verification passes. */
+export const VERIFICATION_PASSED: Checkpoint = {
+  name: "verification_passed",
+  description: "Automated verification (typecheck, tests, lint) passes.",
+  criteria: [
+    "Typecheck passes with no errors",
+    "All existing tests still pass",
+    "New tests added for new functionality",
+    "Lint passes or only has pre-existing warnings",
+  ],
+};
+
 export function makeCheckpoint(
   name: string,
   description: string,
