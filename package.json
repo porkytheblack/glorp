@@ -7,6 +7,30 @@
   "bin": {
     "glorp": "./bin/glorp.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/embed-prompts.ts",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/porkytheblack/glorp.git"
+  },
+  "homepage": "https://github.com/porkytheblack/glorp",
+  "bugs": {
+    "url": "https://github.com/porkytheblack/glorp/issues"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "cli",
+    "glove",
+    "agent",
+    "orchestrator",
+    "bun"
+  ],
   "scripts": {
     "start": "bun run src/cli.ts",
     "dev": "bun run --watch src/cli.ts",
