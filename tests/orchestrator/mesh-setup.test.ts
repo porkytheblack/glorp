@@ -33,11 +33,16 @@ describe("FileMeshAdapter", () => {
       expect(fs.existsSync(path.join(tmpDir, "inbox", "agent-a"))).toBe(true);
     });
 
-    test("unregister removes identity file", async () => {
+    test("unregister marks identity as completed (not deleted)", async () => {
       const adapter = new FileMeshAdapter("agent-a", tmpDir);
       await adapter.register({ id: "agent-a", name: "A", description: "", capabilities: [] });
       await adapter.unregister();
-      expect(fs.existsSync(path.join(tmpDir, "agents", "agent-a.json"))).toBe(false);
+      const file = path.join(tmpDir, "agents", "agent-a.json");
+      expect(fs.existsSync(file)).toBe(true);
+      const data = JSON.parse(fs.readFileSync(file, "utf-8"));
+      expect(data.id).toBe("agent-a");
+      expect(data.status).toBe("completed");
+      expect(data.completedAt).toBeDefined();
     });
 
     test("unregister stops polling", async () => {
@@ -174,9 +179,11 @@ describe("FileMeshAdapter", () => {
       expect(received).toHaveLength(1);
       expect(received[0].content).toBe("ping");
 
-      // File should be deleted after processing
+      // File should be archived (moved from inbox to processed/)
       const remaining = fs.readdirSync(inboxDir).filter((f) => f.endsWith(".json"));
       expect(remaining).toHaveLength(0);
+      const archived = fs.readdirSync(path.join(tmpDir, "processed", "listener")).filter((f) => f.endsWith(".json"));
+      expect(archived).toHaveLength(1);
 
       await adapter.unregister();
     });

@@ -15,6 +15,14 @@ export function StatusBar({ state, workspace, connectionState }: Props) {
       <text fg={theme.accent}><strong>glorp</strong></text>
       <text fg={theme.textDim}> </text>
       <text fg={status.color}>{status.icon} {status.label}</text>
+      {state.permissionMode !== "normal" && (
+        <>
+          <text fg={theme.textDim}> · </text>
+          <text fg={modeColor(state.permissionMode)}>
+            {state.permissionMode === "auto" ? "⚡auto" : "⏩bypass"}
+          </text>
+        </>
+      )}
       {state.title && (
         <>
           <text fg={theme.textDim}> · </text>
@@ -54,6 +62,10 @@ function contextColor(pct: number): string {
   if (pct >= 85) return theme.error;
   if (pct >= 65) return theme.warning;
   return theme.success;
+}
+
+function modeColor(mode: string): string {
+  return mode === "bypass" ? theme.error : theme.warning;
 }
 
 function truncate(s: string, max: number): string {

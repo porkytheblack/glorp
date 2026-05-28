@@ -28,6 +28,7 @@ export interface UiState {
   mood: "idle" | "thinking" | "working" | "speaking" | "glitched" | "error";
   peerCount: number;
   modelLabel: string;
+  permissionMode: "normal" | "auto" | "bypass";
 }
 
 export type UiAction =
@@ -59,7 +60,8 @@ export type UiAction =
   | { kind: "session_reset" }
   | { kind: "error"; message: string }
   | { kind: "peer_count"; count: number }
-  | { kind: "model_label_changed"; label: string };
+  | { kind: "model_label_changed"; label: string }
+  | { kind: "permission_mode_changed"; mode: "normal" | "auto" | "bypass" };
 
 export const initialUiState: UiState = {
   turns: [], title: null, streamingText: "", busy: false, plan: null, tasks: [],
@@ -67,7 +69,7 @@ export const initialUiState: UiState = {
   loopVerdicts: [], foregroundAgent: null, planStatus: null,
   stats: { turns: 0, tokens_in: 0, tokens_out: 0, contextPct: 0 },
   compacting: false, activeSubagents: [], transmissions: [], runnerStats: {},
-  displaySlots: [], mood: "idle", peerCount: 0, modelLabel: "",
+  displaySlots: [], mood: "idle", peerCount: 0, modelLabel: "", permissionMode: "normal",
 };
 
 export function reduceUiState(state: UiState, action: UiAction): UiState {
@@ -141,6 +143,8 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
       next = { ...state, peerCount: action.count }; break;
     case "model_label_changed":
       next = { ...state, modelLabel: action.label }; break;
+    case "permission_mode_changed":
+      next = { ...state, permissionMode: action.mode }; break;
   }
   return { ...next, mood: moodFrom(next) };
 }

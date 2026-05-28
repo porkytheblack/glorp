@@ -38,6 +38,7 @@ function bridgeEventToAction(ev: BridgeEvent): UiAction | null {
     case "runner_agent_stats": return { kind: "runner_agent_stats", agent: ev.agent };
     case "display_slot_pushed": return { kind: "display_slot_pushed", slot: ev.slot };
     case "display_slot_resolved": return { kind: "display_slot_resolved", slotId: ev.slotId };
+    case "permission_mode_changed": return { kind: "permission_mode_changed", mode: ev.mode as UiState["permissionMode"] };
     case "session_reset": return { kind: "session_reset" };
     case "error": return { kind: "error", message: ev.message };
   }
@@ -64,11 +65,10 @@ export function useUiState(client: GlorpClient): UiState {
         dispatchRef.current({ kind: "model_label_changed", label: labelMsg.label });
       }
       if (msg.type === "server_hello") {
-        const hello = msg as { peer_count: number; workspace: string; model_label?: string };
+        const hello = msg as { peer_count: number; workspace: string; model_label?: string; permission_mode?: string };
         dispatchRef.current({ kind: "peer_count", count: hello.peer_count });
-        if (hello.model_label) {
-          dispatchRef.current({ kind: "model_label_changed", label: hello.model_label });
-        }
+        if (hello.model_label) dispatchRef.current({ kind: "model_label_changed", label: hello.model_label });
+        if (hello.permission_mode) dispatchRef.current({ kind: "permission_mode_changed", mode: hello.permission_mode as UiState["permissionMode"] });
       }
     });
   }, [client]);

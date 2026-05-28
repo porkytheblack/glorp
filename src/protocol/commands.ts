@@ -96,6 +96,12 @@ export interface CmdPromoteAgent extends Envelope {
   agent_id: string;
 }
 
+/** Change permission mode at runtime. Maps to GlorpHandle.setPermissionMode(). */
+export interface CmdSetPermissionMode extends Envelope {
+  type: "set_permission_mode";
+  mode: "normal" | "auto" | "bypass";
+}
+
 export type ClientMessage =
   | ClientHello
   | CmdSendMessage
@@ -109,4 +115,5 @@ export type ClientMessage =
   | CmdClearPermissionKey
   | CmdResync
   | CmdStopAgent
-  | CmdPromoteAgent;
+  | CmdPromoteAgent
+  | CmdSetPermissionMode;

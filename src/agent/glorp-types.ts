@@ -5,6 +5,7 @@ import type { GlorpStore } from "./store.ts";
 import type { CredentialsStore } from "./credentials.ts";
 import type { ModelCatalog } from "./model-catalog.ts";
 import type { ProjectConfig } from "./project-config.ts";
+import type { PermissionMode } from "./runtime/permission-mode.ts";
 
 export interface ExtensionCatalogue {
   slash: Array<{ name: string; description: string }>;
@@ -46,6 +47,10 @@ export interface GlorpHandle {
   catalog: ModelCatalog;
   /** Active project config merged from glorp.json layers. */
   projectConfig: ProjectConfig;
+  /** Current permission mode (normal / auto / bypass). */
+  readonly permissionMode: PermissionMode;
+  /** Change the permission mode at runtime. Emits a bridge event. */
+  setPermissionMode(mode: PermissionMode): void;
 }
 
 export interface BuildGlorpOptions {
@@ -55,4 +60,11 @@ export interface BuildGlorpOptions {
   provider?: string;
   model?: string;
   credentials?: CredentialsStore;
+  /**
+   * Controls how tool-execution permission prompts are handled.
+   *   "normal"  — ask the user every time (default)
+   *   "auto"    — auto-approve safe ops; escalate destructive + interactive
+   *   "bypass"  — auto-approve everything; zero permission prompts
+   */
+  permissionMode?: PermissionMode;
 }

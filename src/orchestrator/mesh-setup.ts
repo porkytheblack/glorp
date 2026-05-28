@@ -37,8 +37,12 @@ export class FileMeshAdapter implements MeshAdapter {
   async unregister(): Promise<void> {
     if (!this.identity) return;
     this.stopPolling();
+    // Mark as completed instead of deleting — other agents and future
+    // processes must be able to discover what this agent was and read
+    // messages it left behind.
     const file = path.join(this.baseDir, "agents", `${this.identity.id}.json`);
-    await fs.rm(file, { force: true });
+    const tombstone = { ...this.identity, status: "completed", completedAt: new Date().toISOString() };
+    await atomicWrite(file, JSON.stringify(tombstone)).catch(() => {});
     this.identity = null;
   }
 
@@ -125,6 +129,7 @@ export class FileMeshAdapter implements MeshAdapter {
     } catch {
       return;
     }
+    const archiveDir = path.join(this.baseDir, "processed", this.identity.id);
     for (const f of files) {
       if (this.seen.has(f)) continue;
       this.seen.add(f);
@@ -135,14 +140,17 @@ export class FileMeshAdapter implements MeshAdapter {
         const kind = msg.content?.startsWith("ack:") ? "ack" as const : "direct" as const;
         const incoming: IncomingMeshMessage = { ...msg, kind };
         await this.handler(incoming);
-        await fs.rm(path.join(dir, f), { force: true });
-        // Clean up sender record after successful delivery
-        await fs.rm(path.join(this.baseDir, "senders", `${msg.id}.txt`), { force: true }).catch(() => {});
+        // Archive instead of delete — messages must survive agent
+        // lifecycles so future agents can reconstruct history.
+        await fs.mkdir(archiveDir, { recursive: true });
+        await fs.rename(path.join(dir, f), path.join(archiveDir, f)).catch(() => {});
         this.seen.delete(f);
       } catch (err) {
         console.error(`[mesh] failed to process ${f}:`, err);
-        // Remove corrupted/unparseable messages to prevent infinite retry
-        await fs.rm(path.join(dir, f), { force: true }).catch(() => {});
+        // Move corrupted messages to deadletter instead of deleting
+        const dlDir = path.join(this.baseDir, "deadletter", this.identity.id);
+        await fs.mkdir(dlDir, { recursive: true }).catch(() => {});
+        await fs.rename(path.join(dir, f), path.join(dlDir, f)).catch(() => {});
         this.seen.delete(f);
       }
     }
@@ -179,17 +187,8 @@ export async function mountAgentMesh(
 }
 
 export async function teardownAgentMesh(adapter: FileMeshAdapter): Promise<void> {
+  // Marks the agent as completed and stops polling.
+  // Does NOT delete inbox, processed messages, or sender records —
+  // those must survive so future agents can read the history.
   await adapter.unregister();
-  // Best-effort cleanup of any sender records this agent created
-  await pruneSenders(adapter.baseDir).catch(() => {});
-}
-
-/** Remove sender records whose corresponding inbox message no longer exists. */
-async function pruneSenders(baseDir: string): Promise<void> {
-  const dir = path.join(baseDir, "senders");
-  let files: string[];
-  try { files = await fs.readdir(dir); } catch { return; }
-  for (const f of files) {
-    await fs.rm(path.join(dir, f), { force: true }).catch(() => {});
-  }
 }

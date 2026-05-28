@@ -1,7 +1,6 @@
 /** Orchestrator: main entry point for agent orchestration. Consumer-agnostic. */
 
 import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { DisplayManagerAdapter } from "glove-core/display-manager";
 import type {
   AgentBlueprint,
@@ -134,9 +133,8 @@ export class Orchestrator {
     await this.runner.cancel(agent.runId).catch(() => {});
     this.scheduler.unregister(id);
     this.agents.delete(id);
-    // Persist state first, then clean up mesh registration file.
+    // Persist stopped state. Mesh identity file stays — future agents need it.
     await markAgentStopped(this.meshDir, id, reason).catch(() => {});
-    await fs.rm(path.join(this.meshDir, "agents", `${id}.json`), { force: true }).catch(() => {});
     this.eventBus.emit({ type: "agent_stopped", id, reason });
   }
 

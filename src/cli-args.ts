@@ -4,6 +4,7 @@
 
 import * as path from "node:path";
 import { GLORP_VERSION } from "./shared/version.ts";
+import type { PermissionMode } from "./agent/runtime/permission-mode.ts";
 
 export interface CliArgs {
   command: "tui" | "serve" | "headless" | "help" | "version";
@@ -14,6 +15,7 @@ export interface CliArgs {
   prompt?: string;
   port?: number;
   token?: string;
+  permissionMode?: PermissionMode;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -38,6 +40,8 @@ export function parseCliArgs(argv: string[]): CliArgs {
       args.prompt = argv[++i];
       continue;
     }
+    if (a === "--auto-mode") { args.permissionMode = "auto"; continue; }
+    if (a === "--bypass") { args.permissionMode = "bypass"; continue; }
     if (!a.startsWith("-")) {
       args.prompt = args.prompt ? `${args.prompt} ${a}` : a;
     }
@@ -60,6 +64,8 @@ OPTIONS
       --port <port>        Server port (default: 3271)
       --token <token>      Bearer token for server auth
   -p, --print <prompt>     Run one prompt, print result, exit
+      --auto-mode          Auto-approve safe ops; escalate destructive only
+      --bypass             No permission prompts at all (⚠ use with caution)
   -v, --version            Print version
   -h, --help               This help
 

@@ -40,6 +40,7 @@ export async function runTui(args: CliArgs): Promise<void> {
       workspace: args.workspace, dataDir, port,
       token: args.token ?? process.env.GLORP_TOKEN,
       provider: args.provider, model: args.model,
+      permissionMode: args.permissionMode,
     });
     url = `http://127.0.0.1:${srv.port}`;
     embeddedStop = srv.stop;

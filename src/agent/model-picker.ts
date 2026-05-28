@@ -36,6 +36,11 @@ const CHEAP_TITLE_MODELS: Record<string, string> = {
   mimo: "mimo-v2.5",
 };
 
+/** Default output-token budget for the main agent — generous for coding tasks. */
+const DEFAULT_MAX_TOKENS = 32_768;
+/** Title generation is a single short summary — keep the budget tight. */
+const TITLE_MAX_TOKENS = 1024;
+
 export interface PickModelOptions {
   /** Explicit provider id from CLI flags. Takes precedence over everything else. */
   provider?: string;
@@ -97,24 +102,20 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
   // 1. Explicit CLI flags.
   if (opts.provider) {
     const model = opts.model ?? defaultModelFor(opts.provider);
-    const adapter = await buildAdapter({ providerId: opts.provider, model });
-    const titleAdapter = await buildTitleAdapter({
-      providerId: opts.provider,
-      mainAdapter: adapter,
-    });
     const info = resolveModelInfo({
-      providerId: opts.provider,
-      model,
-      catalog: opts.catalog,
-      projectConfig: opts.projectConfig,
+      providerId: opts.provider, model,
+      catalog: opts.catalog, projectConfig: opts.projectConfig,
+    });
+    const adapter = await buildAdapter({
+      providerId: opts.provider, model, maxTokens: resolveMaxTokens(info),
+    });
+    const titleAdapter = await buildTitleAdapter({
+      providerId: opts.provider, mainAdapter: adapter,
     });
     return {
-      adapter,
-      titleAdapter,
+      adapter, titleAdapter,
       label: labelFor(opts.provider, model),
-      providerId: opts.provider,
-      model,
-      modelInfo: info,
+      providerId: opts.provider, model, modelInfo: info,
       contextLimit: resolveContextLimit({ info }),
     };
   }
@@ -131,36 +132,24 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
         activeVariant?.variant.reasoning
           ? normaliseReasoning(activeVariant.variant.reasoning as ReasoningConfig)
           : normaliseReasoning(profile.reasoning);
-      const adapter = await buildAdapter({
-        providerId: profile.providerId,
-        model: profile.model,
-        reasoning,
-        provider,
-      });
-      const titleAdapter = await buildTitleAdapter({
-        providerId: profile.providerId,
-        provider,
-        profile,
-        mainAdapter: adapter,
-      });
       let info = resolveModelInfo({
-        providerId: profile.providerId,
-        model: profile.model,
-        provider,
-        catalog: opts.catalog,
-        projectConfig: opts.projectConfig,
+        providerId: profile.providerId, model: profile.model, provider,
+        catalog: opts.catalog, projectConfig: opts.projectConfig,
       });
       if (activeVariant?.variant.outputLimit) {
         info = { ...info, output: activeVariant.variant.outputLimit };
       }
+      const adapter = await buildAdapter({
+        providerId: profile.providerId, model: profile.model,
+        reasoning, provider, maxTokens: resolveMaxTokens(info),
+      });
+      const titleAdapter = await buildTitleAdapter({
+        providerId: profile.providerId, provider, profile, mainAdapter: adapter,
+      });
       return {
-        adapter,
-        titleAdapter,
+        adapter, titleAdapter,
         label: labelFor(profile.providerId, profile.model, reasoning, activeVariant?.name),
-        providerId: profile.providerId,
-        model: profile.model,
-        profile,
-        modelInfo: info,
+        providerId: profile.providerId, model: profile.model, profile, modelInfo: info,
         contextLimit: resolveContextLimit({ profile, provider, info }),
       };
     }
@@ -170,21 +159,19 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
   const envProvider = envDetectedProvider();
   if (envProvider) {
     const model = defaultModelFor(envProvider);
-    const adapter = await buildAdapter({ providerId: envProvider });
-    const titleAdapter = await buildTitleAdapter({
-      providerId: envProvider,
-      mainAdapter: adapter,
-    });
     const info = resolveModelInfo({
       providerId: envProvider, model, catalog: opts.catalog, projectConfig: opts.projectConfig,
     });
+    const adapter = await buildAdapter({
+      providerId: envProvider, maxTokens: resolveMaxTokens(info),
+    });
+    const titleAdapter = await buildTitleAdapter({
+      providerId: envProvider, mainAdapter: adapter,
+    });
     return {
-      adapter,
-      titleAdapter,
+      adapter, titleAdapter,
       label: labelFor(envProvider, model),
-      providerId: envProvider,
-      model,
-      modelInfo: info,
+      providerId: envProvider, model, modelInfo: info,
       contextLimit: resolveContextLimit({ info }),
     };
   }
@@ -213,6 +200,7 @@ async function buildTitleAdapter(args: {
       providerId: args.providerId,
       model: titleModel,
       provider: args.provider,
+      maxTokens: TITLE_MAX_TOKENS,
     });
   } catch {
     return args.mainAdapter;
@@ -238,6 +226,12 @@ function resolveContextLimit(args: {
   if (args.provider?.contextLimit && args.provider.contextLimit > 0) return args.provider.contextLimit;
   if (args.info?.context && args.info.context > 0) return args.info.context;
   return DEFAULT_FALLBACK_CONTEXT_LIMIT;
+}
+
+/** Use the catalog's advertised output limit when available, else the generous default. */
+function resolveMaxTokens(info?: ModelInfo): number {
+  if (info?.output && info.output > 0) return info.output;
+  return DEFAULT_MAX_TOKENS;
 }
 
 /**
@@ -280,6 +274,8 @@ async function buildAdapter(args: {
   reasoning?: ReasoningConfig;
   /** Provider config from credentials store, when available. */
   provider?: ProviderConfig;
+  /** Output-token budget. Resolved from catalog output limit or {@link DEFAULT_MAX_TOKENS}. */
+  maxTokens?: number;
 }): Promise<ModelAdapter> {
   const { providerId, model: modelArg, reasoning, provider } = args;
   const effectiveId = effectiveProviderId(providerId, provider);
@@ -295,6 +291,7 @@ async function buildAdapter(args: {
       apiKey,
       model,
       stream: true,
+      maxTokens: args.maxTokens ?? DEFAULT_MAX_TOKENS,
       ...(baseURL ? { baseURL } : {}),
     });
   }
@@ -317,7 +314,7 @@ async function buildAdapter(args: {
       apiKey,
       model,
       stream: true,
-      maxTokens: 8192,
+      maxTokens: args.maxTokens ?? DEFAULT_MAX_TOKENS,
       ...(baseURL ? { baseURL } : {}),
       ...(effort ? { reasoningEffort: effort } : {}),
     });
@@ -330,6 +327,7 @@ async function buildAdapter(args: {
     baseURL: baseURL ?? defaultBaseURLFor(effectiveId),
     model,
     stream: true,
+    maxTokens: args.maxTokens ?? DEFAULT_MAX_TOKENS,
   };
   if (reasoning && reasoning.kind !== "off" && modelAcceptsReasoning(effectiveId, model)) {
     compatOpts.reasoning = translateReasoning(reasoning);

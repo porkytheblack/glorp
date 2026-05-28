@@ -43,5 +43,8 @@ export function dispatchCommand(msg: ClientMessage, handle: GlorpHandle): void {
     case "promote_agent":
       handle.promoteAgent(msg.agent_id);
       break;
+    case "set_permission_mode":
+      handle.setPermissionMode(msg.mode);
+      break;
   }
 }

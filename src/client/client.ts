@@ -118,6 +118,7 @@ export class GlorpClient {
   resync(): void { this.sendCmd({ type: "resync" }); }
   stopAgent(id: string, reason?: string): void { this.sendCmd({ type: "stop_agent", agent_id: id, reason }); }
   promoteAgent(id: string): void { this.sendCmd({ type: "promote_agent", agent_id: id }); }
+  setPermissionMode(mode: "normal" | "auto" | "bypass"): void { this.sendCmd({ type: "set_permission_mode", mode }); }
 
   // ── Internal: WebSocket ───────────────────────────────────
   private doConnect(): void {
