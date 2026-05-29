@@ -38,6 +38,12 @@ async function main(): Promise<void> {
       return;
     }
 
+    case "mesh": {
+      const { runMesh } = await import("./cli-mesh.ts");
+      await runMesh(args);
+      return;
+    }
+
     case "headless": {
       const { runHeadless } = await import("./cli-headless.ts");
       await runHeadless(args);

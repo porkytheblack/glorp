@@ -7,7 +7,7 @@ import { GLORP_VERSION } from "./shared/version.ts";
 import type { PermissionMode } from "./agent/runtime/permission-mode.ts";
 
 export interface CliArgs {
-  command: "tui" | "serve" | "headless" | "help" | "version" | "migrate" | "doctor";
+  command: "tui" | "serve" | "headless" | "help" | "version" | "migrate" | "doctor" | "mesh";
   workspace: string;
   sessionId: string;
   provider?: string;
@@ -18,6 +18,8 @@ export interface CliArgs {
   permissionMode?: PermissionMode;
   /** `glorp doctor --kill`: terminate the stale glorp processes it finds. */
   doctorKill?: boolean;
+  /** `glorp mesh <sub>`: subcommand (agents | log | summary). */
+  meshSub?: string;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -31,6 +33,12 @@ export function parseCliArgs(argv: string[]): CliArgs {
     if (a === "serve") { args.command = "serve"; continue; }
     if (a === "migrate") { args.command = "migrate"; continue; }
     if (a === "doctor") { args.command = "doctor"; continue; }
+    if (a === "mesh") {
+      args.command = "mesh";
+      const next = argv[i + 1];
+      if (next && !next.startsWith("-")) { args.meshSub = next; i++; }
+      continue;
+    }
     if (a === "--kill") { args.doctorKill = true; continue; }
     if (a === "-h" || a === "--help") { args.command = "help"; continue; }
     if (a === "-v" || a === "--version") { args.command = "version"; continue; }
@@ -61,6 +69,7 @@ USAGE
   glorp serve [options]             Start the agent server only
   glorp migrate                     Upgrade stored sessions to the latest schema
   glorp doctor [--kill]             Diagnose / clean up stale glorp processes & state
+  glorp mesh [agents|log]           Inspect the inter-agent mesh history
   glorp -p "prompt"                 One-shot headless mode
 
 OPTIONS

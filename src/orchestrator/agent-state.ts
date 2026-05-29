@@ -125,19 +125,27 @@ export function markAllInterrupted(meshDir: string): Promise<void> {
   });
 }
 
-/** Remove completed/stopped records older than `maxAge` ms (default 24h). */
+/**
+ * Bound roster growth WITHOUT losing history. Records are kept for
+ * observability — completed/stopped agents are retained (the UI hides them by
+ * status, it never deletes them). Only pathological growth is capped: keep the
+ * `maxKeep` most-recently-spawned records, and always keep active ones.
+ */
 export function pruneStaleRecords(
   meshDir: string,
-  maxAge = 86_400_000,
+  maxKeep = 1000,
 ): Promise<void> {
   return serialized(meshDir, async () => {
     const records = await loadAgentRecords(meshDir);
-    const cutoff = Date.now() - maxAge;
-    const kept = records.filter((r) =>
-      r.status === "running" || r.status === "interrupted" || (r.stoppedAt ?? 0) > cutoff,
-    );
-    if (kept.length !== records.length) {
-      await saveAgentRecords(meshDir, kept);
+    if (records.length <= maxKeep) return;
+    const byRecency = [...records].sort((a, b) => (b.spawnedAt ?? 0) - (a.spawnedAt ?? 0));
+    const kept = new Map<string, AgentRecord>();
+    for (const r of byRecency.slice(0, maxKeep)) kept.set(r.id, r);
+    for (const r of byRecency) {
+      if (r.status === "running" || r.status === "interrupted") kept.set(r.id, r);
+    }
+    if (kept.size !== records.length) {
+      await saveAgentRecords(meshDir, [...kept.values()]);
     }
   });
 }

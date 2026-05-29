@@ -77,15 +77,28 @@ describe("markAllInterrupted", () => {
 });
 
 describe("pruneStaleRecords", () => {
-  test("removes old stopped records", async () => {
+  test("retains old stopped records for observability (no age-based deletion)", async () => {
     await upsertAgentRecord(meshDir, record("old", {
       status: "stopped", stoppedAt: Date.now() - 200_000_000,
     }));
     await upsertAgentRecord(meshDir, record("fresh"));
     await pruneStaleRecords(meshDir);
     const records = await loadAgentRecords(meshDir);
-    expect(records).toHaveLength(1);
-    expect(records[0].id).toBe("fresh");
+    expect(records).toHaveLength(2);
+    expect(records.map((r) => r.id).sort()).toEqual(["fresh", "old"]);
+  });
+
+  test("caps pathological growth but always keeps active agents", async () => {
+    for (let i = 0; i < 6; i++) {
+      await upsertAgentRecord(meshDir, record("s" + i, { status: "stopped", spawnedAt: i, stoppedAt: i }));
+    }
+    await upsertAgentRecord(meshDir, record("active", { status: "running", spawnedAt: -1 })); // oldest but active
+    await pruneStaleRecords(meshDir, 3);
+    const ids = (await loadAgentRecords(meshDir)).map((r) => r.id);
+    expect(ids).toContain("active");        // active kept even though oldest
+    expect(ids).toContain("s5");            // most-recent kept
+    expect(ids).not.toContain("s0");        // oldest stopped dropped beyond the cap
+    expect(ids.length).toBeLessThanOrEqual(4);
   });
 });
 
