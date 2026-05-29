@@ -13,6 +13,7 @@ import {
   globTool,
   grepTool,
   inboxManageTool,
+  listAgentsTool,
   lsTool,
   planTool,
   readTool,
@@ -36,13 +37,14 @@ export const MAIN_AGENT_TOOLS = [
   "web_fetch",
   "transmission",
   "spawn_agent",
+  "list_agents",
   "ask_confirm",
   "show_info",
   "ask_choice",
   "ask_text",
 ] as const;
 
-export const READ_ONLY_TOOLS = ["read", "grep", "glob", "ls", "web_fetch"] as const;
+export const READ_ONLY_TOOLS = ["read", "grep", "glob", "ls", "web_fetch", "list_agents"] as const;
 
 export type ToolName =
   | "read"
@@ -58,6 +60,7 @@ export type ToolName =
   | "transmission"
   | "glove_update_inbox"
   | "spawn_agent"
+  | "list_agents"
   | "ask_confirm"
   | "show_info"
   | "ask_choice"
@@ -70,6 +73,8 @@ export interface ToolRegistryDeps {
   resources?: ResourceFsAdapter;
   orchestrator?: Orchestrator;
   contextRef?: { current: Context | null };
+  /** Session mesh dir — lets list_agents read the shared agent roster. */
+  meshDir?: string;
 }
 
 type ToolFactory = () => GloveFoldArgs<any>;
@@ -93,6 +98,7 @@ export function createToolRegistry(deps: ToolRegistryDeps): Record<ToolName, Too
         requireDep(deps.orchestrator, "orchestrator"),
         deps.workspace,
       ),
+    list_agents: () => listAgentsTool(deps.meshDir),
     ask_confirm: () => askConfirmTool,
     show_info: () => showInfoTool,
     ask_choice: () => askChoiceTool,

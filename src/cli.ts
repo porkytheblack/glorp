@@ -32,6 +32,12 @@ async function main(): Promise<void> {
       return;
     }
 
+    case "doctor": {
+      const { runDoctor } = await import("./cli-doctor.ts");
+      await runDoctor(args);
+      return;
+    }
+
     case "headless": {
       const { runHeadless } = await import("./cli-headless.ts");
       await runHeadless(args);

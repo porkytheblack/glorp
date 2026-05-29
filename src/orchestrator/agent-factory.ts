@@ -156,7 +156,7 @@ export function defineOrchestratorAgent(
       // glorp_update_plan) construct correctly. Without it the generator role
       // — the only built-in role with the plan tool — threw "Tool registry
       // missing store" and the subprocess died ("exited unexpectedly").
-      const registry = createToolRegistry({ workspace, dataDir, store });
+      const registry = createToolRegistry({ workspace, dataDir, store, meshDir });
       registerTools(builder, registry, def.tools);
       if (ctx.subscriber) builder.addSubscriber(ctx.subscriber);
       const runnable = builder.build();

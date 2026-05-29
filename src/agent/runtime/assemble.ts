@@ -85,6 +85,7 @@ export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult>
       resources: args.resources,
       orchestrator: args.orchestrator,
       contextRef: args.ctxRef,
+      meshDir: args.meshDir,
     }),
     MAIN_AGENT_TOOLS,
   );

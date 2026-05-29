@@ -7,7 +7,7 @@ import { GLORP_VERSION } from "./shared/version.ts";
 import type { PermissionMode } from "./agent/runtime/permission-mode.ts";
 
 export interface CliArgs {
-  command: "tui" | "serve" | "headless" | "help" | "version" | "migrate";
+  command: "tui" | "serve" | "headless" | "help" | "version" | "migrate" | "doctor";
   workspace: string;
   sessionId: string;
   provider?: string;
@@ -16,6 +16,8 @@ export interface CliArgs {
   port?: number;
   token?: string;
   permissionMode?: PermissionMode;
+  /** `glorp doctor --kill`: terminate the stale glorp processes it finds. */
+  doctorKill?: boolean;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -28,6 +30,8 @@ export function parseCliArgs(argv: string[]): CliArgs {
     const a = argv[i]!;
     if (a === "serve") { args.command = "serve"; continue; }
     if (a === "migrate") { args.command = "migrate"; continue; }
+    if (a === "doctor") { args.command = "doctor"; continue; }
+    if (a === "--kill") { args.doctorKill = true; continue; }
     if (a === "-h" || a === "--help") { args.command = "help"; continue; }
     if (a === "-v" || a === "--version") { args.command = "version"; continue; }
     if (a === "-C" || a === "--cwd") { args.workspace = path.resolve(argv[++i] ?? "."); continue; }
@@ -56,6 +60,7 @@ USAGE
   glorp [options] [prompt...]       Interactive TUI (starts server if needed)
   glorp serve [options]             Start the agent server only
   glorp migrate                     Upgrade stored sessions to the latest schema
+  glorp doctor [--kill]             Diagnose / clean up stale glorp processes & state
   glorp -p "prompt"                 One-shot headless mode
 
 OPTIONS

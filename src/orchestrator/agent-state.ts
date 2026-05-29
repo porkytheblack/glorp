@@ -7,7 +7,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { AgentId, Slot } from "./types.ts";
+import type { AgentId, Slot, AgentProcessingState } from "./types.ts";
 
 /** Per-meshDir write queues so concurrent upsert/stop calls don't race. */
 const writeQueues = new Map<string, Promise<void>>();
@@ -26,6 +26,10 @@ export interface AgentRecord {
   role: string;
   slot: Slot;
   status: AgentStatus;
+  /** Live processing state, so peers can tell when this agent is busy. */
+  state?: AgentProcessingState;
+  /** ms epoch of the last state change. */
+  stateSince?: number;
   runId: string;
   spawnedAt: number;
   stoppedAt?: number;
@@ -77,8 +81,27 @@ export function markAgentStopped(
     const rec = records.find((r) => r.id === id);
     if (rec) {
       rec.status = "stopped";
+      rec.state = reason === "completed" ? "done" : "dead";
+      rec.stateSince = Date.now();
       rec.stoppedAt = Date.now();
       rec.stopReason = reason;
+      await saveAgentRecords(meshDir, records);
+    }
+  });
+}
+
+/** Update an agent's live processing state (no-op if the record is gone). */
+export function setAgentState(
+  meshDir: string,
+  id: AgentId,
+  state: AgentProcessingState,
+): Promise<void> {
+  return serialized(meshDir, async () => {
+    const records = await loadAgentRecords(meshDir);
+    const rec = records.find((r) => r.id === id);
+    if (rec && rec.state !== state) {
+      rec.state = state;
+      rec.stateSince = Date.now();
       await saveAgentRecords(meshDir, records);
     }
   });

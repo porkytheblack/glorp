@@ -61,7 +61,7 @@ export function createOrchestratorRunner(
     adapter,
     subscribers: [subscriber],
     pollIntervalMs: 50,
-    maxConcurrent: 6,
+    maxConcurrent: 5,
   });
 
   // Import the entrypoint to get the real agent definitions (same objects
