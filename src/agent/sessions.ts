@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { deriveProjectId } from "./workspace-id.ts";
+import { removeSessionStorage } from "./session-paths.ts";
 
 /**
  * Lightweight metadata view of a saved session — read directly from the
@@ -50,15 +51,28 @@ export async function listSessions(
 ): Promise<SessionInfo[]> {
   const sessionsDir = path.join(dataDir, "sessions");
   if (!fs.existsSync(sessionsDir)) return [];
-  const files = await fs.promises.readdir(sessionsDir);
+  const entries = await fs.promises.readdir(sessionsDir, { withFileTypes: true });
   const targetProjectId =
     scope.kind === "project" ? deriveProjectId(scope.workspace) : null;
   const targetWorkspace =
     scope.kind === "workspace" ? path.resolve(scope.workspace) : null;
+
+  // Candidates from both layouts: folder layout (sessions/<id>/session.json)
+  // and legacy flat files (sessions/<id>.json), excluding reserved sidecars
+  // (roster/resources) and conversational-agent stores (contain "__").
+  const candidates: Array<{ id: string; file: string }> = [];
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      candidates.push({ id: e.name, file: path.join(sessionsDir, e.name, "session.json") });
+    } else if (e.name.endsWith(".json") && !e.name.endsWith(".tmp")) {
+      if (e.name.includes("__")) continue;
+      if (e.name.endsWith(".roster.json") || e.name.endsWith(".resources.json")) continue;
+      candidates.push({ id: e.name.replace(/\.json$/, ""), file: path.join(sessionsDir, e.name) });
+    }
+  }
+
   const results: SessionInfo[] = [];
-  for (const file of files) {
-    if (!file.endsWith(".json") || file.endsWith(".tmp")) continue;
-    const full = path.join(sessionsDir, file);
+  for (const { id, file: full } of candidates) {
     try {
       const stat = await fs.promises.stat(full);
       const raw = await fs.promises.readFile(full, "utf-8");
@@ -70,8 +84,10 @@ export async function listSessions(
         tokensIn?: number;
         tokensOut?: number;
         turnCount?: number;
-        metadata?: { workspace?: string; projectId?: string };
+        metadata?: { workspace?: string; projectId?: string; kind?: string };
       };
+      if (!Array.isArray(snap.messages)) continue; // not a session transcript
+      if (snap.metadata?.kind && snap.metadata.kind !== "session") continue; // skip subagent snapshots
       const snapWorkspace = snap.metadata?.workspace ?? null;
       const snapProjectId = snap.metadata?.projectId ?? null;
 
@@ -84,7 +100,7 @@ export async function listSessions(
       const agentCount = msgs.filter((m) => m.sender === "agent").length;
       const userCount = msgs.filter((m) => m.sender === "user").length;
       results.push({
-        id: file.replace(/\.json$/, ""),
+        id,
         title: typeof snap.title === "string" && snap.title.trim() ? snap.title.trim() : null,
         firstUserMessage: firstUser,
         agentMessageCount: agentCount,
@@ -106,14 +122,9 @@ export async function listSessions(
   return results;
 }
 
-/** Delete a session's snapshot file. No-op if it doesn't exist. */
+/** Delete everything stored for a session (folder layout + any legacy files). */
 export async function deleteSession(dataDir: string, sessionId: string): Promise<void> {
-  const p = path.join(dataDir, "sessions", `${sessionId}.json`);
-  try {
-    await fs.promises.unlink(p);
-  } catch (err: any) {
-    if (err?.code !== "ENOENT") throw err;
-  }
+  removeSessionStorage(dataDir, sessionId);
 }
 
 /** Generate a stable id for a fresh session. */

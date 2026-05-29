@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useTerminalDimensions } from "@opentui/react";
 import { theme } from "./theme.ts";
 import { OverlayHost, OverlayPanel } from "./overlay-host.tsx";
+import { MenuList, type MenuItem } from "./components/menu/menu-list.tsx";
 import type { GlorpClient } from "../client/client.ts";
 
 interface SessionInfo {
@@ -25,10 +26,14 @@ interface Props {
 
 const LIST_LIMIT = 20;
 
+/**
+ * Session picker overlay. Fetches recent sessions via REST and resumes the
+ * chosen one through `onPick`; `n` starts a fresh session via `onNew`. Built on
+ * the shared MenuList primitive for fuzzy filtering, keyboard nav, and scroll.
+ */
 export function SessionPicker({ client, activeSessionId, workspace, onPick, onNew, onClose }: Props) {
   const { width, height } = useTerminalDimensions();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [cursor, setCursor] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -40,59 +45,45 @@ export function SessionPicker({ client, activeSessionId, workspace, onPick, onNe
       .catch(() => { setLoaded(true); });
   }, [client, workspace]);
 
-  const shown = useMemo(() => sessions.slice(0, LIST_LIMIT), [sessions]);
-  const clamped = Math.min(cursor, Math.max(0, shown.length - 1));
-
-  useKeyboard((key) => {
-    if (key.name === "escape") return onClose();
-    if (key.name === "up" || key.name === "k") {
-      setCursor((c) => Math.max(0, c - 1)); return;
-    }
-    if (key.name === "down" || key.name === "j") {
-      setCursor((c) => Math.min(Math.max(0, shown.length - 1), c + 1)); return;
-    }
-    if (key.name === "return") {
-      const s = shown[clamped];
-      if (s) onPick(s.id); return;
-    }
-    if (key.name === "n") { onNew(); return; }
-  });
+  const items = useMemo<MenuItem[]>(() => sessions.slice(0, LIST_LIMIT).map((s) => {
+    const active = s.id === activeSessionId;
+    const label = (s.title ?? s.first_user_message ?? "(empty)").replace(/\s+/g, " ");
+    const meta = `${s.total_messages}m · ${fmtTokens(s.token_count)}tk`;
+    return {
+      id: s.id,
+      label,
+      icon: active ? "●" : "○",
+      detail: `${meta} · ${relativeTime(s.last_activity)}`,
+      accent: active ? theme.accent : undefined,
+    };
+  }), [sessions, activeSessionId]);
 
   const panelW = Math.min(96, Math.max(60, width - 8));
+  const innerW = panelW - 4;
 
   return (
     <OverlayHost width={width} height={height}>
       <OverlayPanel
-        title="switch session"
+        title="sessions"
         titleColor={theme.accent}
-        hint="up/down pick · enter resume · n new · esc close"
+        subtitle={loaded ? `${sessions.length} recent` : undefined}
         width={panelW}
       >
         <box marginTop={1} flexDirection="column">
-          {!loaded && <text fg={theme.textMuted}>loading sessions...</text>}
-          {loaded && shown.length === 0 && (
-            <text fg={theme.textMuted}>
-              no sessions found — press <span fg={theme.accent}>n</span> to start fresh.
-            </text>
+          {!loaded ? (
+            <text fg={theme.textMuted}>loading sessions…</text>
+          ) : (
+            <MenuList
+              items={items}
+              onSubmit={(item) => onPick(item.id)}
+              onClose={onClose}
+              width={innerW}
+              placeholder="search sessions…"
+              accentColor={theme.accent}
+              actions={[{ key: "n", label: "new session", run: () => onNew() }]}
+              emptyText="no sessions found — n to start fresh"
+            />
           )}
-          {shown.map((s, i) => {
-            const active = s.id === activeSessionId;
-            const highlighted = i === clamped;
-            const fg = highlighted ? theme.bg : active ? theme.accent : theme.text;
-            const bg = highlighted ? theme.accent : "transparent";
-            const star = active ? "●" : "○";
-            const preview = (s.title ?? s.first_user_message ?? "(empty)")
-              .replace(/\s+/g, " ").slice(0, 50);
-            const meta = `${s.total_messages}m · ${s.turn_count}t · ${fmtTokens(s.token_count)}tk`;
-            const ago = relativeTime(s.last_activity);
-            return (
-              <box key={s.id} flexDirection="column">
-                <text fg={fg} bg={bg}>
-                  {` ${star} ${preview.padEnd(50, " ")} ${meta} · ${ago} `}
-                </text>
-              </box>
-            );
-          })}
         </box>
       </OverlayPanel>
     </OverlayHost>

@@ -1,5 +1,6 @@
 import type { IGloveRunnable } from "glove-core/glove";
 import type { PermissionStatus, ContentPart } from "glove-core/core";
+import type { AgentInfo } from "../shared/events.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import type { GlorpStore } from "./store.ts";
 import type { CredentialsStore } from "./credentials.ts";
@@ -35,6 +36,16 @@ export interface GlorpHandle {
   stopAgent(agentId: string, reason?: string): Promise<void>;
   /** Promote a background agent to foreground. Returns false if not found. */
   promoteAgent(agentId: string): boolean;
+  /** The conversational agent roster — every agent the user can chat with. */
+  listAgents(): AgentInfo[];
+  /** The id of the active conversational agent (input + transcript target). */
+  readonly activeAgentId: string;
+  /** Make a conversational agent active: swaps the live transcript + input target. */
+  switchAgent(agentId: string): Promise<void>;
+  /** Spin up a new conversational agent (own transcript + persona) and switch to it. Returns its id. */
+  addAgent(opts: { role: string; label?: string }): Promise<string>;
+  /** Remove a conversational agent and delete its transcript. The default agent cannot be removed. */
+  removeAgent(agentId: string): Promise<void>;
   /** Sweep every persisted grant for a tool name (legacy "always allow X" UX). */
   clearPermission(toolName: string): Promise<void>;
   /** Surgically clear a single canonical permission key (e.g. `bash:git`). */

@@ -110,11 +110,27 @@ export function createOrchestratorRunner(
   };
 }
 
+/** Lines of recent subprocess stderr kept per agent, attached to failures so a
+ *  silent "exited unexpectedly" still carries the real crash output. */
+const STDERR_BUFFER_LINES = 40;
+
 function buildSubscriber(emit: (event: OrchestratorEvent) => void): ContinuumSubscriber {
+  const stderrByAgent = new Map<string, string[]>();
+  const pushStderr = (agentName: string, message: string) => {
+    const buf = stderrByAgent.get(agentName) ?? [];
+    for (const line of message.split("\n")) if (line.trim()) buf.push(line);
+    stderrByAgent.set(agentName, buf.slice(-STDERR_BUFFER_LINES));
+  };
+  const drainStderr = (agentName: string): string | undefined => {
+    const buf = stderrByAgent.get(agentName);
+    stderrByAgent.delete(agentName);
+    return buf?.length ? buf.join("\n") : undefined;
+  };
   return {
     // onRunStarted intentionally omitted — the orchestrator emits agent_spawned
     // with correct role/slot from spawnAgent(). The runner only tracks completion.
     onRunCompleted({ run }) {
+      stderrByAgent.delete(run.agentName);
       emit({
         type: "agent_stopped",
         id: agentId(run.agentName),
@@ -123,10 +139,12 @@ function buildSubscriber(emit: (event: OrchestratorEvent) => void): ContinuumSub
       });
     },
     onRunFailed({ run, error }) {
+      const detail = drainStderr(run.agentName);
       emit({
         type: "error",
         agent: agentId(run.agentName),
         message: `Agent failed: ${error ?? "unknown error"}`,
+        detail,
       });
       emit({
         type: "agent_stopped",
@@ -136,10 +154,12 @@ function buildSubscriber(emit: (event: OrchestratorEvent) => void): ContinuumSub
       });
     },
     onRunTimeout({ run }) {
+      const detail = drainStderr(run.agentName);
       emit({
         type: "error",
         agent: agentId(run.agentName),
         message: `Agent timed out`,
+        detail,
       });
       emit({
         type: "agent_stopped",
@@ -150,10 +170,11 @@ function buildSubscriber(emit: (event: OrchestratorEvent) => void): ContinuumSub
     },
     onLogOutput({ agentName, level, message }) {
       const tag = `[orchestrator:${agentName}:${level}]`;
-      if (level === "stderr") console.error(tag, message);
+      if (level === "stderr") { pushStderr(agentName, message); console.error(tag, message); }
       else console.log(tag, message);
     },
     onAgentTerminated({ agentName, reason }) {
+      pushStderr(agentName, `terminated: ${reason}`);
       console.error(`[orchestrator:${agentName}:terminated]`, reason);
     },
   };

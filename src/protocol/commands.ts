@@ -102,6 +102,25 @@ export interface CmdSetPermissionMode extends Envelope {
   mode: "normal" | "auto" | "bypass";
 }
 
+/** Make a conversational agent active. Maps to GlorpHandle.switchAgent(). */
+export interface CmdSwitchAgent extends Envelope {
+  type: "switch_agent";
+  agent_id: string;
+}
+
+/** Add a new conversational agent to the session. Maps to GlorpHandle.addAgent(). */
+export interface CmdAddAgent extends Envelope {
+  type: "add_agent";
+  role: string;
+  label?: string;
+}
+
+/** Remove a conversational agent from the session. Maps to GlorpHandle.removeAgent(). */
+export interface CmdRemoveAgent extends Envelope {
+  type: "remove_agent";
+  agent_id: string;
+}
+
 export type ClientMessage =
   | ClientHello
   | CmdSendMessage
@@ -116,4 +135,7 @@ export type ClientMessage =
   | CmdResync
   | CmdStopAgent
   | CmdPromoteAgent
-  | CmdSetPermissionMode;
+  | CmdSetPermissionMode
+  | CmdSwitchAgent
+  | CmdAddAgent
+  | CmdRemoveAgent;

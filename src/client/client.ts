@@ -119,6 +119,9 @@ export class GlorpClient {
   stopAgent(id: string, reason?: string): void { this.sendCmd({ type: "stop_agent", agent_id: id, reason }); }
   promoteAgent(id: string): void { this.sendCmd({ type: "promote_agent", agent_id: id }); }
   setPermissionMode(mode: "normal" | "auto" | "bypass"): void { this.sendCmd({ type: "set_permission_mode", mode }); }
+  switchAgent(id: string): void { this.sendCmd({ type: "switch_agent", agent_id: id }); }
+  addAgent(role: string, label?: string): void { this.sendCmd({ type: "add_agent", role, label }); }
+  removeAgent(id: string): void { this.sendCmd({ type: "remove_agent", agent_id: id }); }
 
   // ── Internal: WebSocket ───────────────────────────────────
   private doConnect(): void {

@@ -29,6 +29,8 @@ function bridgeEventToAction(ev: BridgeEvent): UiAction | null {
       return { kind: "orchestrator_plan_event", planAction: ev.action, path: ev.path, title: ev.title };
     case "orchestrator_slot":
       return { kind: "orchestrator_slot_switch", promoted: ev.promoted, demoted: ev.demoted };
+    case "agent_roster":
+      return { kind: "agent_roster", agents: ev.agents, activeId: ev.activeId };
     case "stats": return { kind: "stats", stats: ev.stats };
     case "compaction": return { kind: "compaction", phase: ev.phase };
     case "subagent": return { kind: "subagent", name: ev.name, phase: ev.phase };

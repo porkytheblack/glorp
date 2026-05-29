@@ -139,7 +139,10 @@ export function defineOrchestratorAgent(
       const workspace = process.env.GLORP_WORKSPACE ?? config.workspace;
       const meshDir = process.env.GLORP_MESH_DIR ?? config.meshDir;
       const uid = `${ctx.name}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      const store = ctx.store ?? new GlorpStore(uid, dataDir);
+      // ctx.store is typed as the generic StoreAdapter, but the `.store()`
+      // factory above always returns a GlorpStore — narrow it so store-backed
+      // tools (the plan tool) get the concrete type they require.
+      const store = (ctx.store as GlorpStore | undefined) ?? new GlorpStore(uid, dataDir);
       const model = buildSubprocessModel();
 
       const builder = new Glove({
@@ -149,7 +152,11 @@ export function defineOrchestratorAgent(
         systemPrompt: enrichWithContext(rolePrompt(role)),
         compaction_config: { compaction_instructions: def.compaction, max_turns: def.maxTurns },
       });
-      const registry = createToolRegistry({ workspace, dataDir });
+      // Pass the agent's own store so store-backed tools (e.g. the planner's
+      // glorp_update_plan) construct correctly. Without it the generator role
+      // — the only built-in role with the plan tool — threw "Tool registry
+      // missing store" and the subprocess died ("exited unexpectedly").
+      const registry = createToolRegistry({ workspace, dataDir, store });
       registerTools(builder, registry, def.tools);
       if (ctx.subscriber) builder.addSubscriber(ctx.subscriber);
       const runnable = builder.build();

@@ -261,7 +261,16 @@ export class GlorpStore implements StoreAdapter {
     const trigger = latestTriggerMessage(this.messages);
     const name = safeFilePart(namespace);
     const runKey = durable ? "durable" : `${Date.now()}_${++this.subStoreSeq}`;
-    const filePath = path.join(this.dataDir, "sessions", `${safeFilePart(this.identifier)}.subagents`, name, `${safeFilePart(trigger.id)}_${runKey}.json`);
+    // Locate sub-agent runs next to this store: under the session folder
+    // (folder layout, file "session.json") or as a sibling "<id>.subagents"
+    // dir (legacy flat layout). Derived from the actual file so it works for
+    // the main store, conversational agents, and nested sub-agents alike.
+    const dir = path.dirname(this.filePath);
+    const fileBase = path.basename(this.filePath, ".json");
+    const subBase = fileBase === "session"
+      ? path.join(dir, "subagents")
+      : path.join(dir, `${fileBase}.subagents`);
+    const filePath = path.join(subBase, name, `${safeFilePart(trigger.id)}_${runKey}.json`);
     return new GlorpStore(`${this.identifier}__${namespace}__${trigger.id}__${runKey}`, this.dataDir, {
       filePath,
       metadata: { kind: "subagent", parentSessionId: this.identifier, namespace, triggerMessageId: trigger.id, triggerMessageIndex: trigger.index, triggerMessageText: trigger.text, durable, createdAt: new Date().toISOString() },

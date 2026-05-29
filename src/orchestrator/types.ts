@@ -73,7 +73,7 @@ export type OrchestratorEvent =
   | { type: "plan_created"; path: string; title: string }
   | { type: "plan_accepted"; path: string }
   | { type: "agent_stats"; agentId: string; label: string; role: string; phase: LoopPhase; turns: number; tokensIn: number; tokensOut: number }
-  | { type: "error"; agent?: AgentId; message: string };
+  | { type: "error"; agent?: AgentId; message: string; detail?: string };
 
 export type OrchestratorListener = (event: OrchestratorEvent) => void;
 
