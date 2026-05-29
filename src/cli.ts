@@ -26,6 +26,12 @@ async function main(): Promise<void> {
       return;
     }
 
+    case "migrate": {
+      const { runMigrate } = await import("./cli-migrate.ts");
+      await runMigrate(args);
+      return;
+    }
+
     case "headless": {
       const { runHeadless } = await import("./cli-headless.ts");
       await runHeadless(args);

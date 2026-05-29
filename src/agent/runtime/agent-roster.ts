@@ -7,6 +7,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { rosterMigrator, CURRENT_ROSTER_VERSION } from "../migrations/roster.ts";
 
 export const MAIN_AGENT_ID = "main";
 
@@ -34,6 +35,8 @@ export interface AgentSpec {
 }
 
 export interface RosterFile {
+  /** Schema version, owned by the migration engine. */
+  version?: number;
   activeId: string;
   specs: AgentSpec[];
 }
@@ -45,6 +48,7 @@ export function defaultLabelForRole(role: string): string {
 export function defaultRoster(sessionId: string): RosterFile {
   const now = Date.now();
   return {
+    version: CURRENT_ROSTER_VERSION,
     activeId: MAIN_AGENT_ID,
     specs: [{
       id: MAIN_AGENT_ID,
@@ -75,13 +79,16 @@ export function newAgentSpec(sessionId: string, role: string, label?: string): A
 export function loadRoster(rosterFile: string, sessionId: string): RosterFile {
   try {
     if (!fs.existsSync(rosterFile)) return defaultRoster(sessionId);
-    const parsed = JSON.parse(fs.readFileSync(rosterFile, "utf-8")) as Partial<RosterFile>;
-    const specs = Array.isArray(parsed.specs) ? parsed.specs.filter(isSpec) : [];
+    const parsed = JSON.parse(fs.readFileSync(rosterFile, "utf-8")) as unknown;
+    // Run schema migrations, then apply integrity validation (main present,
+    // valid specs, resolvable activeId) which the migration can't guarantee.
+    const migrated = rosterMigrator.migrate(parsed).data;
+    const specs = Array.isArray(migrated.specs) ? migrated.specs.filter(isSpec) : [];
     if (!specs.some((s) => s.id === MAIN_AGENT_ID)) {
       return defaultRoster(sessionId);
     }
-    const activeId = specs.some((s) => s.id === parsed.activeId) ? parsed.activeId! : MAIN_AGENT_ID;
-    return { activeId, specs };
+    const activeId = specs.some((s) => s.id === migrated.activeId) ? migrated.activeId : MAIN_AGENT_ID;
+    return { version: CURRENT_ROSTER_VERSION, activeId, specs };
   } catch {
     return defaultRoster(sessionId);
   }
@@ -91,7 +98,7 @@ export function saveRoster(rosterFile: string, roster: RosterFile): void {
   try {
     fs.mkdirSync(path.dirname(rosterFile), { recursive: true });
     const tmp = `${rosterFile}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(roster, null, 2), "utf-8");
+    fs.writeFileSync(tmp, JSON.stringify({ ...roster, version: CURRENT_ROSTER_VERSION }, null, 2), "utf-8");
     fs.renameSync(tmp, rosterFile);
   } catch (err) {
     console.error("[agent-roster] failed to persist roster:", err);

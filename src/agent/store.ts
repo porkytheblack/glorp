@@ -7,6 +7,7 @@ import { firstUserRequest, latestTriggerMessage, safeFilePart } from "./store-sn
 import { withSessionState } from "./session-state.ts";
 import { canonicalPermissionKey } from "./permission-key.ts";
 import { deriveProjectId } from "./workspace-id.ts";
+import { sessionMigrator, CURRENT_SESSION_VERSION } from "./migrations/session-store.ts";
 import type { VerificationTracker } from "./runtime/verification-tracker.ts";
 
 export class GlorpStore implements StoreAdapter {
@@ -53,7 +54,16 @@ export class GlorpStore implements StoreAdapter {
   private loadFromDisk(): void {
     if (!fs.existsSync(this.filePath)) return;
     try {
-      const snap = JSON.parse(fs.readFileSync(this.filePath, "utf-8")) as Partial<Snapshot>;
+      const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf-8")) as unknown;
+      // Run schema migrations before consuming any fields. A document from a
+      // newer build is left untouched; one we upgraded is marked dirty so the
+      // migrated shape is persisted on the next flush.
+      const result = sessionMigrator.migrate(parsed);
+      if (result.fromFuture) {
+        console.error(`[migrations:session] ${this.filePath} written by a newer glorp (v${result.fromVersion} > v${sessionMigrator.currentVersion}); leaving as-is`);
+      }
+      const snap = result.data as Partial<Snapshot>;
+      if (result.applied.length > 0) this.dirty = true;
       this.metadata = snap.metadata ?? this.metadata;
       this.messages = snap.messages ?? [];
       this.title = cleanTitle(snap.title);
@@ -107,6 +117,7 @@ export class GlorpStore implements StoreAdapter {
 
   private snapshot(): Snapshot {
     return {
+      version: CURRENT_SESSION_VERSION,
       metadata: this.metadata,
       messages: this.messages,
       title: this.title,

@@ -7,7 +7,7 @@ import { GLORP_VERSION } from "./shared/version.ts";
 import type { PermissionMode } from "./agent/runtime/permission-mode.ts";
 
 export interface CliArgs {
-  command: "tui" | "serve" | "headless" | "help" | "version";
+  command: "tui" | "serve" | "headless" | "help" | "version" | "migrate";
   workspace: string;
   sessionId: string;
   provider?: string;
@@ -27,6 +27,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "serve") { args.command = "serve"; continue; }
+    if (a === "migrate") { args.command = "migrate"; continue; }
     if (a === "-h" || a === "--help") { args.command = "help"; continue; }
     if (a === "-v" || a === "--version") { args.command = "version"; continue; }
     if (a === "-C" || a === "--cwd") { args.workspace = path.resolve(argv[++i] ?? "."); continue; }
@@ -54,6 +55,7 @@ export const HELP_TEXT = `glorp — alien coding agent (v${GLORP_VERSION})
 USAGE
   glorp [options] [prompt...]       Interactive TUI (starts server if needed)
   glorp serve [options]             Start the agent server only
+  glorp migrate                     Upgrade stored sessions to the latest schema
   glorp -p "prompt"                 One-shot headless mode
 
 OPTIONS
