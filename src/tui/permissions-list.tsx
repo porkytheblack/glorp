@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useTerminalDimensions } from "@opentui/react";
 import { theme } from "./theme.ts";
 import { OverlayHost, OverlayPanel } from "./overlay-host.tsx";
+import { MenuList, type MenuItem } from "./components/menu/menu-list.tsx";
 import type { GlorpClient } from "../client/client.ts";
 
 interface PermRow {
@@ -17,13 +18,13 @@ interface Props {
 }
 
 /**
- * Permissions list overlay. Fetched from server state since the TUI
- * is a remote client. Revocations are sent as commands through the client.
+ * Permissions list overlay. Persisted grants live in server state since the TUI
+ * is a remote client, so we resync on open. Revocations are sent as commands
+ * through the client and reflected locally so the list updates instantly.
  */
 export function PermissionsList({ client, onClose }: Props) {
   const { width, height } = useTerminalDimensions();
   const [rows, setRows] = useState<PermRow[]>([]);
-  const [cursor, setCursor] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -31,65 +32,49 @@ export function PermissionsList({ client, onClose }: Props) {
     setLoaded(true);
   }, [client]);
 
-  const clamped = Math.min(cursor, Math.max(0, rows.length - 1));
+  const items = useMemo<MenuItem[]>(
+    () => rows.map((row) => ({
+      id: row.key,
+      label: row.key,
+      icon: statusGlyph(row.status),
+      detail: row.status,
+      accent: statusColor(row.status),
+      keywords: [row.tool, row.projection],
+    })),
+    [rows],
+  );
 
-  useKeyboard((key) => {
-    if (key.name === "escape") return onClose();
-    if (rows.length === 0) return;
-    if (key.name === "up" || key.name === "k") {
-      setCursor((c) => Math.max(0, c - 1)); return;
-    }
-    if (key.name === "down" || key.name === "j") {
-      setCursor((c) => Math.min(rows.length - 1, c + 1)); return;
-    }
-    if (key.sequence === "R") {
-      const row = rows[clamped];
-      if (row) {
-        client.clearPermission(row.tool);
-        setRows((prev) => prev.filter((r) => r.tool !== row.tool));
-      }
-      return;
-    }
-    if (key.name === "r") {
-      const row = rows[clamped];
-      if (row) {
-        client.clearPermissionKey(row.key);
-        setRows((prev) => prev.filter((r) => r.key !== row.key));
-      }
-    }
-  });
+  function revoke(item: MenuItem | null) {
+    if (!item) return;
+    const row = rows.find((r) => r.key === item.id);
+    if (!row) return;
+    client.clearPermissionKey(row.key);
+    setRows((prev) => prev.filter((r) => r.key !== row.key));
+  }
 
   const panelW = Math.min(86, Math.max(56, width - 8));
-  const colKey = Math.max(20, panelW - 22);
+  const innerW = panelW - 4;
+  const emptyText = loaded
+    ? "no saved permissions — tools will prompt on first use"
+    : "loading…";
 
   return (
     <OverlayHost width={width} height={height}>
       <OverlayPanel
         title="permissions"
-        hint="up/down pick · r revoke key · R revoke all for tool · esc close"
+        subtitle={loaded ? `${rows.length} saved` : undefined}
         width={panelW}
       >
         <box marginTop={1} flexDirection="column">
-          {rows.length === 0 ? (
-            <text fg={theme.textMuted}>
-              {loaded ? "no persisted grants. tools will prompt on first use." : "loading..."}
-            </text>
-          ) : (
-            rows.map((row, i) => {
-              const highlighted = i === clamped;
-              const fg = highlighted ? theme.bg : statusColor(row.status);
-              const bg = highlighted ? statusColor(row.status) : "transparent";
-              const display = ` ${statusGlyph(row.status)} ${clip(row.key, colKey).padEnd(colKey, " ")}  ${row.status.padEnd(8, " ")} `;
-              return <text key={row.key} fg={fg} bg={bg}>{display}</text>;
-            })
-          )}
-        </box>
-        <box marginTop={1}>
-          <text fg={theme.textMuted}>
-            keys are tool:projection — e.g.{" "}
-            <span fg={theme.toolName}>bash:git</span>,{" "}
-            <span fg={theme.toolName}>edit:src/foo.ts</span>
-          </text>
+          <MenuList
+            items={items}
+            onSubmit={() => { /* read-only; revoke is the explicit `d` action */ }}
+            onClose={onClose}
+            width={innerW}
+            placeholder="search permissions…"
+            emptyText={emptyText}
+            actions={[{ key: "d", label: "revoke", run: revoke }]}
+          />
         </box>
       </OverlayPanel>
     </OverlayHost>
@@ -106,8 +91,4 @@ function statusGlyph(s: string): string {
   if (s === "granted") return "✓";
   if (s === "denied") return "✗";
   return "○";
-}
-
-function clip(text: string, max: number): string {
-  return text.length <= max ? text : text.slice(0, Math.max(1, max - 1)) + "…";
 }

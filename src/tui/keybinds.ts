@@ -6,7 +6,8 @@ export interface Keybind {
 }
 
 export const KEYBINDS: Keybind[] = [
-  { key: "ctrl+a", label: "^A", description: "Agent manager", context: "global" },
+  { key: "ctrl+k", label: "^K", description: "Command palette", context: "global" },
+  { key: "ctrl+a", label: "^A", description: "Agents · switch / add", context: "global" },
   { key: "ctrl+m", label: "^M", description: "Model switcher", context: "global" },
   { key: "ctrl+s", label: "^S", description: "Session picker", context: "global" },
   { key: "ctrl+b", label: "^B", description: "Toggle context rail", context: "global" },

@@ -34,6 +34,7 @@ const BRIDGE_TYPES: ReadonlySet<string> = new Set([
   "orchestrator_agent",
   "orchestrator_plan",
   "orchestrator_slot",
+  "agent_roster",
   "runner_agent_stats",
   "transmission",
   "permission_mode_changed",

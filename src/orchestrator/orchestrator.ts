@@ -21,11 +21,13 @@ import { runGenEvalLoop } from "./gen-eval-loop.ts";
 import { runPlanPhase, type PlanResult } from "./plan-phase.ts";
 import type { ForwardingDisplayManager } from "./forwarding-display.ts";
 import {
-  upsertAgentRecord, markAgentStopped, markAllInterrupted,
+  upsertAgentRecord, markAgentStopped, markAllInterrupted, setAgentState,
   loadAgentRecords, pruneStaleRecords, type AgentRecord,
 } from "./agent-state.ts";
+import { agentId } from "./types.ts";
+import type { AgentProcessingState, LoopPhase } from "./types.ts";
 
-const DEFAULT_MAX_AGENTS = 8;
+const DEFAULT_MAX_AGENTS = 5;
 
 export class Orchestrator {
   private eventBus = new OrchestratorEventBus();
@@ -52,6 +54,16 @@ export class Orchestrator {
         agentTimeoutMs: config.agentTimeoutMs, workspaceContext: config.workspaceContext },
       (e) => { this.eventBus.emit(e); this.handleRunnerEvent(e); },
     );
+    // Keep each agent's persisted processing state current so peers (via
+    // list_agents / the mesh roster) can tell who is busy.
+    this.eventBus.subscribe((e) => this.trackAgentState(e));
+  }
+
+  /** Map loop activity to a processing state and persist it for the agent. */
+  private trackAgentState(e: OrchestratorEvent): void {
+    if (e.type !== "agent_stats") return;
+    const state = phaseToProcessingState(e.phase);
+    if (state) void setAgentState(this.meshDir, agentId(e.agentId), state).catch(() => {});
   }
 
   /** Reconcile runner lifecycle events with managed agent state. */
@@ -95,7 +107,14 @@ export class Orchestrator {
   async spawnAgent(blueprint: AgentBlueprint, slot: Slot, prompt: string): Promise<ManagedAgent> {
     await this.ensureRunnerStarted();
     if (this.agents.size >= this.maxAgents) {
-      throw new Error(`Agent limit reached (${this.maxAgents}). Stop an agent before spawning.`);
+      const busy = [...this.agents.values()]
+        .map((a) => `${a.blueprint.label} (${a.blueprint.role})`)
+        .join(", ");
+      throw new Error(
+        `Agent limit reached (${this.agents.size}/${this.maxAgents}). ` +
+        `These agents are still busy: ${busy || "unknown"}. ` +
+        `Wait for one to finish (use list_agents to check) or stop one before spawning another.`,
+      );
     }
 
     const input = blueprintToInput(blueprint, prompt, {
@@ -117,7 +136,8 @@ export class Orchestrator {
     this.scheduler.register(managed, slot);
     void upsertAgentRecord(this.meshDir, {
       id: blueprint.id, label: blueprint.label, role: blueprint.role,
-      slot, status: "running", runId, spawnedAt: Date.now(),
+      slot, status: "running", state: "thinking", stateSince: Date.now(),
+      runId, spawnedAt: Date.now(),
     }).catch(() => {});
     this.eventBus.emit({
       type: "agent_spawned",
@@ -194,5 +214,18 @@ export class Orchestrator {
       this.runnerStartPromise = null;
     }
     this.started = false;
+  }
+}
+
+/** Translate a loop phase into the agent's coarse processing state. */
+function phaseToProcessingState(phase: LoopPhase): AgentProcessingState | null {
+  switch (phase) {
+    case "generating": return "thinking";
+    case "evaluating":
+    case "checkpoint": return "working";
+    case "idle": return "idle";
+    case "completed": return "done";
+    case "terminated": return "dead";
+    default: return null;
   }
 }

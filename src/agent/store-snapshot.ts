@@ -34,6 +34,8 @@ export interface OriginalRequest {
 }
 
 export interface Snapshot {
+  /** Schema version, owned by the migration engine (absent ⇒ pre-versioning). */
+  version?: number;
   metadata?: SnapshotMeta;
   messages: Message[];
   title?: string | null;

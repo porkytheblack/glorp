@@ -9,6 +9,7 @@
 
 import type { Envelope } from "./envelope.ts";
 import type {
+  AgentInfo,
   AgentStats,
   ChatTurn,
   DisplaySlotEvent,
@@ -23,6 +24,7 @@ import type {
 
 // Re-export the data types clients need.
 export type {
+  AgentInfo,
   AgentStats,
   ChatTurn,
   DisplaySlotEvent,
@@ -104,9 +106,10 @@ export interface WsOrchestratorPlan extends Envelope {
   type: "orchestrator_plan"; action: "created" | "accepted"; path: string; title?: string;
 }
 export interface WsOrchestratorSlot extends Envelope { type: "orchestrator_slot"; promoted: string; demoted: string }
+export interface WsAgentRoster extends Envelope { type: "agent_roster"; agents: AgentInfo[]; activeId: string }
 export interface WsRunnerAgentStats extends Envelope { type: "runner_agent_stats"; agent: RunnerAgentStats }
 export interface WsTransmission extends Envelope { type: "transmission"; payload: string; severity: "low" | "medium" | "high" }
-export interface WsError extends Envelope { type: "error"; message: string }
+export interface WsError extends Envelope { type: "error"; message: string; detail?: string }
 
 // ── Server-only events ────────────────────────────────────────────
 
@@ -131,6 +134,6 @@ export type ServerMessage =
   | WsSubagent | WsSkill | WsHook
   | WsDisplaySlotPushed | WsDisplaySlotResolved
   | WsOrchestratorPhase | WsOrchestratorVerdict | WsOrchestratorAgent
-  | WsOrchestratorPlan | WsOrchestratorSlot | WsRunnerAgentStats
+  | WsOrchestratorPlan | WsOrchestratorSlot | WsAgentRoster | WsRunnerAgentStats
   | WsTransmission | WsError
   | WsModelLabelChanged | WsCommandRejected | WsProtocolError;

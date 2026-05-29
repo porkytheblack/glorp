@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTerminalDimensions, useKeyboard } from "@opentui/react";
 import { theme } from "./theme.ts";
 import { nextPermissionMode } from "../agent/runtime/permission-mode.ts";
@@ -14,6 +14,7 @@ import { TransmissionsLog } from "./transmissions-log.tsx";
 import { PermissionsList } from "./permissions-list.tsx";
 import { HelpDialog } from "./help-dialog.tsx";
 import { AgentManager } from "./agent-manager.tsx";
+import { CommandPalette, type PaletteCommand } from "./command-palette.tsx";
 import { getSlotRenderer, UnknownSlot } from "./slot-renderers/index.tsx";
 import { EmptyHero } from "./empty-hero.tsx";
 import type { GlorpClient, ClientState } from "../client/client.ts";
@@ -22,7 +23,9 @@ const NARROW = 90;
 const MEDIUM = 140;
 const WIDE = 200;
 
-type Overlay = null | "model" | "session" | "transmissions" | "permissions" | "help" | "agents";
+type Overlay = null | "model" | "session" | "transmissions" | "permissions" | "help" | "agents" | "palette";
+
+const QUICK_ADD_ROLES = ["researcher", "reviewer", "planner", "builder"] as const;
 
 export function App({
   client,
@@ -76,6 +79,7 @@ export function App({
     const nonPermSlot = state.displaySlots.find((s) => !s.isPermissionRequest);
     if (nonPermSlot) return; // let the slot renderer handle it
     // Global shortcuts
+    if (key.name === "k" && key.ctrl) { setOverlay("palette"); return; }
     if (key.name === "a" && key.ctrl) { setOverlay("agents"); return; }
     if (key.name === "m" && key.ctrl) { setOverlay("model"); return; }
     if (key.name === "s" && key.ctrl && onSwapSession) { setOverlay("session"); return; }
@@ -94,6 +98,36 @@ export function App({
     if (key.name === "escape" && state.busy) { client.abort(); return; }
   });
 
+  const commands = useMemo<PaletteCommand[]>(() => {
+    const cmds: PaletteCommand[] = [
+      { id: "agents", label: "Manage agents", detail: "^A", group: "Agents", icon: "◇", keywords: ["switch", "roster"], run: () => setOverlay("agents") },
+    ];
+    for (const a of state.agents) {
+      if (a.id === state.activeAgentId) continue;
+      cmds.push({ id: `switch:${a.id}`, label: `Switch to ${a.label}`, detail: a.role, group: "Agents", icon: "▸", keywords: ["agent", a.role], run: () => client.switchAgent(a.id) });
+    }
+    for (const role of QUICK_ADD_ROLES) {
+      cmds.push({ id: `add:${role}`, label: `Add ${role} agent`, group: "Agents", icon: "+", keywords: ["new", "spawn"], run: () => client.addAgent(role) });
+    }
+    cmds.push(
+      { id: "model", label: "Switch model", detail: "^M", group: "Model", icon: "◈", run: () => setOverlay("model") },
+      { id: "perm-mode", label: `Permission mode: ${state.permissionMode} → ${nextPermissionMode(state.permissionMode)}`, detail: "^Y", group: "Permissions", icon: "⚑", keywords: ["auto", "bypass", "normal"], run: () => client.setPermissionMode(nextPermissionMode(state.permissionMode)) },
+      { id: "perms", label: "Manage permissions", detail: "^P", group: "Permissions", icon: "○", run: () => setOverlay("permissions") },
+      { id: "rail", label: `${railOpen ? "Hide" : "Show"} context rail`, detail: "^B", group: "View", icon: "▤", run: () => setRailOpen((v) => !v) },
+      { id: "reasoning", label: `${showReasoning ? "Hide" : "Show"} reasoning`, detail: "^R", group: "View", icon: "✦", run: () => setShowReasoning((v) => !v) },
+      { id: "transmissions", label: "Transmissions log", detail: "^T", group: "View", icon: "≋", run: () => setOverlay("transmissions") },
+      { id: "help", label: "Help & keybindings", group: "System", icon: "?", run: () => setOverlay("help") },
+      { id: "quit", label: "Quit glorp", group: "System", icon: "⏻", run: () => onQuit() },
+    );
+    if (onSwapSession) {
+      cmds.push(
+        { id: "session", label: "Switch session", detail: "^S", group: "Session", icon: "❒", run: () => setOverlay("session") },
+        { id: "new-session", label: "New session", group: "Session", icon: "✚", keywords: ["fresh", "blank"], run: () => onSwapSession(null) },
+      );
+    }
+    return cmds;
+  }, [state.agents, state.activeAgentId, state.permissionMode, railOpen, showReasoning, client, onSwapSession, onQuit]);
+
   // Non-permission display slots render as full-screen overlays
   const nonPermSlot = state.displaySlots.find((s) => !s.isPermissionRequest);
   if (nonPermSlot) {
@@ -106,6 +140,9 @@ export function App({
   }
 
   // Overlay rendering
+  if (overlay === "palette") {
+    return <CommandPalette commands={commands} onClose={() => setOverlay(null)} />;
+  }
   if (overlay === "model") {
     return (
       <ModelSwitcher client={client}

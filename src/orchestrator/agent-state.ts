@@ -7,7 +7,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { AgentId, Slot } from "./types.ts";
+import type { AgentId, Slot, AgentProcessingState } from "./types.ts";
 
 /** Per-meshDir write queues so concurrent upsert/stop calls don't race. */
 const writeQueues = new Map<string, Promise<void>>();
@@ -26,6 +26,10 @@ export interface AgentRecord {
   role: string;
   slot: Slot;
   status: AgentStatus;
+  /** Live processing state, so peers can tell when this agent is busy. */
+  state?: AgentProcessingState;
+  /** ms epoch of the last state change. */
+  stateSince?: number;
   runId: string;
   spawnedAt: number;
   stoppedAt?: number;
@@ -77,8 +81,27 @@ export function markAgentStopped(
     const rec = records.find((r) => r.id === id);
     if (rec) {
       rec.status = "stopped";
+      rec.state = reason === "completed" ? "done" : "dead";
+      rec.stateSince = Date.now();
       rec.stoppedAt = Date.now();
       rec.stopReason = reason;
+      await saveAgentRecords(meshDir, records);
+    }
+  });
+}
+
+/** Update an agent's live processing state (no-op if the record is gone). */
+export function setAgentState(
+  meshDir: string,
+  id: AgentId,
+  state: AgentProcessingState,
+): Promise<void> {
+  return serialized(meshDir, async () => {
+    const records = await loadAgentRecords(meshDir);
+    const rec = records.find((r) => r.id === id);
+    if (rec && rec.state !== state) {
+      rec.state = state;
+      rec.stateSince = Date.now();
       await saveAgentRecords(meshDir, records);
     }
   });
@@ -102,19 +125,27 @@ export function markAllInterrupted(meshDir: string): Promise<void> {
   });
 }
 
-/** Remove completed/stopped records older than `maxAge` ms (default 24h). */
+/**
+ * Bound roster growth WITHOUT losing history. Records are kept for
+ * observability — completed/stopped agents are retained (the UI hides them by
+ * status, it never deletes them). Only pathological growth is capped: keep the
+ * `maxKeep` most-recently-spawned records, and always keep active ones.
+ */
 export function pruneStaleRecords(
   meshDir: string,
-  maxAge = 86_400_000,
+  maxKeep = 1000,
 ): Promise<void> {
   return serialized(meshDir, async () => {
     const records = await loadAgentRecords(meshDir);
-    const cutoff = Date.now() - maxAge;
-    const kept = records.filter((r) =>
-      r.status === "running" || r.status === "interrupted" || (r.stoppedAt ?? 0) > cutoff,
-    );
-    if (kept.length !== records.length) {
-      await saveAgentRecords(meshDir, kept);
+    if (records.length <= maxKeep) return;
+    const byRecency = [...records].sort((a, b) => (b.spawnedAt ?? 0) - (a.spawnedAt ?? 0));
+    const kept = new Map<string, AgentRecord>();
+    for (const r of byRecency.slice(0, maxKeep)) kept.set(r.id, r);
+    for (const r of byRecency) {
+      if (r.status === "running" || r.status === "interrupted") kept.set(r.id, r);
+    }
+    if (kept.size !== records.length) {
+      await saveAgentRecords(meshDir, [...kept.values()]);
     }
   });
 }

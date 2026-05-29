@@ -23,7 +23,7 @@ export interface RoleDef {
   maxTurns: number;
 }
 
-const READ = ["read", "grep", "glob", "ls"] as const;
+const READ = ["read", "grep", "glob", "ls", "list_agents"] as const;
 const WRITE = ["write", "edit", "apply_patch", "bash"] as const;
 const INTERACT = ["ask_confirm", "ask_choice", "ask_text"] as const;
 const PLAN = ["glorp_update_plan"] as const;

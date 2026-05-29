@@ -26,7 +26,7 @@ export function OverlayHost({ children, width: forcedW, height: forcedH }: Props
       flexDirection="column"
       width={w}
       height={h}
-      backgroundColor={theme.bg}
+      backgroundColor={theme.dimOverlay}
       justifyContent="center"
       alignItems="center"
     >
@@ -36,24 +36,36 @@ export function OverlayHost({ children, width: forcedW, height: forcedH }: Props
 }
 
 /**
- * Standard overlay panel with rounded border and consistent padding.
- * Used by all overlay screens (model switcher, session picker, help, etc.)
+ * Standard overlay panel with rounded border and consistent padding, styled
+ * like the Helix command palette: a clean title bar (title left, optional
+ * subtitle right) and a dim footer hint row at the bottom.
+ *
+ * Backward compatible — existing callers pass
+ * `{ title, titleColor?, hint?, children, borderColor?, width }`. The legacy
+ * `hint` renders as the footer. New optional props: `subtitle`, `footer`.
  */
 export function OverlayPanel({
   title,
   titleColor,
+  subtitle,
   hint,
+  footer,
   children,
   borderColor,
   width,
 }: {
   title: string;
   titleColor?: string;
+  subtitle?: string;
   hint?: string;
+  footer?: React.ReactNode;
   children: React.ReactNode;
   borderColor?: string;
   width: number;
 }) {
+  const accent = titleColor ?? theme.accent;
+  const footerContent = footer ?? (hint ? <text fg={theme.footer}>{hint}</text> : null);
+
   return (
     <box
       flexDirection="column"
@@ -64,9 +76,13 @@ export function OverlayPanel({
       backgroundColor={theme.bgPanel}
       padding={1}
     >
-      <text fg={titleColor ?? theme.accent}><strong>{title}</strong></text>
-      {hint && <text fg={theme.textDim}>{hint}</text>}
+      <box flexDirection="row" width={width - 4}>
+        <text fg={accent}><strong>{title}</strong></text>
+        <box flexGrow={1} />
+        {subtitle && <text fg={theme.textMuted}>{subtitle}</text>}
+      </box>
       {children}
+      {footerContent && <box marginTop={1}>{footerContent}</box>}
     </box>
   );
 }

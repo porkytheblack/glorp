@@ -39,6 +39,8 @@ interface FileResourcesOptions {
   sessionId: string;
   schema: MemorySchema;
   identifier?: string;
+  /** Explicit state file path; overrides the default flat-layout location. */
+  filePath?: string;
 }
 
 export class FileResourcesAdapter implements ResourceFsAdapter, ResourceTree {
@@ -54,7 +56,7 @@ export class FileResourcesAdapter implements ResourceFsAdapter, ResourceTree {
   constructor(opts: FileResourcesOptions) {
     this.schema = opts.schema;
     this.identifier = opts.identifier ?? `glorp-resources:${opts.sessionId}`;
-    this.filePath = path.join(opts.dataDir, "sessions", `${safeFilePart(opts.sessionId)}.resources.json`);
+    this.filePath = opts.filePath ?? path.join(opts.dataDir, "sessions", `${safeFilePart(opts.sessionId)}.resources.json`);
     this.ready = this.load();
   }
 
