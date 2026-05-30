@@ -3,6 +3,7 @@ import type { Context } from "glove-core/core";
 import type { ResourceFsAdapter } from "glove-memory";
 import type { Orchestrator } from "../../orchestrator/orchestrator.ts";
 import type { GlorpStore } from "../store.ts";
+import type { Bridge } from "../../shared/bridge.ts";
 import {
   askChoiceTool,
   askConfirmTool,
@@ -75,6 +76,8 @@ export interface ToolRegistryDeps {
   contextRef?: { current: Context | null };
   /** Session mesh dir — lets list_agents read the shared agent roster. */
   meshDir?: string;
+  /** Per-session event bus, so the transmission tool stays session-scoped. */
+  bridge?: Bridge;
 }
 
 type ToolFactory = () => GloveFoldArgs<any>;
@@ -91,7 +94,7 @@ export function createToolRegistry(deps: ToolRegistryDeps): Record<ToolName, Too
     grep: () => grepTool(deps.workspace),
     ls: () => lsTool(deps.workspace),
     web_fetch: () => webFetchTool,
-    transmission: () => transmissionTool(requireDep(deps.dataDir, "dataDir")),
+    transmission: () => transmissionTool(requireDep(deps.dataDir, "dataDir"), deps.bridge),
     glove_update_inbox: () => inboxManageTool(requireDep(deps.contextRef?.current, "context")),
     spawn_agent: () =>
       spawnAgentTool(

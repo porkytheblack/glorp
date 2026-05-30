@@ -147,7 +147,7 @@ Templates are JSON files stored in `<stationDataDir>/templates/`. Each template 
 
 Credentials resolve in priority order:
 
-1. **Session-level override** — custom API key passed in `POST /sessions` or `PATCH /sessions/:id/credentials`. Stored encrypted at rest in the session's data dir. Never logged, never returned in API responses (only `provider` + last-4 of key shown).
+1. **Session-level override** — custom API key passed in `POST /sessions` or `POST /sessions/:id/credentials`. Held in memory only for the life of the session and never persisted to disk (per Open Question 7, recommendation b). Never logged, never returned in API responses (only `provider` + last-4 of key shown). Sessions that need persistence re-supply the key on reconnect.
 2. **Station default** — the CredentialsStore configured on the Station. Sessions that don't provide a custom key inherit this.
 3. **Workspace glorp.json** — existing `loadProjectConfig` can reference a provider/model, but keys always come from layer 1 or 2.
 

@@ -44,6 +44,12 @@ async function main(): Promise<void> {
       return;
     }
 
+    case "station": {
+      const { runStation } = await import("./cli-station.ts");
+      await runStation(args);
+      return;
+    }
+
     case "headless": {
       const { runHeadless } = await import("./cli-headless.ts");
       await runHeadless(args);

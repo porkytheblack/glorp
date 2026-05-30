@@ -7,7 +7,7 @@ import { GLORP_VERSION } from "./shared/version.ts";
 import type { PermissionMode } from "./agent/runtime/permission-mode.ts";
 
 export interface CliArgs {
-  command: "tui" | "serve" | "headless" | "help" | "version" | "migrate" | "doctor" | "mesh";
+  command: "tui" | "serve" | "station" | "headless" | "help" | "version" | "migrate" | "doctor" | "mesh";
   workspace: string;
   sessionId: string;
   provider?: string;
@@ -20,6 +20,14 @@ export interface CliArgs {
   doctorKill?: boolean;
   /** `glorp mesh <sub>`: subcommand (agents | log | summary). */
   meshSub?: string;
+  /** Station: bind hostname. */
+  host?: string;
+  /** Station: override data dir. */
+  dataDir?: string;
+  /** Station: base directory for auto-provisioned workspaces. */
+  workspaceRoot?: string;
+  /** Station: serve the Glorp Dashboard SPA. */
+  dashboard?: boolean;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -31,6 +39,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "serve") { args.command = "serve"; continue; }
+    if (a === "station") { args.command = "station"; continue; }
     if (a === "migrate") { args.command = "migrate"; continue; }
     if (a === "doctor") { args.command = "doctor"; continue; }
     if (a === "mesh") {
@@ -48,6 +57,10 @@ export function parseCliArgs(argv: string[]): CliArgs {
     if (a === "-m" || a === "--model") { args.model = argv[++i]; continue; }
     if (a === "--port") { args.port = Number(argv[++i]); continue; }
     if (a === "--token") { args.token = argv[++i]; continue; }
+    if (a === "--host") { args.host = argv[++i]; continue; }
+    if (a === "--data-dir") { args.dataDir = argv[++i]; continue; }
+    if (a === "--workspace-root") { args.workspaceRoot = path.resolve(argv[++i] ?? "."); continue; }
+    if (a === "--dashboard") { args.dashboard = true; continue; }
     if (a === "-p" || a === "--print") {
       args.command = "headless";
       args.prompt = argv[++i];
@@ -67,6 +80,7 @@ export const HELP_TEXT = `glorp — alien coding agent (v${GLORP_VERSION})
 USAGE
   glorp [options] [prompt...]       Interactive TUI (starts server if needed)
   glorp serve [options]             Start the agent server only
+  glorp station [options]           Start the multi-session Station runtime
   glorp migrate                     Upgrade stored sessions to the latest schema
   glorp doctor [--kill]             Diagnose / clean up stale glorp processes & state
   glorp mesh [agents|log]           Inspect the inter-agent mesh history
@@ -77,13 +91,19 @@ OPTIONS
   -s, --session <id>       Resume a session by ID
       --provider <name>    LLM provider (anthropic|openai|openrouter|gemini|…)
   -m, --model <name>       Model name override
-      --port <port>        Server port (default: 3271)
+      --port <port>        Server port (serve: 3271, station: 4271)
       --token <token>      Bearer token for server auth
   -p, --print <prompt>     Run one prompt, print result, exit
       --auto-mode          Auto-approve safe ops; escalate destructive only
       --bypass             No permission prompts at all (⚠ use with caution)
   -v, --version            Print version
   -h, --help               This help
+
+STATION OPTIONS
+      --host <addr>        Bind address (default: 127.0.0.1)
+      --data-dir <dir>     State directory (default: ~/.glorp)
+      --workspace-root <d> Base dir for auto-provisioned workspaces
+      --dashboard          Serve the Glorp Dashboard SPA at /
 
 ENV
   ANTHROPIC_API_KEY        Default provider if set
