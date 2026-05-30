@@ -14,17 +14,45 @@ export interface SessionState {
 const MAX_ORIGINAL_REQUEST_CHARS = 4000;
 
 export function withSessionState(messages: Message[], state: SessionState): Message[] {
-  const result: Message[] = [];
-  const anchor = buildOriginalRequestAnchor(state.originalRequest, messages);
-  const stateMessage = buildSessionStateMessage(state);
-  const index = latestUserMessageIndex(messages);
-  const insertAt = index === -1 ? messages.length : index;
+  // glove-core slices the transcript at the last compaction summary before
+  // sending it to the model (splitAtLastCompaction): everything the model
+  // actually sees lives at/after that boundary. Compaction *hides* older
+  // messages by slicing at read time — it never deletes them from the store.
+  // So we must reason about that live window only. If we inject relative to
+  // the full history instead, the anchor/state can land before the boundary
+  // and get silently dropped — which is exactly when the agent forgets the
+  // original request and loses its task/verification state after a compaction.
+  const liveStart = lastCompactionIndex(messages) + 1; // 0 when no compaction
+  const liveWindow = messages.slice(liveStart);
 
+  // Presence of the original request must be checked against the live window,
+  // not the full history — otherwise a copy lingering before the compaction
+  // boundary suppresses the anchor even though the model can no longer see it.
+  const anchor = buildOriginalRequestAnchor(state.originalRequest, liveWindow);
+  const stateMessage = buildSessionStateMessage(state);
+
+  // Insert before the latest real user message *within the live window*. When
+  // there is none (a mid-task continuation right after compaction), fall to
+  // the tail of the window so the injection still survives the slice.
+  const userIdx = latestUserMessageIndex(liveWindow);
+  const insertAt = liveStart + (userIdx === -1 ? liveWindow.length : userIdx);
+
+  const result: Message[] = [];
   result.push(...messages.slice(0, insertAt));
   if (anchor) result.push(anchor);
   if (stateMessage) result.push(stateMessage);
   result.push(...messages.slice(insertAt));
   return result;
+}
+
+/** Index of the last compaction summary, or -1 when none exists. Mirrors
+ *  glove-core's splitAtLastCompaction boundary so the injection lands inside
+ *  the window the model will actually receive. */
+function lastCompactionIndex(messages: Message[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.is_compaction) return i;
+  }
+  return -1;
 }
 
 function buildOriginalRequestAnchor(
