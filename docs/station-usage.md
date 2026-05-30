@@ -215,15 +215,22 @@ The key is held **in memory only** — never written to disk, never logged, neve
 
 A web UI that consumes the same REST + WS API.
 
-```bash
-# Build the static assets (once, or after dashboard changes)
-bun run build:dashboard           # → dist/dashboard/
+**With the compiled binary** (`glorp` on your PATH): `bun run build` now builds the dashboard too, and `bun run install-bin` copies the assets to `<data-dir>/dashboard` (default `~/.glorp/dashboard`) — the single-file binary can't read them from inside itself, so they live next to your state.
 
-# Serve it from Station
-glorp station --dashboard         # open http://127.0.0.1:4271/
+```bash
+bun run build && bun run install-bin   # builds dashboard + CLI, installs both
+glorp station --dashboard              # open http://127.0.0.1:4271/
 ```
 
-Local development with hot reload (proxies the API/WS to a running Station):
+**From source / npm install:** assets are found automatically (next to `dist/dashboard`).
+
+Station probes, in order: `$GLORP_DASHBOARD_DIR`, `<data-dir>/dashboard`, the source/npm `dist/dashboard`, then next to the executable. If `--dashboard` is set but no assets are found, the startup log lists every path it checked. Point it anywhere explicitly with:
+
+```bash
+GLORP_DASHBOARD_DIR=/path/to/dist/dashboard glorp station --dashboard
+```
+
+**Local development** with hot reload (proxies the API/WS to a running Station):
 
 ```bash
 glorp station                     # API on :4271 in one terminal
@@ -231,7 +238,7 @@ bun run dashboard:dev             # Vite dev server on :5173 in another
 # override the API target: STATION_URL=http://127.0.0.1:4271 bun run dashboard:dev
 ```
 
-The dashboard is shipped pre-built in the npm package; if `--dashboard` is set but the assets aren't built, `/` returns a hint to run `bun run build:dashboard`.
+The dashboard is also shipped pre-built in the npm package, so installs from npm work without a build step.
 
 ---
 
