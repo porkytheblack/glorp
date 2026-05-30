@@ -37,7 +37,11 @@ export function credentialRoutes(manager: SessionManager): CredentialRoutes {
     async clear(id): Promise<Response> {
       const session = manager.getOrRehydrate(id);
       if (!session) return errorJson("not_found", `Session ${id} not found`, 404);
-      await session.clearCredential();
+      try {
+        await session.clearCredential();
+      } catch (err) {
+        return errorJson("credential_error", err instanceof Error ? err.message : String(err), 409);
+      }
       return noContent();
     },
   };
