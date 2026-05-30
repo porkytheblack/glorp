@@ -34,6 +34,20 @@ echo "📦 Installing glorp → $DEST"
 cp -f "$SRC" "$DEST"
 chmod +x "$DEST"
 
+# --- dashboard assets ---
+# The compiled binary can't read the dashboard from its in-binary virtual FS,
+# so drop the built SPA into the data dir, where Station looks for it first.
+DASH_SRC="$(dirname "$SRC")/dashboard"
+if [[ -d "$DASH_SRC" ]]; then
+  DASH_DEST="${GLORP_DATA_DIR:-$HOME/.glorp}/dashboard"
+  mkdir -p "$(dirname "$DASH_DEST")"
+  rm -rf "$DASH_DEST"
+  cp -R "$DASH_SRC" "$DASH_DEST"
+  echo "🖥  dashboard → $DASH_DEST"
+else
+  echo "ℹ️  no dashboard build found at $DASH_SRC (run 'bun run build:dashboard' to include it)"
+fi
+
 # --- verify ---
 if command -v "$BINARY_NAME" &>/dev/null; then
   INSTALLED_VERSION="$($BINARY_NAME --version 2>/dev/null || echo "unknown")"

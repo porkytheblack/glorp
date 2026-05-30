@@ -13,7 +13,7 @@ import { makeWsData, handleWsOpen, handleWsClose, handleWsMessage, type WsData }
 import { CredentialsStore } from "../agent/credentials.ts";
 import { TemplateStore } from "./templates/store.ts";
 import { provision } from "./templates/engine.ts";
-import { serveDashboard, dashboardBuilt } from "./dashboard.ts";
+import { serveDashboard, dashboardBuilt, dashboardSearchPaths } from "./dashboard.ts";
 import type { StationConfig } from "./config.ts";
 import { json } from "./respond.ts";
 
@@ -110,7 +110,7 @@ export async function startStation(config: StationConfig): Promise<StationHandle
 
       // Dashboard SPA: serve any non-API GET (/, /assets/*, client routes).
       if (config.dashboard && req.method === "GET" && !API_PREFIX.test(url.pathname)) {
-        return withCors(req, url, await serveDashboard(url.pathname));
+        return withCors(req, url, await serveDashboard(config.dataDir, url.pathname));
       }
       if (!config.dashboard && url.pathname === "/" && req.method === "GET") {
         return withCors(req, url, json({ status: "ok", service: "glorp-station" }));
@@ -143,11 +143,13 @@ export async function startStation(config: StationConfig): Promise<StationHandle
   config.port = port;
   console.log(`[glorp-station] listening on ${config.hostname}:${port} (dataDir: ${config.dataDir})`);
   if (config.dashboard) {
-    console.log(
-      dashboardBuilt()
-        ? `[glorp-station] dashboard at http://${config.hostname}:${port}/`
-        : "[glorp-station] dashboard enabled but not built — run `bun run build` in dashboard/",
-    );
+    if (dashboardBuilt(config.dataDir)) {
+      console.log(`[glorp-station] dashboard at http://${config.hostname}:${port}/`);
+    } else {
+      console.log("[glorp-station] dashboard enabled but no built assets found. Looked in:");
+      for (const dir of dashboardSearchPaths(config.dataDir)) console.log(`    ${dir}`);
+      console.log("[glorp-station]   Fix: `bun run build:dashboard` (then re-run `bun run install-bin` for the binary), or set GLORP_DASHBOARD_DIR.");
+    }
   }
 
   return {
