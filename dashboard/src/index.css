@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+/*
+ * Glorp design language — the TUI's dark palette, ported to the web.
+ * Exposed as Tailwind theme tokens so components use `bg-glorp-bg`,
+ * `text-glorp-accent`, etc.
+ */
+@theme {
+  --color-glorp-bg: #0d1117;
+  --color-glorp-surface: #161b22;
+  --color-glorp-surface-2: #1c2129;
+  --color-glorp-border: #30363d;
+  --color-glorp-text: #c9d1d9;
+  --color-glorp-muted: #8b949e;
+  --color-glorp-accent: #3fb950;
+  --color-glorp-accent-dim: #238636;
+  --color-glorp-warn: #d29922;
+  --color-glorp-error: #f85149;
+  --color-glorp-user: #58a6ff;
+
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-glorp-bg);
+  color: var(--color-glorp-text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, unobtrusive scrollbars to match the terminal aesthetic. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-glorp-border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-glorp-border);
+  border-radius: 4px;
+}

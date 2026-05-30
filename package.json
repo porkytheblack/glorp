@@ -10,6 +10,7 @@
   "files": [
     "bin/",
     "src/",
+    "dist/dashboard/",
     "scripts/embed-prompts.ts",
     "LICENSE"
   ],
@@ -37,6 +38,8 @@
     "prebuild": "bun scripts/embed-prompts.ts",
     "build": "bun run prebuild && bun build src/cli.ts --compile --minify --target=bun --outfile=dist/glorp",
     "install-bin": "bash scripts/install.sh",
+    "build:dashboard": "cd dashboard && bun install && bun run build",
+    "dashboard:dev": "cd dashboard && bun run dev",
     "bench:conventions": "bun scripts/bench-conventions.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/",

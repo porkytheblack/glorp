@@ -51,7 +51,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const projectConfig = loadProjectConfig(opts.workspace);
   const picked = await pickModel({ provider: opts.provider, model: opts.model, credentials, catalog, projectConfig });
   const contextLimit = picked.contextLimit;
-  const bridge = getBridge();
+  const bridge = opts.bridge ?? getBridge();
   const rawDM = new Displaymanager();
   const permissionDM = new PermissionDM(rawDM, opts.permissionMode ?? "normal");
   const labelListeners = new Set<(label: string) => void>();

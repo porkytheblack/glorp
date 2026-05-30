@@ -7,6 +7,7 @@ import type { CredentialsStore } from "./credentials.ts";
 import type { ModelCatalog } from "./model-catalog.ts";
 import type { ProjectConfig } from "./project-config.ts";
 import type { PermissionMode } from "./runtime/permission-mode.ts";
+import type { Bridge } from "../shared/bridge.ts";
 
 export interface ExtensionCatalogue {
   slash: Array<{ name: string; description: string }>;
@@ -71,6 +72,12 @@ export interface BuildGlorpOptions {
   provider?: string;
   model?: string;
   credentials?: CredentialsStore;
+  /**
+   * Per-session event bus. When omitted, falls back to the process-global
+   * `getBridge()` singleton (the single-session server's behavior). Station
+   * passes a fresh Bridge per session so concurrent sessions never cross-talk.
+   */
+  bridge?: Bridge;
   /**
    * Controls how tool-execution permission prompts are handled.
    *   "normal"  — ask the user every time (default)
