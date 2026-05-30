@@ -1,11 +1,11 @@
 /**
  * On-disk session snapshot helpers used for rehydration. Station reuses the
- * agent's `GlorpStore` snapshot files (`<dataDir>/sessions/<id>.json`) so a
- * session created in a previous Station process can be listed and resumed.
+ * agent's `GlorpStore` snapshot files so a session created in a previous
+ * Station process can be listed and resumed.
  */
 
 import * as fs from "node:fs";
-import * as path from "node:path";
+import { resolveSessionPaths } from "../agent/session-paths.ts";
 
 export interface SnapshotMetaView {
   workspace: string | null;
@@ -17,7 +17,7 @@ export interface SnapshotMetaView {
 }
 
 function snapshotPath(dataDir: string, id: string): string {
-  return path.join(dataDir, "sessions", `${id}.json`);
+  return resolveSessionPaths(dataDir, id).storeFile;
 }
 
 /** Whether a persisted snapshot exists for this session id. */

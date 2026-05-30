@@ -17,6 +17,7 @@ export interface ControlRoutes {
   abort(id: string): Response;
   resolveSlot(id: string, slotId: string, req: Request): Promise<Response>;
   setPermissionMode(id: string, req: Request): Promise<Response>;
+  setProfile(id: string, req: Request): Promise<Response>;
 }
 
 export function controlRoutes(manager: SessionManager): ControlRoutes {
@@ -75,6 +76,24 @@ export function controlRoutes(manager: SessionManager): ControlRoutes {
       }
       handle.setPermissionMode(body.mode as PermissionMode);
       return json({ permission_mode: body.mode });
+    },
+
+    async setProfile(id, req): Promise<Response> {
+      const handle = manager.get(id)?.current();
+      if (!handle) return errorJson("not_active", `Session ${id} is not active`, 409);
+      let body: { profile_id?: string };
+      try {
+        body = await readJson<{ profile_id?: string }>(req);
+      } catch {
+        return errorJson("bad_request", "Invalid JSON body", 400);
+      }
+      if (!body.profile_id) return errorJson("bad_request", "Missing 'profile_id'", 400);
+      try {
+        await handle.swapProfile(body.profile_id);
+      } catch (err) {
+        return errorJson("profile_error", err instanceof Error ? err.message : String(err), 400);
+      }
+      return json({ profile_id: body.profile_id, model_label: handle.modelLabel });
     },
   };
 }

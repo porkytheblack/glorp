@@ -7,6 +7,7 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -30,6 +31,17 @@ function tmp(prefix = "station-test-"): string {
 afterEach(() => {
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
+
+async function freePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      server.close(() => resolve(typeof addr === "object" && addr ? addr.port : 0));
+    });
+  });
+}
 
 function captureClient(id: string): { client: StreamClient; sent: string[] } {
   const sent: string[] = [];
@@ -99,7 +111,7 @@ describe("Session isolation (success metric: 5 concurrent, no cross-talk)", () =
       workspace: path.join(tmp(), "w"),
       dataDir: tmp(),
       permissionMode: "normal",
-      customCredential: { provider: "anthropic", apiKey: "sk-ant-secret-7788" },
+      customCredential: { provider: "anthropic", apiKey: "fixture-key-7788" },
     });
     const dto = s.toDto();
     expect(dto.custom_credentials).toEqual({ provider: "anthropic", last4: "7788" });
@@ -283,7 +295,7 @@ describe("loadStationConfig", () => {
 describe("HTTP surface (integration)", () => {
   it("serves health, session CRUD, state, models and rehydration", async () => {
     const dataDir = tmp();
-    const config = loadStationConfig({ dataDir, port: 0, hostname: "127.0.0.1" });
+    const config = loadStationConfig({ dataDir, port: await freePort(), hostname: "127.0.0.1" });
     const station = await startStation(config);
     const base = `http://127.0.0.1:${station.port}`;
     const call = async (method: string, p: string, body?: unknown) => {

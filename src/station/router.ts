@@ -99,6 +99,9 @@ function routeSubpath(req: Request, m: RegExpMatchArray, g: SubGroups): Promise<
     case "permission-mode":
       if (method === "POST") return g.control.setPermissionMode(id, req);
       break;
+    case "profile":
+      if (method === "POST") return g.control.setProfile(id, req);
+      break;
     case "history":
       if (method === "GET") return g.state.history(id);
       break;

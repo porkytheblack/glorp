@@ -52,7 +52,7 @@ glorp station [options]
   --bypass                Default permission mode: bypass (no prompts)
 ```
 
-> Station binds to `127.0.0.1` by default and ships **no authentication** (v1). Run it on a trusted machine, or put it behind a reverse proxy / SSH tunnel if you need remote access.
+> Station binds to `127.0.0.1` by default and ships **no authentication** (v1). Browser requests are limited to same-origin or loopback origins, but non-browser clients on the host can still call the API. Run it on a trusted machine, or put it behind a reverse proxy / SSH tunnel if you need remote access.
 
 ### `station.json`
 
@@ -92,11 +92,12 @@ All paths are bare (no `/api/v1` prefix). JSON in, JSON out.
 | `GET` | `/sessions/:id/permissions` | Granted permissions |
 | `DELETE` | `/sessions/:id/permissions/:key` | Revoke a permission |
 | `POST` | `/sessions/:id/permission-mode` | `{ "mode": "normal" \| "auto" \| "bypass" }` |
+| `POST` | `/sessions/:id/profile` | Swap the live session to `{ "profile_id": "..." }` |
 | `POST` | `/sessions/:id/credentials` | Set a custom API key (in-memory only) |
 | `DELETE` | `/sessions/:id/credentials` | Revert to Station defaults |
 | `GET` | `/templates`, `/templates/:name` | Setup templates |
 | `GET` | `/models/providers`, `/models/profiles` | Configured models (keys redacted) |
-| `POST` | `/models/profiles/:id/activate` | Set the default profile |
+| `POST` | `/models/profiles/:id/activate` | Set the Station-wide default profile |
 | `GET` | `/health` | Health check |
 
 ### `POST /sessions` body

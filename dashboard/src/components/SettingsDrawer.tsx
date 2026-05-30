@@ -44,13 +44,14 @@ export function SettingsDrawer({ sessionId, session, open, onClose }: Props) {
 
   const loadProfiles = () =>
     api.profiles().then((r) => {
+      const sessionProfile = r.profiles.find((p) => p.label === session?.model_label)?.id ?? null;
       setProfiles(r.profiles);
-      setActiveProfile(r.active_profile_id);
+      setActiveProfile(sessionProfile ?? r.active_profile_id);
     });
 
   useEffect(() => {
     if (open) void loadProfiles().catch(() => {});
-  }, [open]);
+  }, [open, session?.model_label]);
 
   if (!open) return null;
 
@@ -73,8 +74,8 @@ export function SettingsDrawer({ sessionId, session, open, onClose }: Props) {
 
   const activate = (id: string) =>
     run(async () => {
-      await api.activateProfile(id);
-      await loadProfiles();
+      await api.setSessionProfile(sessionId, id);
+      setActiveProfile(id);
     });
 
   const saveKey = () =>

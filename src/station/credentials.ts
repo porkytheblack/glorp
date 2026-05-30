@@ -57,6 +57,11 @@ export class SessionCredentialsStore extends CredentialsStore {
     return this.activeId;
   }
 
+  /** Active Station profile, ignoring the session custom-key overlay. */
+  stationDefaultProfileId(): string | undefined {
+    return super.getActiveProfile()?.id;
+  }
+
   override getProvider(id: string): ProviderConfig | undefined {
     if (this.overlayProvider && id === this.overlayProvider.id) return this.overlayProvider;
     return super.getProvider(id);

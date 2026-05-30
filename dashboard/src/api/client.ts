@@ -60,6 +60,8 @@ export const api = {
 
   setPermissionMode: (id: string, mode: string) =>
     req<SessionDto>("POST", `/sessions/${id}/permission-mode`, { mode }).catch(() => null),
+  setSessionProfile: (id: string, profileId: string) =>
+    req<{ profile_id: string; model_label: string | null }>("POST", `/sessions/${id}/profile`, { profile_id: profileId }),
 
   templates: () => req<{ templates: TemplateSummary[] }>("GET", "/templates"),
   profiles: () =>

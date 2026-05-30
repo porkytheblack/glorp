@@ -1,32 +1,15 @@
-/**
- * A single Station session: one workspace, one isolated Bridge, one lazily
- * built GlorpHandle, and a fan-out stream of events to WS clients.
- *
- * The handle is built on first use so a session can be listed (and rehydrated
- * from its on-disk snapshot) without paying the cost of spinning up an agent.
- */
+/** One workspace, one isolated Bridge, one lazily built GlorpHandle. */
 
 import { Bridge } from "../shared/bridge.ts";
 import { buildGlorp } from "../agent/glorp.ts";
 import { GlorpStore } from "../agent/store.ts";
 import type { GlorpHandle, BuildGlorpOptions } from "../agent/glorp-types.ts";
-import type { PermissionMode } from "../agent/runtime/permission-mode.ts";
 import { EventStream } from "./event-stream.ts";
 import { SessionCredentialsStore } from "./credentials.ts";
 import { SessionStats } from "./session-stats.ts";
 import { buildSessionDto } from "./session-dto.ts";
+import type { StationSessionInit } from "./session-init.ts";
 import type { SessionLifecycle, SessionDto, SessionCredential } from "./types.ts";
-
-export interface StationSessionInit {
-  id: string;
-  workspace: string;
-  dataDir: string;
-  provider?: string;
-  model?: string;
-  profileId?: string;
-  permissionMode: PermissionMode;
-  customCredential?: SessionCredential | null;
-}
 
 export class StationSession {
   readonly id: string;
@@ -124,9 +107,14 @@ export class StationSession {
 
   /** Remove the custom key, reverting to Station defaults. */
   async clearCredential(): Promise<void> {
-    this.customCredential = null;
-    const profileId = this.credentials().clearCustom();
+    const credentials = this.credentials();
+    const profileId = credentials.stationDefaultProfileId();
+    if (this.handle && !profileId) {
+      throw new Error("Cannot clear session credential without a Station default profile");
+    }
     if (this.handle && profileId) await this.handle.swapProfile(profileId);
+    this.customCredential = null;
+    credentials.clearCustom();
   }
 
   /** Send a user message, building the agent if needed. Captures fatal errors. */
@@ -165,11 +153,7 @@ export class StationSession {
     return this.handle;
   }
 
-  /**
-   * A GlorpStore for read-only state queries (history/plan/tasks/permissions)
-   * that works without building the model adapter — so state can be served for
-   * a dormant, rehydrated session even when no credentials are configured.
-   */
+  /** Read-only state queries without building the model adapter. */
   peekStore(): GlorpStore {
     if (this.handle) return this.handle.store;
     if (!this.readStore) this.readStore = new GlorpStore(this.id, this.init.dataDir);
