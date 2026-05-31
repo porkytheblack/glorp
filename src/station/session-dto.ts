@@ -9,6 +9,7 @@ export function buildSessionDto(s: StationSession): SessionDto {
     id: s.id,
     state: s.state,
     workspace: s.workspace,
+    workspace_id: s.workspaceId,
     title: s.stats.title,
     model_label: handle?.modelLabel ?? null,
     permission_mode: handle?.permissionMode ?? s.defaultPermissionMode,

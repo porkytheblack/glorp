@@ -28,6 +28,14 @@ export interface CliArgs {
   workspaceRoot?: string;
   /** Station: serve the Glorp Dashboard SPA. */
   dashboard?: boolean;
+  /** `glorp station keys <sub>`: manage API keys (add | list | revoke). */
+  stationKeysSub?: "add" | "list" | "revoke";
+  /** `keys add <name>`. */
+  keyName?: string;
+  /** `keys revoke <id>`. */
+  keyId?: string;
+  /** `--scopes a,b,c` for `keys add`. */
+  scopes?: string[];
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -39,7 +47,22 @@ export function parseCliArgs(argv: string[]): CliArgs {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "serve") { args.command = "serve"; continue; }
-    if (a === "station") { args.command = "station"; continue; }
+    if (a === "station") {
+      args.command = "station";
+      if (argv[i + 1] === "keys") {
+        i++;
+        const sub = argv[i + 1];
+        args.stationKeysSub = sub === "add" || sub === "revoke" ? sub : "list";
+        if (sub === "add" || sub === "list" || sub === "revoke") i++;
+        const pos = argv[i + 1];
+        if (pos && !pos.startsWith("-")) {
+          if (args.stationKeysSub === "add") args.keyName = pos;
+          else if (args.stationKeysSub === "revoke") args.keyId = pos;
+          i++;
+        }
+      }
+      continue;
+    }
     if (a === "migrate") { args.command = "migrate"; continue; }
     if (a === "doctor") { args.command = "doctor"; continue; }
     if (a === "mesh") {
@@ -60,6 +83,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
     if (a === "--host") { args.host = argv[++i]; continue; }
     if (a === "--data-dir") { args.dataDir = argv[++i]; continue; }
     if (a === "--workspace-root") { args.workspaceRoot = path.resolve(argv[++i] ?? "."); continue; }
+    if (a === "--scopes") { args.scopes = (argv[++i] ?? "").split(",").map((s) => s.trim()).filter(Boolean); continue; }
     if (a === "--dashboard") { args.dashboard = true; continue; }
     if (a === "-p" || a === "--print") {
       args.command = "headless";
@@ -81,6 +105,8 @@ USAGE
   glorp [options] [prompt...]       Interactive TUI (starts server if needed)
   glorp serve [options]             Start the agent server only
   glorp station [options]           Start the multi-session Station runtime
+  glorp station keys add <name>     Create an API key (printed once)
+  glorp station keys list|revoke    Manage API keys
   glorp migrate                     Upgrade stored sessions to the latest schema
   glorp doctor [--kill]             Diagnose / clean up stale glorp processes & state
   glorp mesh [agents|log]           Inspect the inter-agent mesh history
@@ -100,9 +126,10 @@ OPTIONS
   -h, --help               This help
 
 STATION OPTIONS
-      --host <addr>        Bind address (default: 127.0.0.1)
+      --host <addr>        Bind address (default: 127.0.0.1; non-loopback ⇒ auth required)
       --data-dir <dir>     State directory (default: ~/.glorp)
       --workspace-root <d> Base dir for auto-provisioned workspaces
+      --scopes <a,b>       Scopes for 'keys add' (default: admin)
       --dashboard          Serve the Glorp Dashboard SPA at /
 
 ENV
@@ -110,6 +137,7 @@ ENV
   GLORP_PORT               Override server port
   GLORP_TOKEN              Override server token
   GLORP_DATA_DIR           Override storage (default ~/.glorp)
+  GLORP_STATION_AUTH       Station API-key auth: required | off (default: auto)
 
 KEYBOARD (in TUI)
   Ctrl+M  Model switcher     Ctrl+S  Session picker

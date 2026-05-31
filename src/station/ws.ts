@@ -94,5 +94,14 @@ async function dispatch(
     case "swap_profile":
       await handle.swapProfile(String(msg.profile_id)).catch(() => {});
       break;
+    case "switch_agent":
+      await handle.switchAgent(String(msg.agent_id)).catch(() => {});
+      break;
+    case "add_agent":
+      await handle.addAgent({ role: String(msg.role), label: msg.label as string | undefined }).catch(() => {});
+      break;
+    case "remove_agent":
+      await handle.removeAgent(String(msg.agent_id)).catch(() => {});
+      break;
   }
 }

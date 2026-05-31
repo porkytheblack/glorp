@@ -1,3 +1,4 @@
+import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -9,11 +10,13 @@ const STATION = process.env.STATION_URL ?? "http://127.0.0.1:4271";
 // API + WebSocket to a running Station so there are no CORS hoops.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   base: "./",
   build: { outDir: "../dist/dashboard", emptyOutDir: true },
   server: {
     proxy: {
       "/sessions": { target: STATION, ws: true, changeOrigin: true },
+      "/workspaces": STATION,
       "/health": STATION,
       "/models": STATION,
       "/templates": STATION,

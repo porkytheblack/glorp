@@ -315,7 +315,7 @@ describe("HTTP surface (integration)", () => {
       fs.mkdirSync(ws, { recursive: true });
       const created = await call("POST", "/sessions", { workspace: ws });
       expect(created.status).toBe(201);
-      expect(created.body.ws_url).toContain(`:${station.port}/sessions/`);
+      expect(created.body.ws_url).toContain(`:${station.port}/api/v1/sessions/`);
       const id = created.body.id;
 
       expect((await call("GET", "/sessions")).body.total).toBeGreaterThanOrEqual(1);

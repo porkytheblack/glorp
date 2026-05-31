@@ -16,9 +16,39 @@ export interface SessionRoutes {
   sendMessage(id: string, req: Request): Promise<Response>;
 }
 
+/**
+ * The session-events WebSocket URL for a session id, on the stable `/api/v1`
+ * path (also reachable at the legacy `/sessions/:id/events`). Clients on another
+ * host should swap `config.hostname` for the address they dialed.
+ */
+export function sessionWsUrl(config: StationConfig, id: string): string {
+  return `ws://${config.hostname}:${config.port}/api/v1/sessions/${id}/events`;
+}
+
+/**
+ * Create a session and return its DTO (+ws_url), mapping the known failure
+ * modes to status codes. Shared by `POST /sessions` and
+ * `POST /workspaces/:id/sessions`.
+ */
+export async function createSessionResponse(
+  manager: SessionManager,
+  config: StationConfig,
+  body: CreateSessionInput,
+): Promise<Response> {
+  try {
+    const session = await manager.create(body);
+    return json({ ...session.toDto(), ws_url: sessionWsUrl(config, session.id) }, 201);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (err instanceof SessionExistsError) return errorJson("session_exists", msg, 409);
+    if (err instanceof WorkspaceError) return errorJson("workspace_error", msg, 400);
+    return errorJson("session_create_failed", msg, 500);
+  }
+}
+
 export function sessionRoutes(manager: SessionManager, config: StationConfig): SessionRoutes {
   function wsUrl(id: string): string {
-    return `ws://${config.hostname}:${config.port}/sessions/${id}/events`;
+    return sessionWsUrl(config, id);
   }
 
   return {
@@ -29,15 +59,7 @@ export function sessionRoutes(manager: SessionManager, config: StationConfig): S
       } catch {
         return errorJson("bad_request", "Invalid JSON body", 400);
       }
-      try {
-        const session = await manager.create(body);
-        return json({ ...session.toDto(), ws_url: wsUrl(session.id) }, 201);
-      } catch (err) {
-        if (err instanceof SessionExistsError) return errorJson("session_exists", err.message, 409);
-        if (err instanceof WorkspaceError) return errorJson("workspace_error", err.message, 400);
-        const msg = err instanceof Error ? err.message : String(err);
-        return errorJson("session_create_failed", msg, 500);
-      }
+      return createSessionResponse(manager, config, body);
     },
 
     async list(): Promise<Response> {

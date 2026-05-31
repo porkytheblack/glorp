@@ -14,6 +14,7 @@ import type { SessionLifecycle, SessionDto, SessionCredential } from "./types.ts
 export class StationSession {
   readonly id: string;
   readonly workspace: string;
+  readonly workspaceId: string | null;
   readonly bridge = new Bridge();
   readonly stream: EventStream;
   readonly stats = new SessionStats();
@@ -33,6 +34,7 @@ export class StationSession {
     this.init = init;
     this.id = init.id;
     this.workspace = init.workspace;
+    this.workspaceId = init.workspaceId ?? null;
     this.customCredential = init.customCredential ?? null;
     this.stream = new EventStream(init.id);
     this.bridge.subscribe((ev) => this.onEvent(ev));

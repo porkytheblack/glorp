@@ -1,6 +1,8 @@
 /** Live-session control: abort the current request, resolve display slots. */
 
 import type { SessionManager } from "../manager.ts";
+import type { StationSession } from "../session.ts";
+import type { GlorpHandle } from "../../agent/glorp-types.ts";
 import type { PermissionMode } from "../../agent/runtime/permission-mode.ts";
 import { json, errorJson, readJson } from "../respond.ts";
 
@@ -18,6 +20,9 @@ export interface ControlRoutes {
   resolveSlot(id: string, slotId: string, req: Request): Promise<Response>;
   setPermissionMode(id: string, req: Request): Promise<Response>;
   setProfile(id: string, req: Request): Promise<Response>;
+  addAgent(id: string, req: Request): Promise<Response>;
+  switchAgent(id: string, agentId: string): Promise<Response>;
+  removeAgent(id: string, agentId: string): Promise<Response>;
 }
 
 export function controlRoutes(manager: SessionManager): ControlRoutes {
@@ -95,5 +100,54 @@ export function controlRoutes(manager: SessionManager): ControlRoutes {
       }
       return json({ profile_id: body.profile_id, model_label: handle.modelLabel });
     },
+
+    // --- Multi-agent roster -------------------------------------------------
+
+    async addAgent(id, req): Promise<Response> {
+      const session = manager.getOrRehydrate(id);
+      if (!session) return errorJson("not_found", `Session ${id} not found`, 404);
+      let body: { role?: string; label?: string };
+      try {
+        body = await readJson<{ role?: string; label?: string }>(req);
+      } catch {
+        return errorJson("bad_request", "Invalid JSON body", 400);
+      }
+      if (!body.role) return errorJson("bad_request", "Missing 'role'", 400);
+      return runRoster(session, async (handle) => {
+        const agentId = await handle.addAgent({ role: body.role!, label: body.label });
+        return { agent_id: agentId, agents: handle.listAgents(), active_agent_id: handle.activeAgentId };
+      });
+    },
+
+    async switchAgent(id, agentId): Promise<Response> {
+      const session = manager.getOrRehydrate(id);
+      if (!session) return errorJson("not_found", `Session ${id} not found`, 404);
+      return runRoster(session, async (handle) => {
+        await handle.switchAgent(agentId);
+        return { agents: handle.listAgents(), active_agent_id: handle.activeAgentId };
+      });
+    },
+
+    async removeAgent(id, agentId): Promise<Response> {
+      const session = manager.getOrRehydrate(id);
+      if (!session) return errorJson("not_found", `Session ${id} not found`, 404);
+      return runRoster(session, async (handle) => {
+        await handle.removeAgent(agentId);
+        return { agents: handle.listAgents(), active_agent_id: handle.activeAgentId };
+      });
+    },
   };
+}
+
+/** Build the session's handle and run a roster mutation, mapping failures. */
+async function runRoster(
+  session: StationSession,
+  fn: (handle: GlorpHandle) => Promise<unknown>,
+): Promise<Response> {
+  try {
+    const handle = await session.ensureBuilt();
+    return json(await fn(handle));
+  } catch (err) {
+    return errorJson("agent_failed", err instanceof Error ? err.message : String(err), 502);
+  }
 }

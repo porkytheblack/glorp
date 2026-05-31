@@ -45,7 +45,9 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/",
     "test:orchestrator": "bash scripts/test-orchestrator.sh",
-    "ci": "bun run typecheck && bun run test"
+    "client:sync": "bun packages/glorp-client/scripts/sync-contract.ts",
+    "client:check": "bun packages/glorp-client/scripts/sync-contract.ts --check",
+    "ci": "bun run typecheck && bun run client:check && bun run test"
   },
   "dependencies": {
     "@opentui/core": "latest",

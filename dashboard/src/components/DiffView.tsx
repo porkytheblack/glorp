@@ -93,7 +93,7 @@ export function DiffView(props: DiffViewProps) {
   const removed = lines.filter((l) => l.kind === "del").length;
 
   return (
-    <div className="overflow-hidden rounded border border-glorp-border bg-glorp-bg text-[12px]">
+    <div className="overflow-hidden rounded border border-glorp-border bg-glorp-bg font-mono text-[12px]">
       <div className="flex items-center justify-between border-b border-glorp-border bg-glorp-surface-2 px-2 py-1">
         <span className="truncate text-glorp-text">{props.filePath ?? "diff"}</span>
         <span className="shrink-0 tabular-nums">

@@ -1,0 +1,374 @@
+openapi: 3.1.0
+info:
+  title: Glorp Station API
+  version: "1"
+  description: >
+    Remote control plane for Glorp Station: create workspaces and run coding
+    agents over an API-key-secured HTTP/WS API. All endpoints are served under
+    the stable `/api/v1` prefix (and, for backwards compatibility, at the root).
+    Auth is required whenever Station is bound to a non-loopback host.
+servers:
+  - url: "{endpoint}/api/v1"
+    variables:
+      endpoint:
+        default: http://127.0.0.1:4271
+        description: Base URL of the Station server.
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: health
+  - name: keys
+  - name: workspaces
+  - name: sessions
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness probe (open — no auth required)
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  version: { type: string }
+                  uptime_ms: { type: integer }
+                  live_sessions: { type: integer }
+
+  /keys:
+    post:
+      tags: [keys]
+      summary: Create an API key (scope admin). The raw key is returned once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                scopes:
+                  type: array
+                  items: { type: string, enum: [admin, run, read] }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - $ref: "#/components/schemas/ApiKeyPublic"
+                      - type: object
+                        properties:
+                          key: { type: string, description: The raw key — shown only here. }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    get:
+      tags: [keys]
+      summary: List API keys (scope admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApiKeyPublic" }
+  /keys/{id}:
+    delete:
+      tags: [keys]
+      summary: Revoke an API key (scope admin)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties: { revoked: { type: boolean } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /workspaces:
+    get:
+      tags: [workspaces]
+      summary: List workspaces
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspaces:
+                    type: array
+                    items: { $ref: "#/components/schemas/WorkspaceDto" }
+                  total: { type: integer }
+    post:
+      tags: [workspaces]
+      summary: Register a workspace (a folder on the host)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateWorkspaceInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkspaceDto" }
+  /workspaces/{id}:
+    get:
+      tags: [workspaces]
+      summary: Get a workspace + its sessions
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: OK }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [workspaces]
+      summary: Remove a workspace (optionally its sessions)
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: sessions, in: query, schema: { type: boolean }, description: Cascade-delete contained sessions. }
+      responses:
+        "204": { description: Removed }
+  /workspaces/{id}/sessions:
+    post:
+      tags: [sessions]
+      summary: Create a session inside a workspace
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSessionInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionDto" }
+
+  /sessions:
+    get:
+      tags: [sessions]
+      summary: List sessions
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: "#/components/schemas/SessionDto" }
+                  total: { type: integer }
+    post:
+      tags: [sessions]
+      summary: Create a session
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSessionInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionDto" }
+  /sessions/{id}:
+    get:
+      tags: [sessions]
+      summary: Get a session (poll `busy`/`state` here)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionDto" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [sessions]
+      summary: Destroy a session
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: workspace, in: query, schema: { type: boolean }, description: "Also delete the workspace folder — but only if it is a Station-provisioned sandbox (under workspaceRoot) that no other session references. Caller-supplied and shared workspaces are always kept." }
+      responses:
+        "204": { description: Destroyed }
+  /sessions/{id}/messages:
+    post:
+      tags: [sessions]
+      summary: Send a message to the agent
+      description: >
+        Default is async (202) — the agent runs in the background; poll
+        `/sessions/{id}/result` or stream the WebSocket. Set `wait: true` to
+        block until the turn finishes and return its text.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string }
+                wait: { type: boolean, default: false }
+      responses:
+        "202":
+          description: Accepted (async)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { accepted: { type: boolean }, session_id: { type: string } }
+        "200":
+          description: Completed turn (only when wait=true)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { text: { type: string }, error: { type: string } }
+  /sessions/{id}/result:
+    get:
+      tags: [sessions]
+      summary: Latest agent answer + run status (one-call result fetch)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /sessions/{id}/abort:
+    post:
+      tags: [sessions]
+      summary: Abort the running turn
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { aborted: { type: boolean } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        `Authorization: Bearer glsk_…`. For the WebSocket event stream
+        (`/api/v1/sessions/{id}/events`), which cannot set headers from a
+        browser, pass the key as an `?api_key=glsk_…` query parameter instead.
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Missing required scope
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+    ApiKeyPublic:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        keyPrefix: { type: string }
+        scopes: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+        lastUsed: { type: [string, "null"], format: date-time }
+        expiresAt: { type: [string, "null"], format: date-time }
+        revoked: { type: boolean }
+    WorkspaceDto:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        path: { type: string }
+        created_at: { type: string, format: date-time }
+        session_count: { type: integer }
+    CreateWorkspaceInput:
+      type: object
+      properties:
+        name: { type: string }
+        path: { type: string }
+    CreateSessionInput:
+      type: object
+      properties:
+        workspaceId: { type: string }
+        workspace: { type: string, description: Absolute host path. }
+        template: { type: string }
+        params: { type: object, additionalProperties: { type: string } }
+        provider: { type: string }
+        model: { type: string }
+        profileId: { type: string }
+        permissionMode: { type: string, enum: [normal, auto, bypass] }
+    SessionDto:
+      type: object
+      properties:
+        id: { type: string }
+        state: { type: string, enum: [provisioning, idle, busy, error, destroyed] }
+        workspace: { type: string }
+        workspace_id: { type: [string, "null"] }
+        title: { type: [string, "null"] }
+        model_label: { type: [string, "null"] }
+        permission_mode: { type: string, enum: [normal, auto, bypass] }
+        busy: { type: boolean }
+        turn_count: { type: integer }
+        tokens_in: { type: integer }
+        tokens_out: { type: integer }
+        error: { type: [string, "null"] }
+        ws_url: { type: string, description: WebSocket URL for the event stream. }
+    SessionResult:
+      type: object
+      properties:
+        status: { type: string, enum: [provisioning, idle, busy, error, destroyed] }
+        busy: { type: boolean }
+        text: { type: [string, "null"], description: The latest agent answer. }
+        error: { type: [string, "null"] }
+        turn_count: { type: integer }

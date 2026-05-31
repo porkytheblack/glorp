@@ -7,20 +7,34 @@
  * is intentionally separate from the single-session `src/server/`.
  */
 
+import * as path from "node:path";
 import { SessionManager } from "./manager.ts";
 import { createStationRouter } from "./router.ts";
 import { makeWsData, handleWsOpen, handleWsClose, handleWsMessage, type WsData } from "./ws.ts";
 import { CredentialsStore } from "../agent/credentials.ts";
 import { TemplateStore } from "./templates/store.ts";
+import { WorkspaceStore } from "./workspace-store.ts";
 import { provision } from "./templates/engine.ts";
 import { serveDashboard, dashboardBuilt, dashboardSearchPaths } from "./dashboard.ts";
-import type { StationConfig } from "./config.ts";
+import { KeyStore } from "./auth/key-store.ts";
+import { requireAuth, requireScope } from "./auth/middleware.ts";
+import { authRequired, type StationConfig } from "./config.ts";
 import { json } from "./respond.ts";
 
 /** GET paths owned by the REST API (everything else can be the dashboard SPA). */
-const API_PREFIX = /^\/(sessions|health|models|templates)(\/|$)/;
+const API_PREFIX = /^\/(sessions|workspaces|health|models|templates|keys)(\/|$)/;
 
 const WS_PATH = /^\/sessions\/([^/]+)\/events$/;
+
+/** The stable, versioned API prefix. Requests may arrive with or without it. */
+const API_V1 = "/api/v1";
+
+/** Strip a leading `/api/v1` so the existing route regexes match unchanged. */
+function stripApiPrefix(pathname: string): string {
+  if (pathname === API_V1) return "/";
+  if (pathname.startsWith(API_V1 + "/")) return pathname.slice(API_V1.length);
+  return pathname;
+}
 
 const CORS_BASE: Record<string, string> = {
   "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
@@ -73,19 +87,23 @@ export interface StationHandle {
 export async function startStation(config: StationConfig): Promise<StationHandle> {
   const credentials = new CredentialsStore(config.dataDir);
   const templates = new TemplateStore(config.templatesDir);
+  const workspaces = new WorkspaceStore(config.dataDir);
   const manager = new SessionManager({
     dataDir: config.dataDir,
     workspaceRoot: config.workspaceRoot,
     defaultProvider: config.defaultProvider,
     defaultModel: config.defaultModel,
     permissionMode: config.permissionMode,
+    workspaces,
     templates: {
       has: (name) => templates.has(name),
       provision: (name, params, workspace) => provision(templates.get(name)!, params, workspace),
     },
   });
   const startedAt = Date.now();
-  const router = createStationRouter(manager, config, credentials, templates, startedAt);
+  const keyStore = new KeyStore(config.auth?.keyStorage ?? path.join(config.dataDir, "glorp-keys.json"));
+  const authOn = authRequired(config);
+  const router = createStationRouter(manager, config, credentials, templates, startedAt, keyStore);
 
   const server = Bun.serve<WsData>({
     hostname: config.hostname,
@@ -98,8 +116,16 @@ export async function startStation(config: StationConfig): Promise<StationHandle
       const blocked = rejectBrowserOrigin(req, url);
       if (blocked) return withCors(req, url, blocked);
 
-      const wsMatch = url.pathname.match(WS_PATH);
+      // The public API is also mounted under /api/v1; strip it so every route
+      // regex below matches the same way for both prefixes.
+      const routePath = stripApiPrefix(url.pathname);
+
+      const wsMatch = routePath.match(WS_PATH);
       if (wsMatch && req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+        if (authOn) {
+          const auth = await requireAuth(req, url, keyStore);
+          if (!auth.ok) return withCors(req, url, auth.response);
+        }
         const session = manager.getOrRehydrate(wsMatch[1]!);
         if (!session) {
           return withCors(req, url, json({ error: "not_found", message: "Session not found" }, 404));
@@ -108,16 +134,27 @@ export async function startStation(config: StationConfig): Promise<StationHandle
         return withCors(req, url, new Response("WebSocket upgrade failed", { status: 500 }));
       }
 
-      // Dashboard SPA: serve any non-API GET (/, /assets/*, client routes).
-      if (config.dashboard && req.method === "GET" && !API_PREFIX.test(url.pathname)) {
-        return withCors(req, url, await serveDashboard(config.dataDir, url.pathname));
+      // Dashboard SPA: serve any non-API GET (/, /assets/*, client routes). Static
+      // assets stay open so the (loopback-only) dashboard loads even with auth on.
+      if (config.dashboard && req.method === "GET" && !API_PREFIX.test(routePath)) {
+        return withCors(req, url, await serveDashboard(config.dataDir, routePath));
       }
       if (!config.dashboard && url.pathname === "/" && req.method === "GET") {
         return withCors(req, url, json({ status: "ok", service: "glorp-station" }));
       }
 
+      // API-key auth for every REST route except health.
+      if (authOn && routePath !== "/health") {
+        const auth = await requireAuth(req, url, keyStore);
+        if (!auth.ok) return withCors(req, url, auth.response);
+        if (routePath === "/keys" || routePath.startsWith("/keys/")) {
+          const denied = requireScope(auth.key, "admin");
+          if (denied) return withCors(req, url, denied);
+        }
+      }
+
       try {
-        return withCors(req, url, await router.route(req, url.pathname));
+        return withCors(req, url, await router.route(req, routePath));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return withCors(req, url, json({ error: "internal", message }, 500));
@@ -142,6 +179,15 @@ export async function startStation(config: StationConfig): Promise<StationHandle
   // the caller passed port 0 to get an ephemeral port, e.g. in tests).
   config.port = port;
   console.log(`[glorp-station] listening on ${config.hostname}:${port} (dataDir: ${config.dataDir})`);
+  if (authOn) {
+    const count = (await keyStore.list().catch(() => [])).length;
+    console.log(`[glorp-station] API-key auth: REQUIRED (${count} key${count === 1 ? "" : "s"})`);
+    if (count === 0) {
+      console.warn("[glorp-station]   No API keys yet — run `glorp station keys add <name>` to create one.");
+    }
+  } else {
+    console.log("[glorp-station] API-key auth: off (loopback). Bind a non-loopback host or set auth to enable.");
+  }
   if (config.dashboard) {
     if (dashboardBuilt(config.dataDir)) {
       console.log(`[glorp-station] dashboard at http://${config.hostname}:${port}/`);
@@ -157,6 +203,7 @@ export async function startStation(config: StationConfig): Promise<StationHandle
     manager,
     async stop() {
       await manager.shutdownAll();
+      await keyStore.close().catch(() => {});
       server.stop();
       console.log("[glorp-station] stopped");
     },

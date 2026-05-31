@@ -73,9 +73,30 @@ Drop a `station.json` in the data dir for persistent config (CLI flags win over 
 
 ---
 
+## Authentication & remote access
+
+Station is **open on loopback** (localhost dev) and **requires an API key on any
+non-loopback bind** — so `glorp station --host 0.0.0.0` is auth-protected by
+default. Force it either way with `GLORP_STATION_AUTH=required|off`.
+
+```bash
+glorp station keys add ci-bot --scopes admin   # prints the key once (glsk_…)
+glorp station keys list
+glorp station keys revoke <id>
+```
+
+Send the key as `Authorization: Bearer glsk_…` (REST) or `?api_key=glsk_…` (the
+WebSocket, which can't set headers from a browser). `/health` stays open.
+
+For driving Station from another machine or your own orchestration, see
+[`remote-orchestration.md`](./remote-orchestration.md), the OpenAPI contract in
+[`openapi.yaml`](./openapi.yaml), and the typed client
+[`@porkytheblack/glorp-client`](../packages/glorp-client/README.md).
+
 ## REST API
 
-All paths are bare (no `/api/v1` prefix). JSON in, JSON out.
+Every path is served at the stable `/api/v1` prefix **and** at the bare root
+(e.g. `GET /api/v1/sessions` ≡ `GET /sessions`). JSON in, JSON out.
 
 | Method | Path | Purpose |
 | --- | --- | --- |

@@ -109,10 +109,19 @@ export interface EventEnvelope {
 
 export type SessionLifecycle = "provisioning" | "idle" | "busy" | "error" | "destroyed";
 
+export interface WorkspaceDto {
+  id: string;
+  name: string;
+  path: string;
+  created_at: string;
+  session_count: number;
+}
+
 export interface SessionDto {
   id: string;
   state: SessionLifecycle;
   workspace: string;
+  workspace_id: string | null;
   title: string | null;
   model_label: string | null;
   permission_mode: string;
