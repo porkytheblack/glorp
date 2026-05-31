@@ -74,6 +74,18 @@ export interface SessionDto {
   custom_credentials: { provider: string; last4: string } | null;
 }
 
+/** One file in a session's `uploads/` exchange folder. */
+export interface FileEntry {
+  path: string;
+  size: number;
+  modified_at: string;
+}
+
+/** Returned by `GET /sessions/:id/files` and `POST /sessions/:id/files`. */
+export interface FileListResponse {
+  files: FileEntry[];
+}
+
 /** Returned by `GET /sessions/:id/result` — the latest agent answer + status. */
 export interface SessionResult {
   status: SessionLifecycle;

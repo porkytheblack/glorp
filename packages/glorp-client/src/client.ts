@@ -5,7 +5,7 @@
  * `configure()` / env.
  */
 
-import { request, ping } from "./rest.js";
+import { request, ping, requestForm, requestBinary } from "./rest.js";
 import { runWith, type RunHandle, type RunOptions } from "./run.js";
 import { streamSessionWith, type SessionStream } from "./ws.js";
 import { resolveConfig, type GlorpConfig } from "./config.js";
@@ -14,11 +14,17 @@ import type {
   ApiKeyPublic,
   BridgeEvent,
   CreateSessionInput,
+  FileListResponse,
   PermissionGrant,
   SessionDto,
   SessionResult,
   WorkspaceDto,
 } from "./contract.js";
+
+/** Encode a workspace-relative path for a URL, keeping `/` separators. */
+function encodePath(p: string): string {
+  return p.split("/").map(encodeURIComponent).join("/");
+}
 
 type Roster = { agents: AgentInfo[]; active_agent_id: string };
 
@@ -74,6 +80,18 @@ export function createClient(opts?: GlorpConfig) {
       permissions: (id: string) => req<{ permissions: PermissionGrant[] }>("GET", `/sessions/${id}/permissions`),
       revokePermission: (id: string, key: string) =>
         req<void>("DELETE", `/sessions/${id}/permissions/${encodeURIComponent(key)}`),
+
+      // File exchange — the session's `uploads/` folder (shared with the agent).
+      files: (id: string) => req<FileListResponse>("GET", `/sessions/${id}/files`),
+      uploadFile: (id: string, file: Blob, name: string) => {
+        const form = new FormData();
+        form.append("file", file, name);
+        return requestForm<FileListResponse>(cfg, `/sessions/${id}/files`, form);
+      },
+      downloadFile: (id: string, p: string) =>
+        requestBinary(cfg, "GET", `/sessions/${id}/files/${encodePath(p)}`),
+      deleteFile: (id: string, p: string) =>
+        req<void>("DELETE", `/sessions/${id}/files/${encodePath(p)}`),
     },
 
     models: {
