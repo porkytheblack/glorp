@@ -45,6 +45,11 @@ async function main(): Promise<void> {
     }
 
     case "station": {
+      if (args.stationKeysSub) {
+        const { runKeys } = await import("./cli-keys.ts");
+        await runKeys(args);
+        return;
+      }
       const { runStation } = await import("./cli-station.ts");
       await runStation(args);
       return;

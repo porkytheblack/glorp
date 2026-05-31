@@ -8,9 +8,21 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { PermissionMode } from "../agent/runtime/permission-mode.ts";
+import type { ApiKeyStorageAdapter } from "./auth/types.ts";
 
 /** Distinct from the single-session server's 3271 so both can run side by side. */
 export const STATION_DEFAULT_PORT = 4271;
+
+/**
+ * API-key auth. `enabled` left undefined means "auto": required when bound to a
+ * non-loopback host, open on loopback (preserves localhost dev + tests).
+ * `keyStorage` is a code-only escape hatch for a custom backend (SQLite, etc.);
+ * the default is a file at `<dataDir>/glorp-keys.json`.
+ */
+export interface StationAuthConfig {
+  enabled?: boolean;
+  keyStorage?: ApiKeyStorageAdapter;
+}
 
 export interface StationConfig {
   hostname: string;
@@ -23,6 +35,7 @@ export interface StationConfig {
   permissionMode: PermissionMode;
   /** Serve the optional Glorp Dashboard SPA at `/` when true. */
   dashboard: boolean;
+  auth?: StationAuthConfig;
 }
 
 export interface StationConfigOverrides {
@@ -34,6 +47,7 @@ export interface StationConfigOverrides {
   model?: string;
   permissionMode?: PermissionMode;
   dashboard?: boolean;
+  auth?: StationAuthConfig;
 }
 
 interface StationFileConfig {
@@ -45,6 +59,29 @@ interface StationFileConfig {
   defaultModel?: string;
   permissionMode?: PermissionMode;
   dashboard?: boolean;
+  auth?: { enabled?: boolean };
+}
+
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+/** True when binding to a loopback-only interface (auth optional there). */
+export function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK.has(hostname);
+}
+
+/**
+ * Resolve whether API-key auth is enforced: explicit `auth.enabled` wins; else
+ * auto — required for any non-loopback bind (i.e. reachable from other hosts).
+ */
+export function authRequired(config: StationConfig): boolean {
+  return config.auth?.enabled ?? !isLoopbackHost(config.hostname);
+}
+
+function envAuthEnabled(): boolean | undefined {
+  const v = process.env.GLORP_STATION_AUTH?.toLowerCase();
+  if (v === "required" || v === "on" || v === "true") return true;
+  if (v === "off" || v === "false") return false;
+  return undefined;
 }
 
 function readFileConfig(dataDir: string): StationFileConfig {
@@ -77,5 +114,10 @@ export function loadStationConfig(overrides: StationConfigOverrides = {}): Stati
     defaultModel: overrides.model ?? file.defaultModel,
     permissionMode: overrides.permissionMode ?? file.permissionMode ?? "normal",
     dashboard: overrides.dashboard ?? file.dashboard ?? false,
+    auth: {
+      // undefined ⇒ server applies the loopback-aware default at startup.
+      enabled: overrides.auth?.enabled ?? envAuthEnabled() ?? file.auth?.enabled,
+      keyStorage: overrides.auth?.keyStorage,
+    },
   };
 }

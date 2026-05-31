@@ -1,0 +1,29 @@
+{
+  "name": "@porkytheblack/glorp-client",
+  "version": "0.1.0",
+  "description": "Typed client for driving a remote Glorp Station — create workspaces, run agents, poll/stream results over an API-key-secured HTTP/WS API.",
+  "type": "module",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "sync": "bun scripts/sync-contract.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/porkytheblack/glorp.git",
+    "directory": "packages/glorp-client"
+  },
+  "keywords": ["glorp", "agent", "orchestration", "sdk", "client", "station"]
+}

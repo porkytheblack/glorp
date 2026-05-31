@@ -1,0 +1,39 @@
+# Glorp Station — a containerized, sandboxed agent runtime.
+#   docker compose up -d --build
+#   docker compose logs | grep glsk_        # grab the auto-minted API key
+# Agents run their tools inside the container; their files land in the
+# `glorp-workspaces` volume, never on your host.
+
+services:
+  glorp:
+    build: .
+    image: glorp-station
+    ports:
+      - "4271:4271"
+    environment:
+      # Standard providers: set the matching key here. For custom providers
+      # (custom base URLs), mount your credentials.json instead — see volumes.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      GLORP_STATION_AUTH: "required"   # set to "off" only on a trusted private network
+      GLORP_AUTO_KEY: "1"
+    volumes:
+      - glorp-data:/data                 # API keys + session snapshots (persisted)
+      - glorp-workspaces:/workspaces     # agent working dirs (persisted, host-isolated)
+      # Reuse your existing model credentials (incl. custom providers), read-only:
+      # - ${HOME}/.glorp/credentials.json:/data/credentials.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4271/api/v1/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    # Optional guardrails for letting agents run wild:
+    # mem_limit: 4g
+    # cpus: 2.0
+    # pids_limit: 512
+
+volumes:
+  glorp-data:
+  glorp-workspaces:

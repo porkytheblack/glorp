@@ -4,6 +4,8 @@ import type { SessionCredential } from "./types.ts";
 export interface StationSessionInit {
   id: string;
   workspace: string;
+  /** Id of the first-class workspace this session belongs to. */
+  workspaceId?: string | null;
   dataDir: string;
   provider?: string;
   model?: string;

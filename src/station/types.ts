@@ -36,9 +36,37 @@ export interface SessionCredential {
   model?: string;
 }
 
+/**
+ * A first-class workspace: one project = one folder on disk = a collection of
+ * chat sessions that all share that folder. Persisted in `workspaces.json`.
+ */
+export interface Workspace {
+  id: string;
+  name: string;
+  path: string;
+  createdAt: string;
+}
+
+/** Public view of a workspace returned by the REST API. */
+export interface WorkspaceDto {
+  id: string;
+  name: string;
+  path: string;
+  created_at: string;
+  session_count: number;
+}
+
+/** Body accepted by `POST /workspaces`. */
+export interface CreateWorkspaceInput {
+  name?: string;
+  path?: string;
+}
+
 /** Body accepted by `POST /sessions`. */
 export interface CreateSessionInput {
   sessionId?: string;
+  /** Create the session inside an existing first-class workspace. */
+  workspaceId?: string;
   /** Absolute path to an existing workspace directory on the host. */
   workspace?: string;
   /** Name of a setup template to provision a fresh workspace from. */
@@ -59,6 +87,8 @@ export interface SessionDto {
   id: string;
   state: SessionLifecycle;
   workspace: string;
+  /** Id of the first-class workspace this session belongs to (null if legacy). */
+  workspace_id: string | null;
   title: string | null;
   model_label: string | null;
   permission_mode: PermissionMode;

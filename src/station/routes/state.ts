@@ -6,10 +6,12 @@ import { json, errorJson, noContent } from "../respond.ts";
 
 export interface StateRoutes {
   history(id: string): Promise<Response>;
+  result(id: string): Promise<Response>;
   plan(id: string): Promise<Response>;
   tasks(id: string): Promise<Response>;
   permissions(id: string): Promise<Response>;
   revokePermission(id: string, key: string): Promise<Response>;
+  agents(id: string): Promise<Response>;
 }
 
 export function stateRoutes(manager: SessionManager): StateRoutes {
@@ -23,6 +25,27 @@ export function stateRoutes(manager: SessionManager): StateRoutes {
       if (!session) return notFound(id);
       const messages = await session.peekStore().getDisplayMessages();
       return json({ turns: turnsFromMessages(messages) });
+    },
+
+    /**
+     * The latest agent answer + run status — the one-call result fetch for
+     * orchestration. `text` is the last agent turn's text (null until one lands).
+     */
+    async result(id): Promise<Response> {
+      const session = require(id);
+      if (!session) return notFound(id);
+      const dto = session.toDto();
+      const messages = await session.peekStore().getDisplayMessages();
+      const turns = turnsFromMessages(messages);
+      let text: string | null = null;
+      for (let i = turns.length - 1; i >= 0; i--) {
+        const t = turns[i]!;
+        if (t.kind === "agent" && typeof t.text === "string" && t.text.length > 0) {
+          text = t.text;
+          break;
+        }
+      }
+      return json({ status: dto.state, busy: dto.busy, text, error: dto.error, turn_count: dto.turn_count });
     },
 
     async plan(id): Promise<Response> {
@@ -59,6 +82,18 @@ export function stateRoutes(manager: SessionManager): StateRoutes {
       if (handle) await handle.clearPermissionKey(decoded);
       else await session.peekStore().clearPermissionKey(decoded);
       return noContent();
+    },
+
+    /** The conversational-agent roster (builds the handle if needed). */
+    async agents(id): Promise<Response> {
+      const session = require(id);
+      if (!session) return notFound(id);
+      try {
+        const handle = await session.ensureBuilt();
+        return json({ agents: handle.listAgents(), active_agent_id: handle.activeAgentId });
+      } catch (err) {
+        return errorJson("agents_failed", err instanceof Error ? err.message : String(err), 502);
+      }
     },
   };
 }

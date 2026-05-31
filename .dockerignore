@@ -1,0 +1,15 @@
+# Keep the build context small + never ship host state into the image.
+.git
+.claude
+.glorp
+node_modules
+**/node_modules
+dist
+**/dist
+dashboard/dist
+packages/glorp-client/dist
+*.log
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*

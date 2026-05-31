@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { deriveProjectId } from "./workspace-id.ts";
 import { removeSessionStorage } from "./session-paths.ts";
+import { randomSessionName } from "./session-name.ts";
 
 /**
  * Lightweight metadata view of a saved session — read directly from the
@@ -127,9 +128,13 @@ export async function deleteSession(dataDir: string, sessionId: string): Promise
   removeSessionStorage(dataDir, sessionId);
 }
 
-/** Generate a stable id for a fresh session. */
+/**
+ * Generate a fresh session id. A friendly `<adjective>-<noun>-<suffix>`
+ * codename (the id is an opaque key, never sorted on) so sessions read as a
+ * fun name rather than a timestamp.
+ */
 export function newSessionId(): string {
-  return new Date().toISOString().replace(/[:.]/g, "-");
+  return randomSessionName();
 }
 
 /** Render an mtime as a short human-readable distance ("3m ago", "yesterday"). */
