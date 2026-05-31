@@ -35,6 +35,8 @@ export interface StationConfig {
   permissionMode: PermissionMode;
   /** Serve the optional Glorp Dashboard SPA at `/` when true. */
   dashboard: boolean;
+  /** Name of the per-session file-exchange subfolder. Defaults to `uploads`. */
+  filesDir?: string;
   auth?: StationAuthConfig;
 }
 
@@ -59,6 +61,7 @@ interface StationFileConfig {
   defaultModel?: string;
   permissionMode?: PermissionMode;
   dashboard?: boolean;
+  filesDir?: string;
   auth?: { enabled?: boolean };
 }
 
@@ -114,6 +117,7 @@ export function loadStationConfig(overrides: StationConfigOverrides = {}): Stati
     defaultModel: overrides.model ?? file.defaultModel,
     permissionMode: overrides.permissionMode ?? file.permissionMode ?? "normal",
     dashboard: overrides.dashboard ?? file.dashboard ?? false,
+    filesDir: file.filesDir,
     auth: {
       // undefined ⇒ server applies the loopback-aware default at startup.
       enabled: overrides.auth?.enabled ?? envAuthEnabled() ?? file.auth?.enabled,

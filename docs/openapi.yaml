@@ -250,6 +250,66 @@ paths:
               schema:
                 type: object
                 properties: { text: { type: string }, error: { type: string } }
+  /sessions/{id}/files:
+    get:
+      tags: [sessions]
+      summary: List files in the session's uploads/ exchange folder
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FileListResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [sessions]
+      summary: Upload one or more files into uploads/
+      description: >
+        multipart/form-data; every file part is written into the session's
+        uploads/ folder. The agent reads/writes the same folder.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: Stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FileListResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /sessions/{id}/files/{path}:
+    get:
+      tags: [sessions]
+      summary: Download a file from uploads/ (binary)
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: path, in: path, required: true, schema: { type: string }, description: Path relative to uploads/ }
+      responses:
+        "200":
+          description: File bytes (Content-Disposition&#58; attachment)
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [sessions]
+      summary: Delete a file from uploads/
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: path, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /sessions/{id}/result:
     get:
       tags: [sessions]
@@ -297,6 +357,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Invalid request (e.g. path escapes the workspace, bad body)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     Forbidden:
       description: Missing required scope
       content:
@@ -332,6 +397,16 @@ components:
         path: { type: string }
         created_at: { type: string, format: date-time }
         session_count: { type: integer }
+    FileEntry:
+      type: object
+      properties:
+        path: { type: string, description: Path relative to uploads/ }
+        size: { type: integer }
+        modified_at: { type: string, format: date-time }
+    FileListResponse:
+      type: object
+      properties:
+        files: { type: array, items: { $ref: "#/components/schemas/FileEntry" } }
     CreateWorkspaceInput:
       type: object
       properties:

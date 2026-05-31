@@ -116,6 +116,10 @@ Every path is served at the stable `/api/v1` prefix **and** at the bare root
 | `POST` | `/sessions/:id/profile` | Swap the live session to `{ "profile_id": "..." }` |
 | `POST` | `/sessions/:id/credentials` | Set a custom API key (in-memory only) |
 | `DELETE` | `/sessions/:id/credentials` | Revert to Station defaults |
+| `GET` | `/sessions/:id/files` | List files in the session's `uploads/` folder |
+| `POST` | `/sessions/:id/files` | Upload file(s) into `uploads/` (`multipart/form-data`) |
+| `GET` | `/sessions/:id/files/:path` | Download a file from `uploads/` (binary) |
+| `DELETE` | `/sessions/:id/files/:path` | Delete a file from `uploads/` |
 | `GET` | `/templates`, `/templates/:name` | Setup templates |
 | `GET` | `/models/providers`, `/models/profiles` | Configured models (keys redacted) |
 | `POST` | `/models/profiles/:id/activate` | Set the Station-wide default profile |
@@ -159,6 +163,41 @@ Fire-and-forget returns `202 { accepted: true }`; `wait:true` returns the collec
 ```jsonc
 { "action": "approve" }   // approve | deny | resolve | reject
 // resolve takes "value": <any>; reject takes "reason": "..."
+```
+
+### Exchanging files
+
+Each session has a dedicated **`uploads/` folder inside its workspace** (the name
+is configurable via `filesDir` in `station.json`). It's the shared hand-off point
+between you and the agent: drop input files in for the agent to read, and the
+agent writes any file deliverable you ask for (`.pptx`, `.docx`, `.zip`, exports)
+back into it for you to download. Paths are confined to that folder — a `..`
+traversal is rejected with `400`.
+
+```bash
+id=...   # a session id
+
+# Upload a file the agent should work on
+curl -s -F file=@./brief.pdf localhost:4271/sessions/$id/files
+
+# Ask the agent to produce something, then list what's there
+curl -s localhost:4271/sessions/$id/files
+# → { "files": [ { "path": "deck.pptx", "size": 48211, "modified_at": "..." } ] }
+
+# Download a generated file
+curl -s localhost:4271/sessions/$id/files/deck.pptx -o deck.pptx
+
+# Delete it
+curl -s -X DELETE localhost:4271/sessions/$id/files/deck.pptx
+```
+
+With the `@porkytheblack/glorp-client` kit:
+
+```ts
+await client.sessions.uploadFile(id, new Blob([buf]), "brief.pdf");
+const { files } = await client.sessions.files(id);
+const bytes = await client.sessions.downloadFile(id, "deck.pptx"); // Uint8Array
+await client.sessions.deleteFile(id, "deck.pptx");
 ```
 
 ---

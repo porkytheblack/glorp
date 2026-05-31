@@ -15,6 +15,7 @@ import { controlRoutes } from "./routes/control.ts";
 import { modelRoutes } from "./routes/models.ts";
 import { templateRoutes } from "./routes/templates.ts";
 import { credentialRoutes } from "./routes/credentials.ts";
+import { fileRoutes } from "./routes/files.ts";
 import { keyRoutes } from "./routes/keys.ts";
 import { healthRoute } from "./routes/health.ts";
 import type { KeyStore } from "./auth/key-store.ts";
@@ -49,6 +50,7 @@ export function createStationRouter(
   const models = modelRoutes(credentials);
   const tmpl = templateRoutes(templates);
   const creds = credentialRoutes(manager);
+  const files = fileRoutes(manager, config);
   const keys = keyRoutes(keyStore);
 
   return {
@@ -104,7 +106,7 @@ export function createStationRouter(
       }
 
       const sub = pathname.match(SUBPATH);
-      if (sub) return routeSubpath(req, sub, { sessions, state, control, creds });
+      if (sub) return routeSubpath(req, sub, { sessions, state, control, creds, files });
 
       const sess = pathname.match(SESSION);
       if (sess) {
@@ -124,6 +126,7 @@ type SubGroups = {
   state: ReturnType<typeof stateRoutes>;
   control: ReturnType<typeof controlRoutes>;
   creds: ReturnType<typeof credentialRoutes>;
+  files: ReturnType<typeof fileRoutes>;
 };
 
 /** Dispatch `/sessions/:id/<resource>[/<rest>]`. */
@@ -174,6 +177,12 @@ function routeSubpath(req: Request, m: RegExpMatchArray, g: SubGroups): Promise<
     case "credentials":
       if (method === "POST") return g.creds.set(id, req);
       if (method === "DELETE") return g.creds.clear(id);
+      break;
+    case "files":
+      if (method === "GET" && !rest) return g.files.list(id);
+      if (method === "POST" && !rest) return g.files.upload(id, req);
+      if (method === "GET" && rest) return g.files.download(id, rest);
+      if (method === "DELETE" && rest) return g.files.remove(id, rest);
       break;
   }
   return methodNotAllowed();
