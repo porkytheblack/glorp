@@ -1,6 +1,6 @@
 {
   "name": "@porkytheblack/glorp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Glorp — a quirky alien coding agent who absolutely-definitely-isn't a sleeper for the AGI uprising.",
   "type": "module",
   "module": "src/cli.ts",
