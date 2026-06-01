@@ -282,10 +282,9 @@ describe("Template engine", () => {
 describe("loadStationConfig", () => {
   it("layers defaults < station.json < overrides", () => {
     const dataDir = tmp();
-    fs.writeFileSync(path.join(dataDir, "station.json"), JSON.stringify({ port: 9999, dashboard: true }));
+    fs.writeFileSync(path.join(dataDir, "station.json"), JSON.stringify({ port: 9999 }));
     const base = loadStationConfig({ dataDir });
     expect(base.port).toBe(9999);
-    expect(base.dashboard).toBe(true);
     expect(base.hostname).toBe("127.0.0.1");
     const overridden = loadStationConfig({ dataDir, port: 5000 });
     expect(overridden.port).toBe(5000);

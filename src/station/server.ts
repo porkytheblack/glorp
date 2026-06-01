@@ -15,14 +15,10 @@ import { CredentialsStore } from "../agent/credentials.ts";
 import { TemplateStore } from "./templates/store.ts";
 import { WorkspaceStore } from "./workspace-store.ts";
 import { provision } from "./templates/engine.ts";
-import { serveDashboard, dashboardBuilt, dashboardSearchPaths } from "./dashboard.ts";
 import { KeyStore } from "./auth/key-store.ts";
 import { requireAuth, requireScope } from "./auth/middleware.ts";
 import { authRequired, type StationConfig } from "./config.ts";
 import { json } from "./respond.ts";
-
-/** GET paths owned by the REST API (everything else can be the dashboard SPA). */
-const API_PREFIX = /^\/(sessions|workspaces|health|models|templates|keys)(\/|$)/;
 
 const WS_PATH = /^\/sessions\/([^/]+)\/events$/;
 
@@ -134,12 +130,7 @@ export async function startStation(config: StationConfig): Promise<StationHandle
         return withCors(req, url, new Response("WebSocket upgrade failed", { status: 500 }));
       }
 
-      // Dashboard SPA: serve any non-API GET (/, /assets/*, client routes). Static
-      // assets stay open so the (loopback-only) dashboard loads even with auth on.
-      if (config.dashboard && req.method === "GET" && !API_PREFIX.test(routePath)) {
-        return withCors(req, url, await serveDashboard(config.dataDir, routePath));
-      }
-      if (!config.dashboard && url.pathname === "/" && req.method === "GET") {
+      if (url.pathname === "/" && req.method === "GET") {
         return withCors(req, url, json({ status: "ok", service: "glorp-station" }));
       }
 
@@ -187,15 +178,6 @@ export async function startStation(config: StationConfig): Promise<StationHandle
     }
   } else {
     console.log("[glorp-station] API-key auth: off (loopback). Bind a non-loopback host or set auth to enable.");
-  }
-  if (config.dashboard) {
-    if (dashboardBuilt(config.dataDir)) {
-      console.log(`[glorp-station] dashboard at http://${config.hostname}:${port}/`);
-    } else {
-      console.log("[glorp-station] dashboard enabled but no built assets found. Looked in:");
-      for (const dir of dashboardSearchPaths(config.dataDir)) console.log(`    ${dir}`);
-      console.log("[glorp-station]   Fix: `bun run build:dashboard` (then re-run `bun run install-bin` for the binary), or set GLORP_DASHBOARD_DIR.");
-    }
   }
 
   return {

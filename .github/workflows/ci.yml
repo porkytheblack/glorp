@@ -42,12 +42,6 @@ jobs:
           bun run typecheck
           bun run build
 
-      - name: Dashboard — typecheck
-        run: |
-          cd dashboard
-          bun install --frozen-lockfile
-          bun run typecheck
-
       - name: Build single binary (smoke)
         run: bun run build
 

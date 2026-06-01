@@ -2,7 +2,7 @@
 
 > **Naming note.** "Glorp Station" here is the **multi-session runtime** (`glorp station`) — a long-running server that hosts many agent sessions over a REST + WebSocket API. It is *not* the same as the `station-signal` async **fleet** runner mentioned elsewhere in the README (which runs background fan-out jobs in child processes). Two different things that happen to share the word "station".
 
-Station lets you run multiple Glorp agents at once, leave them running, and connect from any client — a web dashboard, an IDE extension, a CLI, or a CI pipeline. See [`station-spec.md`](./station-spec.md) for the product spec and rationale.
+Station lets you run multiple Glorp agents at once, leave them running, and connect from any client — an IDE extension, a CLI, or a CI pipeline. See [`station-spec.md`](./station-spec.md) for the product spec and rationale.
 
 ---
 
@@ -13,7 +13,6 @@ Station lets you run multiple Glorp agents at once, leave them running, and conn
 # or set an env var: export ANTHROPIC_API_KEY=... (or OPENAI_API_KEY, OPENROUTER_API_KEY, ...)
 
 glorp station                 # REST + WS API on http://127.0.0.1:4271
-glorp station --dashboard     # also serve the web dashboard at http://127.0.0.1:4271/
 ```
 
 Then create a session and send it a prompt:
@@ -45,7 +44,6 @@ glorp station [options]
   --data-dir <dir>        State directory (default: ~/.glorp, or $GLORP_DATA_DIR)
   --workspace-root <dir>  Base dir for auto-provisioned workspaces
                           (default: <data-dir>/workspaces)
-  --dashboard             Serve the Glorp Dashboard SPA at /
   --provider <name>       Default provider for new sessions
   -m, --model <name>      Default model for new sessions
   --auto-mode             Default permission mode: auto (approve safe ops)
@@ -66,8 +64,7 @@ Drop a `station.json` in the data dir for persistent config (CLI flags win over 
   "templatesDir": "/home/dev/.glorp/templates",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-sonnet-4-20250514",
-  "permissionMode": "normal",
-  "dashboard": true
+  "permissionMode": "normal"
 }
 ```
 
@@ -212,7 +209,7 @@ Connect to `GET /sessions/:id/events` (upgrade to WS). On connect you receive a 
 
 `seq` is monotonic per client — a gap means you missed events (reconnect or send a `resync` command to re-hydrate). Multiple clients can subscribe to the same session.
 
-You can also push commands back over the socket (the dashboard uses both REST and this):
+You can also push commands back over the socket (clients can use both REST and this):
 
 ```jsonc
 { "type": "send_message", "text": "..." }
@@ -268,37 +265,6 @@ curl -s -X DELETE localhost:4271/sessions/<id>/credentials   # revert to Station
 ```
 
 The key is held **in memory only** — never written to disk, never logged, never returned by the API (responses show only `provider` + last-4). Re-supply it after a Station restart if needed.
-
----
-
-## The dashboard
-
-A web UI that consumes the same REST + WS API.
-
-**With the compiled binary** (`glorp` on your PATH): `bun run build` now builds the dashboard too, and `bun run install-bin` copies the assets to `<data-dir>/dashboard` (default `~/.glorp/dashboard`) — the single-file binary can't read them from inside itself, so they live next to your state.
-
-```bash
-bun run build && bun run install-bin   # builds dashboard + CLI, installs both
-glorp station --dashboard              # open http://127.0.0.1:4271/
-```
-
-**From source / npm install:** assets are found automatically (next to `dist/dashboard`).
-
-Station probes, in order: `$GLORP_DASHBOARD_DIR`, `<data-dir>/dashboard`, the source/npm `dist/dashboard`, then next to the executable. If `--dashboard` is set but no assets are found, the startup log lists every path it checked. Point it anywhere explicitly with:
-
-```bash
-GLORP_DASHBOARD_DIR=/path/to/dist/dashboard glorp station --dashboard
-```
-
-**Local development** with hot reload (proxies the API/WS to a running Station):
-
-```bash
-glorp station                     # API on :4271 in one terminal
-bun run dashboard:dev             # Vite dev server on :5173 in another
-# override the API target: STATION_URL=http://127.0.0.1:4271 bun run dashboard:dev
-```
-
-The dashboard is also shipped pre-built in the npm package, so installs from npm work without a build step.
 
 ---
 

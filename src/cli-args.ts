@@ -26,8 +26,6 @@ export interface CliArgs {
   dataDir?: string;
   /** Station: base directory for auto-provisioned workspaces. */
   workspaceRoot?: string;
-  /** Station: serve the Glorp Dashboard SPA. */
-  dashboard?: boolean;
   /** `glorp station keys <sub>`: manage API keys (add | list | revoke). */
   stationKeysSub?: "add" | "list" | "revoke";
   /** `keys add <name>`. */
@@ -84,7 +82,6 @@ export function parseCliArgs(argv: string[]): CliArgs {
     if (a === "--data-dir") { args.dataDir = argv[++i]; continue; }
     if (a === "--workspace-root") { args.workspaceRoot = path.resolve(argv[++i] ?? "."); continue; }
     if (a === "--scopes") { args.scopes = (argv[++i] ?? "").split(",").map((s) => s.trim()).filter(Boolean); continue; }
-    if (a === "--dashboard") { args.dashboard = true; continue; }
     if (a === "-p" || a === "--print") {
       args.command = "headless";
       args.prompt = argv[++i];
@@ -130,7 +127,6 @@ STATION OPTIONS
       --data-dir <dir>     State directory (default: ~/.glorp)
       --workspace-root <d> Base dir for auto-provisioned workspaces
       --scopes <a,b>       Scopes for 'keys add' (default: admin)
-      --dashboard          Serve the Glorp Dashboard SPA at /
 
 ENV
   ANTHROPIC_API_KEY        Default provider if set
