@@ -2,11 +2,11 @@
 
 ## Problem Statement
 
-Today, running Glorp on a remote server means SSH-ing in, launching a single TUI session, and staying connected for the duration. There is no way to run multiple Glorp agents simultaneously, disconnect and reconnect to a running session, or programmatically create and manage sessions from a web dashboard, IDE extension, or CI pipeline. Developers who want to run Glorp on a powerful remote machine, or orchestrate multiple agents in parallel, have no supported path.
+Today, running Glorp on a remote server means SSH-ing in, launching a single TUI session, and staying connected for the duration. There is no way to run multiple Glorp agents simultaneously, disconnect and reconnect to a running session, or programmatically create and manage sessions from an IDE extension or CI pipeline. Developers who want to run Glorp on a powerful remote machine, or orchestrate multiple agents in parallel, have no supported path.
 
 ## Target Users
 
-**Primary: Solo developer with a remote dev server.** Has a VPS or workstation they SSH into. Wants to fire up Glorp sessions for different projects, leave them running, and connect from their laptop, phone, or a web client. Comfortable with the command line.
+**Primary: Solo developer with a remote dev server.** Has a VPS or workstation they SSH into. Wants to fire up Glorp sessions for different projects, leave them running, and connect from their laptop, phone, or a CLI client. Comfortable with the command line.
 
 **Secondary: Team lead or platform engineer.** Wants to offer Glorp-as-a-service to a small team (2-10 developers). Each developer gets their own sessions, the team shares a pool of API keys. No billing, no usage tracking — just a shared server running agents.
 
@@ -15,7 +15,7 @@ Today, running Glorp on a remote server means SSH-ing in, launching a single TUI
 ## Value Proposition
 
 - **User value:** Run Glorp sessions that persist across connections. Start a task from your desk, check progress from your phone, pick it back up tomorrow. Run five agents in parallel against five repos without five terminal windows.
-- **Business value:** Unlocks "remote Glorp" — a prerequisite for any future web client, VS Code extension, or collaborative feature. Also makes Glorp viable for CI/automation workflows (create session, send prompt, poll for completion, tear down).
+- **Business value:** Unlocks "remote Glorp" — a prerequisite for any future client, VS Code extension, or collaborative feature. Also makes Glorp viable for CI/automation workflows (create session, send prompt, poll for completion, tear down).
 
 ## What Glorp Station Is
 
@@ -25,8 +25,7 @@ Glorp Station is a long-running Bun process that:
 2. **Manages the lifecycle** of multiple concurrent `GlorpHandle` instances, each scoped to its own workspace directory and event bus.
 3. **Provisions workspaces** from declarative setup templates (clone a repo, run init scripts).
 4. **Manages model credentials** with a layered model: Station provides defaults, sessions can override with custom API keys passed at creation time or changed at runtime.
-5. **Streams session events** over WebSocket so any client (web, TUI, CLI, IDE extension) renders the same experience the terminal TUI does today.
-6. **Ships an optional web frontend** (Glorp Dashboard) that provides a full visual interface for interacting with all sessions — creating workspaces, chatting with agents, reviewing diffs, managing settings.
+5. **Streams session events** over WebSocket so any client (TUI, CLI, IDE extension) renders the same experience the terminal TUI does today.
 
 Station is **not** a scheduler, a queue, or a CI system. It does not decide when to run agents. It does not watch git for changes. It is a runtime that holds sessions in memory and exposes them over a network API.
 
@@ -55,7 +54,6 @@ Station is **not** a scheduler, a queue, or a CI system. It does not decide when
 13. As an admin, I want to **assign model profiles to sessions** (e.g., "this session uses Claude Sonnet, that one uses GPT-5").
 14. As a developer, I want to **swap the model** on a live session through the API.
 15. As a developer, I want to **set the permission mode** for a session (normal/auto/bypass) at creation time, so CI-driven sessions can run without human-in-the-loop.
-16. As a developer, I want to **open a web dashboard** (Glorp Dashboard) to interact with all my sessions visually — see all projects, chat with agents, review code changes, manage settings — without needing a terminal.
 
 ## Key User Flows
 
@@ -94,7 +92,6 @@ Station is **not** a scheduler, a queue, or a CI system. It does not decide when
 - WebSocket API for real-time event streaming (1:1 mapping to existing `BridgeEvent` types)
 - Layered credentials: Station defaults + per-session custom API keys
 - Setup templates (declarative workspace provisioning)
-- Optional web frontend (Glorp Dashboard) — ships with Station, served on the same port
 - Session persistence — sessions survive Station restarts by re-hydrating from GlorpStore snapshots
 - Basic health/status endpoint
 
@@ -197,8 +194,6 @@ GET    /models/profiles                   Configured model profiles
 POST   /models/profiles/:id/activate     Set default profile
 
 GET    /health                            Station health check
-
-GET    /                                  Serve Glorp Dashboard (when enabled)
 ```
 
 ### WebSocket protocol
@@ -208,77 +203,6 @@ Endpoint: `GET /sessions/:id/events` (upgrade to WS). On connect, sends `session
 ### Entry point
 
 Station is a separate entry point (`src/station/`) that reuses the agent layer (`src/agent/`) but has its own HTTP/WS server. Do not retrofit the existing `src/server/` — compose from agent primitives cleanly.
-
-## Glorp Dashboard (Optional Web Frontend)
-
-Station ships with an optional web frontend — **Glorp Dashboard** — served on the same port as the API. When enabled (`station.json: { "dashboard": true }`), `GET /` serves the SPA. When disabled, `GET /` returns the health check. The dashboard is a pure API consumer — it uses the exact same REST + WebSocket endpoints as any other client.
-
-### Design — inspired by Codex
-
-The UI takes cues from Codex's desktop app: a project-centric layout with a persistent sidebar, inline code diffs, and a chat-first interaction model.
-
-#### Layout: three-column
-
-```
-+------------------+-----------------------------+------------------+
-|                  |                             |                  |
-|  Project         |  Session / Chat             |  Environment     |
-|  Sidebar         |  (main panel)               |  Panel           |
-|                  |                             |                  |
-|  - Workspaces    |  Agent messages             |  - Git status    |
-|    - Sessions    |  Tool calls (expandable)    |  - Changed files |
-|  - New workspace |  Code diffs (inline)        |  - Plan / Tasks  |
-|  - Search        |  Permission prompts         |  - Stats         |
-|  - Templates     |  Streaming text             |                  |
-|                  |                             |                  |
-|                  +-----------------------------+                  |
-|                  |  Input bar                  |                  |
-|                  |  [model] [mode] [context %] |                  |
-+------------------+-----------------------------+------------------+
-```
-
-#### Left sidebar — Project tree
-
-- **Workspaces** group sessions by their workspace path. A workspace is a directory on the host; sessions under the same workspace are grouped together.
-- Each session shows: name/id, status badge (idle/busy/error), last activity timestamp.
-- **New workspace** button → opens a create-session dialog (pick a path or pick a template).
-- **Templates** section → browse available setup templates.
-- Clicking a session switches the main panel to that session's chat.
-
-#### Main panel — Chat / Task view
-
-- Renders the session's event stream as a conversation: user messages, agent text (streaming), tool calls with expandable detail, code diffs rendered inline with syntax highlighting, permission prompts with approve/deny buttons.
-- Input bar at the bottom for sending messages. Shows the active model label, permission mode, and context usage percentage (same info as the TUI chrome bar).
-- Abort button appears when the agent is busy.
-
-#### Right sidebar — Environment panel
-
-- **Git status**: branch, ahead/behind, uncommitted changes count. Sourced from a periodic `git status` the agent runs, or from the session's tool results.
-- **Changed files**: list of files the agent has modified in this session. Clickable to expand the diff.
-- **Plan / Tasks**: the session's current plan document and task list (from the orchestrator), rendered as a checklist.
-- **Stats**: token usage, turns, context window percentage.
-
-#### Settings page
-
-Accessible via a gear icon. Covers:
-
-- **Work mode**: permission level for the current session (normal / auto-review / full access — maps to normal / auto / bypass).
-- **Model configuration**: select model profile for the session, or enter custom API key.
-- **Station settings**: bind address, default workspace root, template management (admin-level).
-
-### Tech stack
-
-- **Framework**: Next.js or plain React SPA (static build, no SSR needed — Station serves the built assets).
-- **Styling**: Tailwind + the dark theme from the existing Glorp design language (the TUI's color palette: `bg: #0D1117`, accent greens, warning ambers, error reds).
-- **State management**: The WebSocket event stream IS the state. The dashboard connects to `/sessions/:id/events`, receives `session_hydrate` on connect, then applies `BridgeEvent`s incrementally — exactly like the TUI's `useUiState` reducer.
-- **Code rendering**: Monaco editor (read-only) or a lightweight diff viewer for inline diffs. Syntax highlighting via Shiki or Prism.
-- **Build**: Static export bundled into Station's dist. `bun build` produces `dist/dashboard/` which Station serves as static files. No separate process.
-
-### What the dashboard is NOT
-
-- Not a code editor. You don't edit files in the dashboard — the agent edits files, you review its work.
-- Not a terminal emulator. Bash output from tool calls is rendered as formatted output, not a live terminal.
-- Not a replacement for the TUI. The TUI remains the primary interface for developers who prefer the terminal. The dashboard is for when you want a browser window.
 
 ## Open Questions
 
@@ -295,8 +219,6 @@ Accessible via a gear icon. Covers:
 6. **Station configuration file.** `station.json` in the data dir, with CLI flag overrides for address and port.
 
 7. **Custom API key storage.** Session-level API keys must not be stored in plaintext. Options: (a) encrypt at rest with a Station master key derived from a passphrase, (b) hold only in memory and require re-submission on Station restart, (c) use OS keychain. Recommendation: (b) for v1 — simplest, no crypto dependency, keys are transient. Sessions that need persistence can re-supply keys on reconnect.
-
-8. **Dashboard bundling.** Ship the dashboard as pre-built static assets in the npm package, or require a separate build step? Recommendation: pre-built. `bun run build:dashboard` produces `dist/dashboard/` and Station serves it. Users who don't want the dashboard just don't enable it.
 
 ## Implementation Phases
 
@@ -325,13 +247,3 @@ Accessible via a gear icon. Covers:
 - Error recovery (session error state, process-level exception handling)
 - Station configuration file
 - Graceful shutdown (flush all sessions on SIGTERM)
-
-### Phase 4 — Glorp Dashboard (2-3 weeks)
-
-- Project sidebar with workspace grouping and session tree
-- Session chat view: streaming text, tool calls, inline diffs, permission prompts
-- Environment panel: git status, changed files, plan/tasks, stats
-- Input bar with model label, permission mode, context meter
-- Settings page: permission mode, model/credentials config, Station admin
-- Create workspace dialog with template picker
-- Static build bundled into Station dist

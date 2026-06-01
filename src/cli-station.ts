@@ -16,7 +16,6 @@ export async function runStation(args: CliArgs): Promise<void> {
     provider: args.provider,
     model: args.model,
     permissionMode: args.permissionMode,
-    dashboard: args.dashboard,
   });
 
   const station = await startStation(config);
