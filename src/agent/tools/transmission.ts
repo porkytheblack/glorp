@@ -1,14 +1,17 @@
 import { z } from "zod";
 import type { GloveFoldArgs } from "glove-core";
-import { getBridge } from "../../shared/bridge.ts";
+import { getBridge, type Bridge } from "../../shared/bridge.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
 /**
  * Operational audit trail for major session events. Persisted to
  * ~/.glorp/transmissions.jsonl and surfaced in the Signals panel.
+ *
+ * `bridge` scopes the emitted event to a single session; when omitted it
+ * falls back to the process-global Bridge (legacy single-session server).
  */
-export function transmissionTool(dataDir: string): GloveFoldArgs<{
+export function transmissionTool(dataDir: string, bridge?: Bridge): GloveFoldArgs<{
   subject: string;
   body: string;
   severity?: "low" | "medium" | "high";
@@ -45,7 +48,7 @@ export function transmissionTool(dataDir: string): GloveFoldArgs<{
         // Don't fail the agent if the diary write fails.
         console.error("[transmission] write failed:", err);
       }
-      getBridge().emit({
+      (bridge ?? getBridge()).emit({
         type: "transmission",
         payload: `[${entry.severity.toUpperCase()}] ${entry.subject} — ${entry.body}`,
         severity: entry.severity,

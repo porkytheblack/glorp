@@ -51,6 +51,22 @@ export ANTHROPIC_API_KEY=sk-ant-...     # or OPENAI_API_KEY / OPENROUTER_API_KEY
 ./dist/glorp --provider openai -m gpt-4.1
 ```
 
+### Glorp Station (multi-session server)
+
+Run many agents at once over a REST + WebSocket API — leave sessions running, reconnect from a laptop/phone/CLI client, or drive them from CI. (Distinct from the `station-signal` fleet runner above; same word, different thing.)
+
+```bash
+glorp station                     # API at http://127.0.0.1:4271/
+
+# create a session and send it a prompt
+curl -s -X POST localhost:4271/sessions -H 'content-type: application/json' \
+  -d '{"workspace":"'"$PWD"'"}'
+curl -s -X POST localhost:4271/sessions/<id>/messages -H 'content-type: application/json' \
+  -d '{"text":"add tests for the auth module","wait":true}'
+```
+
+Full guide — CLI flags, `station.json`, the REST/WS API, setup templates, and per-session keys — in [`docs/station-usage.md`](docs/station-usage.md). No auth in v1: bind to localhost or sit behind a reverse proxy.
+
 ### Inside the TUI
 
 - Type a request, enter to send.

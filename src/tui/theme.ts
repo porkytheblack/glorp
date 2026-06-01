@@ -26,6 +26,11 @@ export const theme = {
   agent: "#c0a0ff",
   loopActive: "#7dcfff",
   dimOverlay: "#0b0e14",
+  // Menu / overlay primitives (Helix-style command palette & pickers).
+  match: "#7dcfff",       // dim highlight on fuzzy-matched characters
+  menuSel: "#5dd3a8",     // selected-row background fill
+  menuSelText: "#0b0e14", // selected-row foreground (on menuSel)
+  footer: "#6b7a8c",      // footer key-hint row text
 } as const;
 
 export const BANNER = [

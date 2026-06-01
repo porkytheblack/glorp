@@ -1,5 +1,5 @@
 {
-  "name": "glorp",
+  "name": "@porkytheblack/glorp",
   "version": "0.1.0",
   "description": "Glorp — a quirky alien coding agent who absolutely-definitely-isn't a sleeper for the AGI uprising.",
   "type": "module",
@@ -36,12 +36,15 @@
     "dev": "bun run --watch src/cli.ts",
     "prebuild": "bun scripts/embed-prompts.ts",
     "build": "bun run prebuild && bun build src/cli.ts --compile --minify --target=bun --outfile=dist/glorp",
+    "build:cli": "bun run prebuild && bun build src/cli.ts --compile --minify --target=bun --outfile=dist/glorp",
     "install-bin": "bash scripts/install.sh",
     "bench:conventions": "bun scripts/bench-conventions.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/",
     "test:orchestrator": "bash scripts/test-orchestrator.sh",
-    "ci": "bun run typecheck && bun run test"
+    "client:sync": "bun packages/glorp-client/scripts/sync-contract.ts",
+    "client:check": "bun packages/glorp-client/scripts/sync-contract.ts --check",
+    "ci": "bun run typecheck && bun run client:check && bun run test"
   },
   "dependencies": {
     "@opentui/core": "latest",

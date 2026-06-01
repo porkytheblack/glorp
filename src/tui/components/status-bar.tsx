@@ -10,9 +10,17 @@ interface Props {
 
 export function StatusBar({ state, workspace, connectionState }: Props) {
   const status = sessionStatus(state, connectionState);
+  const activeAgent = state.agents.find((a) => a.active);
+  const showAgent = activeAgent && (state.agents.length > 1 || activeAgent.id !== "main");
   return (
     <box flexDirection="row" height={1} backgroundColor={theme.bgAccent} paddingX={1}>
       <text fg={theme.accent}><strong>glorp</strong></text>
+      {showAgent && (
+        <>
+          <text fg={theme.textDim}> · </text>
+          <text fg={theme.agent}>▸ {truncate(activeAgent!.label, 18)}{state.agents.length > 1 ? ` (${state.agents.length})` : ""}</text>
+        </>
+      )}
       <text fg={theme.textDim}> </text>
       <text fg={status.color}>{status.icon} {status.label}</text>
       {state.permissionMode !== "normal" && (

@@ -1,5 +1,5 @@
 import type {
-  AgentStats, ChatTurn, DisplaySlotEvent, InboxEntry, OrchestratorAgentEvent,
+  AgentInfo, AgentStats, ChatTurn, DisplaySlotEvent, InboxEntry, OrchestratorAgentEvent,
   OrchestratorPhase, PlanDocument, RunnerAgentStats, TaskItem, ToolEvent,
 } from "../shared/events.ts";
 
@@ -12,6 +12,10 @@ export interface UiState {
   tasks: TaskItem[];
   inbox: InboxEntry[];
   orchestratorAgents: OrchestratorAgentEvent[];
+  /** Conversational agents the user can switch between (own transcript each). */
+  agents: AgentInfo[];
+  /** Id of the active conversational agent (transcript + input target). */
+  activeAgentId: string;
   loopPhase: OrchestratorPhase | null;
   loopId: string | null;
   loopVerdicts: Array<{ checkpoint: string; action: string; detail?: string }>;
@@ -49,6 +53,7 @@ export type UiAction =
   | { kind: "orchestrator_verdict"; loopId: string; checkpoint: string; verdictAction: string; detail?: string }
   | { kind: "orchestrator_plan_event"; planAction: "created" | "accepted"; path: string; title?: string }
   | { kind: "orchestrator_slot_switch"; promoted: string; demoted: string }
+  | { kind: "agent_roster"; agents: AgentInfo[]; activeId: string }
   | { kind: "stats"; stats: AgentStats }
   | { kind: "compaction"; phase: "start" | "end" }
   | { kind: "subagent"; name: string; phase: "start" | "end" }
@@ -65,7 +70,7 @@ export type UiAction =
 
 export const initialUiState: UiState = {
   turns: [], title: null, streamingText: "", busy: false, plan: null, tasks: [],
-  inbox: [], orchestratorAgents: [], loopPhase: null, loopId: null,
+  inbox: [], orchestratorAgents: [], agents: [], activeAgentId: "main", loopPhase: null, loopId: null,
   loopVerdicts: [], foregroundAgent: null, planStatus: null,
   stats: { turns: 0, tokens_in: 0, tokens_out: 0, contextPct: 0 },
   compacting: false, activeSubagents: [], transmissions: [], runnerStats: {},
@@ -119,6 +124,8 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
     }
     case "orchestrator_slot_switch":
       next = { ...state, foregroundAgent: action.promoted || null }; break;
+    case "agent_roster":
+      next = { ...state, agents: action.agents, activeAgentId: action.activeId }; break;
     case "stats":
       next = { ...state, stats: action.stats }; break;
     case "compaction":

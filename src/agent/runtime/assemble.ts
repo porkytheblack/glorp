@@ -45,6 +45,10 @@ export interface AssembleArgs {
   ctxRef: { current: Context | null };
   inboxContext: Context;
   verification: VerificationTracker;
+  /** Override the system prompt (e.g. a non-default agent persona). */
+  systemPrompt?: string;
+  /** Mesh identity name for this agent (defaults to "main"). */
+  meshName?: string;
 }
 
 export interface AssembleResult {
@@ -59,7 +63,7 @@ export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult>
     model,
     displayManager: args.displayManager,
     serverMode: true,
-    systemPrompt: buildGlorpSystemPrompt({
+    systemPrompt: args.systemPrompt ?? buildGlorpSystemPrompt({
       workspace: args.workspace,
       contextLimit: args.contextLimit,
       extensions: args.diskExtensions,
@@ -81,6 +85,8 @@ export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult>
       resources: args.resources,
       orchestrator: args.orchestrator,
       contextRef: args.ctxRef,
+      meshDir: args.meshDir,
+      bridge: args.bridge,
     }),
     MAIN_AGENT_TOOLS,
   );
@@ -101,7 +107,7 @@ export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult>
   foldContextTools(agent, args.inboxContext);
 
   const caps = ["orchestrate", "plan", "interact", "generate"];
-  const meshAdapter = await mountAgentMesh(agent, "main", args.meshDir, caps);
+  const meshAdapter = await mountAgentMesh(agent, args.meshName ?? "main", args.meshDir, caps);
   return { agent, meshAdapter };
 }
 
@@ -174,7 +180,7 @@ export function wireOrchestratorToBridge(
         bridge.emit({ type: "runner_agent_stats", agent: { agentId: event.agentId, label: event.label, role: event.role, phase: event.phase, turns: event.turns, tokensIn: event.tokensIn, tokensOut: event.tokensOut } });
         break;
       case "error":
-        bridge.emit({ type: "error", message: event.message });
+        bridge.emit({ type: "error", message: event.message, detail: event.detail });
         break;
     }
   });

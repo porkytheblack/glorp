@@ -38,6 +38,28 @@ export type LoopPhase =
 /** Scheduling slot: one foreground, many background. */
 export type Slot = "foreground" | "background";
 
+/**
+ * Live processing state of an agent, so agents can tell when peers are busy.
+ *   idle     — registered but not actively processing
+ *   thinking — generating a response / reasoning
+ *   working  — executing tools / doing work
+ *   done     — finished successfully
+ *   dead     — failed, timed out, stopped, or interrupted
+ */
+export type AgentProcessingState = "idle" | "thinking" | "working" | "done" | "dead";
+
+/** A snapshot of an agent's identity + current processing state. */
+export interface AgentRuntimeInfo {
+  id: string;
+  label: string;
+  role: string;
+  slot: Slot;
+  state: AgentProcessingState;
+  /** ms epoch of the last state change. */
+  since: number;
+  detail?: string;
+}
+
 /** Runtime state of a scheduled agent. */
 export interface AgentSlot {
   id: AgentId;
@@ -73,7 +95,7 @@ export type OrchestratorEvent =
   | { type: "plan_created"; path: string; title: string }
   | { type: "plan_accepted"; path: string }
   | { type: "agent_stats"; agentId: string; label: string; role: string; phase: LoopPhase; turns: number; tokensIn: number; tokensOut: number }
-  | { type: "error"; agent?: AgentId; message: string };
+  | { type: "error"; agent?: AgentId; message: string; detail?: string };
 
 export type OrchestratorListener = (event: OrchestratorEvent) => void;
 

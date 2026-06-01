@@ -7,6 +7,7 @@ import { firstUserRequest, latestTriggerMessage, safeFilePart } from "./store-sn
 import { withSessionState } from "./session-state.ts";
 import { canonicalPermissionKey } from "./permission-key.ts";
 import { deriveProjectId } from "./workspace-id.ts";
+import { sessionMigrator, CURRENT_SESSION_VERSION } from "./migrations/session-store.ts";
 import type { VerificationTracker } from "./runtime/verification-tracker.ts";
 
 export class GlorpStore implements StoreAdapter {
@@ -53,7 +54,16 @@ export class GlorpStore implements StoreAdapter {
   private loadFromDisk(): void {
     if (!fs.existsSync(this.filePath)) return;
     try {
-      const snap = JSON.parse(fs.readFileSync(this.filePath, "utf-8")) as Partial<Snapshot>;
+      const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf-8")) as unknown;
+      // Run schema migrations before consuming any fields. A document from a
+      // newer build is left untouched; one we upgraded is marked dirty so the
+      // migrated shape is persisted on the next flush.
+      const result = sessionMigrator.migrate(parsed);
+      if (result.fromFuture) {
+        console.error(`[migrations:session] ${this.filePath} written by a newer glorp (v${result.fromVersion} > v${sessionMigrator.currentVersion}); leaving as-is`);
+      }
+      const snap = result.data as Partial<Snapshot>;
+      if (result.applied.length > 0) this.dirty = true;
       this.metadata = snap.metadata ?? this.metadata;
       this.messages = snap.messages ?? [];
       this.title = cleanTitle(snap.title);
@@ -107,6 +117,7 @@ export class GlorpStore implements StoreAdapter {
 
   private snapshot(): Snapshot {
     return {
+      version: CURRENT_SESSION_VERSION,
       metadata: this.metadata,
       messages: this.messages,
       title: this.title,
@@ -261,7 +272,16 @@ export class GlorpStore implements StoreAdapter {
     const trigger = latestTriggerMessage(this.messages);
     const name = safeFilePart(namespace);
     const runKey = durable ? "durable" : `${Date.now()}_${++this.subStoreSeq}`;
-    const filePath = path.join(this.dataDir, "sessions", `${safeFilePart(this.identifier)}.subagents`, name, `${safeFilePart(trigger.id)}_${runKey}.json`);
+    // Locate sub-agent runs next to this store: under the session folder
+    // (folder layout, file "session.json") or as a sibling "<id>.subagents"
+    // dir (legacy flat layout). Derived from the actual file so it works for
+    // the main store, conversational agents, and nested sub-agents alike.
+    const dir = path.dirname(this.filePath);
+    const fileBase = path.basename(this.filePath, ".json");
+    const subBase = fileBase === "session"
+      ? path.join(dir, "subagents")
+      : path.join(dir, `${fileBase}.subagents`);
+    const filePath = path.join(subBase, name, `${safeFilePart(trigger.id)}_${runKey}.json`);
     return new GlorpStore(`${this.identifier}__${namespace}__${trigger.id}__${runKey}`, this.dataDir, {
       filePath,
       metadata: { kind: "subagent", parentSessionId: this.identifier, namespace, triggerMessageId: trigger.id, triggerMessageIndex: trigger.index, triggerMessageText: trigger.text, durable, createdAt: new Date().toISOString() },

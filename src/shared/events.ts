@@ -67,6 +67,22 @@ export interface OrchestratorAgentEvent {
   slot?: string;
 }
 
+/**
+ * A conversational agent the user can switch between within a session.
+ * Each has its own persistent transcript (store) and persona. Exactly one
+ * is `active` at a time — input routes to it and the transcript shows it.
+ */
+export interface AgentInfo {
+  id: string;
+  label: string;
+  role: string;
+  active: boolean;
+  busy: boolean;
+  createdAt: number;
+  lastActiveAt: number;
+  turnCount: number;
+}
+
 export interface AgentStats {
   turns: number;
   tokens_in: number;
@@ -118,12 +134,13 @@ export type BridgeEvent =
   | { type: "orchestrator_agent"; agent: OrchestratorAgentEvent }
   | { type: "orchestrator_plan"; action: "created" | "accepted"; path: string; title?: string }
   | { type: "orchestrator_slot"; promoted: string; demoted: string }
+  | { type: "agent_roster"; agents: AgentInfo[]; activeId: string }
   | { type: "stats"; stats: AgentStats }
   | { type: "runner_agent_stats"; agent: RunnerAgentStats }
   | { type: "compaction"; phase: "start" | "end" }
   | { type: "subagent"; name: string; phase: "start" | "end"; status?: "success" | "error"; message?: string }
   | { type: "transmission"; payload: string; severity: "low" | "medium" | "high" }
-  | { type: "error"; message: string }
+  | { type: "error"; message: string; detail?: string }
   | { type: "hook"; name: string }
   | { type: "skill"; name: string; source: "user" | "agent" }
   | { type: "display_slot_pushed"; slot: DisplaySlotEvent }

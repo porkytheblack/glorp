@@ -26,6 +26,35 @@ async function main(): Promise<void> {
       return;
     }
 
+    case "migrate": {
+      const { runMigrate } = await import("./cli-migrate.ts");
+      await runMigrate(args);
+      return;
+    }
+
+    case "doctor": {
+      const { runDoctor } = await import("./cli-doctor.ts");
+      await runDoctor(args);
+      return;
+    }
+
+    case "mesh": {
+      const { runMesh } = await import("./cli-mesh.ts");
+      await runMesh(args);
+      return;
+    }
+
+    case "station": {
+      if (args.stationKeysSub) {
+        const { runKeys } = await import("./cli-keys.ts");
+        await runKeys(args);
+        return;
+      }
+      const { runStation } = await import("./cli-station.ts");
+      await runStation(args);
+      return;
+    }
+
     case "headless": {
       const { runHeadless } = await import("./cli-headless.ts");
       await runHeadless(args);

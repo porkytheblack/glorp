@@ -11,4 +11,5 @@ export { webFetchTool } from "./webfetch.ts";
 export { transmissionTool } from "./transmission.ts";
 export { inboxManageTool } from "./inbox-manage.ts";
 export { spawnAgentTool } from "../../orchestrator/spawn-tool.ts";
+export { listAgentsTool } from "./list-agents.ts";
 export { askConfirmTool, showInfoTool, askChoiceTool, askTextTool } from "./modals.ts";

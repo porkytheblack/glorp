@@ -2,9 +2,9 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, preview]
   pull_request:
-    branches: [main]
+    branches: [main, preview]
   workflow_dispatch:
 
 # Cancel older runs of the same branch/PR when a new commit comes in.
@@ -16,7 +16,7 @@ jobs:
   ci:
     name: typecheck + test + build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,16 +29,18 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Test
-        # ANTHROPIC_API_KEY is required by buildGlorp's API-key guard but
-        # the real LLM is never called in tests (the mock model handles
-        # everything). sk-test satisfies the env check.
+      - name: Backend — typecheck + contract drift-check + tests
+        # ANTHROPIC_API_KEY is required by buildGlorp's API-key guard but the
+        # real LLM is never called in tests (the mock model handles everything).
         env:
           ANTHROPIC_API_KEY: sk-test
-        run: bun run test
+        run: bun run ci
+
+      - name: Client kit — typecheck + build
+        run: |
+          cd packages/glorp-client
+          bun run typecheck
+          bun run build
 
       - name: Build single binary (smoke)
         run: bun run build

@@ -68,6 +68,56 @@ describe("withSessionState — original-request anchor", () => {
     expect(out[0]!.text).toBe("hi");
   });
 
+  test("injects an anchor when the original survives in the store but before the last compaction", () => {
+    // Real compaction flow: the summary is appended, but the original user
+    // message is NOT deleted from the store — glove-core hides it by slicing
+    // at read time. The anchor must still fire because the model's window
+    // (everything after the summary) no longer contains the original.
+    const messages: Message[] = [
+      { id: "u-first", sender: "user", text: ORIGINAL.text },
+      { sender: "agent", text: "working on it" },
+      { sender: "user", text: "[Conversation summary from compaction]\nGoal: …", is_compaction: true },
+      { sender: "user", text: "tool results", tool_results: [] as any } as any,
+    ];
+    const out = withSessionState(messages, { ...emptyState, originalRequest: ORIGINAL });
+
+    const anchor = out.find((m) => m.is_skill_injection && m.text.includes("Original user request"));
+    expect(anchor).toBeDefined();
+    expect(anchor!.text).toContain(ORIGINAL.text);
+
+    // The anchor must land inside the live window — at or after the summary —
+    // so glove-core's splitAtLastCompaction keeps it.
+    const compactionIdx = out.findIndex((m) => m.is_compaction);
+    expect(out.indexOf(anchor!)).toBeGreaterThan(compactionIdx);
+  });
+
+  test("session state lands after the compaction boundary in a mid-task continuation", () => {
+    // No new user message has arrived after the compaction — the latest real
+    // user message sits before the summary. The state block must still land
+    // in the post-compaction window or the agent loses its task list.
+    const messages: Message[] = [
+      { id: "u-first", sender: "user", text: ORIGINAL.text },
+      { sender: "agent", text: "ok" },
+      { sender: "user", text: "summary", is_compaction: true },
+      { sender: "user", text: "tool results", tool_results: [] as any } as any,
+    ];
+    const out = withSessionState(messages, {
+      plan: null,
+      tasks: [
+        { id: "t1", content: "wire up the parser", activeForm: "wiring the parser", status: "in_progress" } as any,
+      ],
+      inboxItems: [],
+      originalRequest: ORIGINAL,
+    });
+
+    const stateMsg = out.find((m) => m.is_skill_injection && m.text.includes("Current Glorp session state"));
+    expect(stateMsg).toBeDefined();
+    expect(stateMsg!.text).toContain("wire up the parser");
+
+    const compactionIdx = out.findIndex((m) => m.is_compaction);
+    expect(out.indexOf(stateMsg!)).toBeGreaterThan(compactionIdx);
+  });
+
   test("clips an over-long original request to a manageable size", () => {
     const longText = "x".repeat(10_000);
     const messages: Message[] = [

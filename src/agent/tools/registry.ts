@@ -3,6 +3,7 @@ import type { Context } from "glove-core/core";
 import type { ResourceFsAdapter } from "glove-memory";
 import type { Orchestrator } from "../../orchestrator/orchestrator.ts";
 import type { GlorpStore } from "../store.ts";
+import type { Bridge } from "../../shared/bridge.ts";
 import {
   askChoiceTool,
   askConfirmTool,
@@ -13,6 +14,7 @@ import {
   globTool,
   grepTool,
   inboxManageTool,
+  listAgentsTool,
   lsTool,
   planTool,
   readTool,
@@ -36,13 +38,14 @@ export const MAIN_AGENT_TOOLS = [
   "web_fetch",
   "transmission",
   "spawn_agent",
+  "list_agents",
   "ask_confirm",
   "show_info",
   "ask_choice",
   "ask_text",
 ] as const;
 
-export const READ_ONLY_TOOLS = ["read", "grep", "glob", "ls", "web_fetch"] as const;
+export const READ_ONLY_TOOLS = ["read", "grep", "glob", "ls", "web_fetch", "list_agents"] as const;
 
 export type ToolName =
   | "read"
@@ -58,6 +61,7 @@ export type ToolName =
   | "transmission"
   | "glove_update_inbox"
   | "spawn_agent"
+  | "list_agents"
   | "ask_confirm"
   | "show_info"
   | "ask_choice"
@@ -70,6 +74,10 @@ export interface ToolRegistryDeps {
   resources?: ResourceFsAdapter;
   orchestrator?: Orchestrator;
   contextRef?: { current: Context | null };
+  /** Session mesh dir — lets list_agents read the shared agent roster. */
+  meshDir?: string;
+  /** Per-session event bus, so the transmission tool stays session-scoped. */
+  bridge?: Bridge;
 }
 
 type ToolFactory = () => GloveFoldArgs<any>;
@@ -86,13 +94,14 @@ export function createToolRegistry(deps: ToolRegistryDeps): Record<ToolName, Too
     grep: () => grepTool(deps.workspace),
     ls: () => lsTool(deps.workspace),
     web_fetch: () => webFetchTool,
-    transmission: () => transmissionTool(requireDep(deps.dataDir, "dataDir")),
+    transmission: () => transmissionTool(requireDep(deps.dataDir, "dataDir"), deps.bridge),
     glove_update_inbox: () => inboxManageTool(requireDep(deps.contextRef?.current, "context")),
     spawn_agent: () =>
       spawnAgentTool(
         requireDep(deps.orchestrator, "orchestrator"),
         deps.workspace,
       ),
+    list_agents: () => listAgentsTool(deps.meshDir),
     ask_confirm: () => askConfirmTool,
     show_info: () => showInfoTool,
     ask_choice: () => askChoiceTool,

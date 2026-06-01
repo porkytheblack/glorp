@@ -5,11 +5,12 @@ import { createGlorpMemorySchema } from "../resources/schema.ts";
 
 type FoldTarget<T> = T & { fold<I>(args: unknown): T };
 
-export function createSessionResources(dataDir: string, sessionId: string): ResourceFsAdapter {
+export function createSessionResources(dataDir: string, sessionId: string, filePath?: string): ResourceFsAdapter {
   return new FileResourcesAdapter({
     dataDir,
     sessionId,
     schema: createGlorpMemorySchema(),
+    ...(filePath ? { filePath } : {}),
   });
 }
 

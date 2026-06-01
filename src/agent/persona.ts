@@ -29,6 +29,25 @@ export function builtInAgentPrompt(
   return readPrompt(`agents/${name}.md`);
 }
 
+const ROLE_PROMPT_NAMES = new Set(["planner", "researcher", "reviewer", "generator", "evaluator", "builder"]);
+
+/**
+ * System prompt for a conversational agent of a given role. The default
+ * ("general"/"main") agent is the full glorp persona; other roles layer their
+ * built-in role prompt over the same runtime + project + extensions context.
+ */
+export function buildAgentSystemPrompt(role: string, opts: SystemPromptOptions): string {
+  if (role === "general" || role === "main" || !ROLE_PROMPT_NAMES.has(role)) {
+    return buildGlorpSystemPrompt(opts);
+  }
+  return [
+    builtInAgentPrompt(role as Parameters<typeof builtInAgentPrompt>[0]),
+    runtimeContext(opts.workspace),
+    buildProjectInstructionsContext({ workspace: opts.workspace, contextLimit: opts.contextLimit }),
+    buildExtensionsContext(opts.extensions, { contextLimit: opts.contextLimit }),
+  ].filter(Boolean).join("\n\n");
+}
+
 export const COMPACTION_INSTRUCTIONS = readPrompt("compaction.md");
 
 function runtimeContext(workspace: string): string {
