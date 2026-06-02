@@ -10,6 +10,12 @@ export interface GlorpConfig {
   endpoint: string;
   /** API key (Bearer). Required unless the server runs auth-off on loopback. */
   apiKey?: string;
+  /**
+   * Target a tenant namespace. Sent as the `X-Glorp-Namespace` header on REST
+   * (and `&ns=` on the WebSocket). Admin keys use this to act inside a namespace;
+   * a namespace-bound tenant key doesn't need it (its key already scopes it).
+   */
+  namespace?: string;
   /** Override the global `fetch` (e.g. for Node < 18 or testing). */
   fetch?: typeof fetch;
   /** WebSocket implementation (e.g. Node's `ws`) when not in a browser/Bun. */
@@ -20,8 +26,19 @@ export interface GlorpConfig {
 
 let active: GlorpConfig | null = null;
 
+/**
+ * Trim a namespace and reject a blank/whitespace-only value (which would send an
+ * unusable `X-Glorp-Namespace` header). `undefined` (absent) is allowed.
+ */
+export function normalizeNamespace(ns?: string): string | undefined {
+  if (ns === undefined) return undefined;
+  const trimmed = ns.trim();
+  if (trimmed === "") throw new Error("glorp-client: `namespace` must not be blank.");
+  return trimmed;
+}
+
 function normalize(c: GlorpConfig): GlorpConfig {
-  return { ...c, endpoint: c.endpoint.replace(/\/+$/, "") };
+  return { ...c, endpoint: c.endpoint.replace(/\/+$/, ""), namespace: normalizeNamespace(c.namespace) };
 }
 
 /** Set the default client config (used by the top-level `run`/`streamSession`). */

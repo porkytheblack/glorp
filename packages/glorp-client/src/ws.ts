@@ -21,7 +21,11 @@ export function streamSessionWith(
   if (!WS) throw new Error("No WebSocket implementation. Pass WebSocketImpl to configure() (e.g. Node's `ws`).");
 
   const wsBase = cfg.endpoint.replace(/^http/, "ws");
-  const q = cfg.apiKey ? `?api_key=${encodeURIComponent(cfg.apiKey)}` : "";
+  // WS can't set headers from a browser, so auth + namespace travel as query params.
+  const params = new URLSearchParams();
+  if (cfg.apiKey) params.set("api_key", cfg.apiKey);
+  if (cfg.namespace) params.set("ns", cfg.namespace);
+  const q = params.toString() ? `?${params.toString()}` : "";
   const ws = new WS(`${wsBase}/api/v1/sessions/${encodeURIComponent(sessionId)}/events${q}`);
 
   const queue: BridgeEvent[] = [];
