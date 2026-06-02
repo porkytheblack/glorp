@@ -1,0 +1,93 @@
+# Running Glorp Station in Docker
+
+Yes — Station runs well in a container, and a container is the right place to
+**let agents loose**: every tool the agent runs (bash, file writes, `npm`/`bun`
+installs, `git`) happens *inside* the container against `/workspaces`, never on
+your host. You talk to it over the same API-key-secured HTTP/WS API.
+
+```
+┌─ your machine ──────────┐        ┌─ container (the sandbox) ─────────────┐
+│ orchestration / kit /   │  HTTP  │ glorp station  ──▶ agent ──▶ bash,    │
+│ curl  (GLORP_API_KEY)   │ ─────▶ │   :4271 (auth)      write, git, tests │
+└─────────────────────────┘   WS   │   /data  /workspaces (volumes)        │
+                                   └───────────────────────────────────────┘
+```
+
+## Quick start
+
+```bash
+# from the repo root
+ANTHROPIC_API_KEY=sk-ant-… docker compose up -d --build
+
+# grab the API key it minted on first boot
+docker compose logs | grep glsk_
+```
+
+Then drive it from your machine (any language via the REST/WS API, or the kit):
+
+```bash
+export GLORP_ENDPOINT=http://localhost:4271
+export GLORP_API_KEY=glsk_…            # from the logs above
+```
+
+```ts
+import { configure, run } from "@porkytheblack/glorp-client";
+configure({ endpoint: process.env.GLORP_ENDPOINT, apiKey: process.env.GLORP_API_KEY });
+
+// permissionMode "bypass" = no prompts. Safe here — it's all inside the container.
+const h = await run({ workspace: "/workspaces/demo", prompt: "Scaffold a TS lib with a test and run it.", permissionMode: "bypass" });
+console.log((await h.result()).text);
+```
+
+The agent's files land in the `glorp-workspaces` volume — inspect them with
+`docker compose exec glorp ls -R /workspaces`.
+
+## Credentials
+
+Two ways to give the agent model access:
+
+1. **Env vars** (standard providers): `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+   `OPENROUTER_API_KEY`, … — set them in `docker compose` (already wired).
+2. **Mount your `credentials.json`** (for custom providers / your existing
+   profiles): uncomment in `docker-compose.yml`:
+   ```yaml
+   - ${HOME}/.glorp/credentials.json:/data/credentials.json:ro
+   ```
+
+## Why it's safe to "let it do stuff"
+
+- **Filesystem isolation:** the agent only sees the container — `/app` (Station),
+  `/data` (keys/sessions), `/workspaces` (its scratch space). Your host files are
+  untouched unless you bind-mount them.
+- **`permissionMode: "bypass"`** is fine in here: no human-in-the-loop prompts,
+  yet the hard-block guard still refuses `rm -rf /`, `sudo`, etc.
+- **Auth on by default:** the port is API-key protected (auto-minted key). Set
+  `GLORP_STATION_AUTH=off` only behind a private network/tunnel.
+- **Guardrails:** uncomment `mem_limit` / `cpus` / `pids_limit` in the compose
+  file to cap runaway runs. Add `--network none`-style policies if the agent
+  shouldn't reach the internet (note: it needs outbound for model APIs).
+- The workspace-cleanup guard means `?workspace=true` only deletes Station's own
+  `/workspaces/<id>` sandboxes, never a mounted project.
+
+## Managing keys
+
+```bash
+docker compose exec glorp bun run src/cli.ts station keys add ci --scopes run
+docker compose exec glorp bun run src/cli.ts station keys list
+docker compose exec glorp bun run src/cli.ts station keys revoke <id>
+```
+
+## Persisting / resetting
+
+State lives in the `glorp-data` and `glorp-workspaces` named volumes.
+`docker compose down` keeps them; `docker compose down -v` wipes them (fresh
+keys + empty workspaces next boot).
+
+## Image notes
+
+The image runs Station from source on the `oven/bun` base (bun is present so
+agents can run `bun`/`bunx`; `git`, `curl`, `python3` are installed — extend the
+`apt-get` line for your stack). For a smaller runtime you can instead compile a
+single binary (`bun run build:cli` → `dist/glorp`) in a build stage and copy it
+into an `oven/bun` runtime image; keep `bun` + `git` in the runtime so the agent
+can still build and test.
