@@ -102,6 +102,70 @@ const { text } = await handle.result();
 `configure` also auto-reads `GLORP_ENDPOINT` / `GLORP_API_KEY` from the
 environment, so you can skip it entirely in a configured deployment.
 
+## Multi-tenant namespaces
+
+Hosting more than one user on a Station? Give each their own **namespace** — an
+isolated data partition with its own sessions, workspaces, sandboxes, and model
+credentials. A namespace's data lives under `<dataDir>/namespaces/<id>/` and its
+sandboxes under `<workspaceRoot>/<id>/`; one tenant's sessions are physically
+invisible to another's.
+
+Your orchestrator holds an **admin** key and provisions namespaces, minting a
+namespace-bound key per user. That tenant key transparently scopes every call —
+the user just talks to `/sessions`, `/workspaces`, etc. as usual and only ever
+sees their own data. (Namespaces require auth on — bind a non-loopback host or
+`GLORP_STATION_AUTH=required`.)
+
+```bash
+EP=https://glorp.example.com ADMIN=glsk_admin_xxx
+
+# 1. Provision a namespace for a user (admin key)
+curl -s -X POST $EP/api/v1/namespaces \
+  -H "authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"name":"acme"}'
+#  -> { "id":"ns_acme", "slug":"acme", "is_default":false, ... }
+
+# 2. Mint a key bound to that namespace (returned once)
+curl -s -X POST $EP/api/v1/namespaces/ns_acme/keys \
+  -H "authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"name":"acme-bot"}'
+#  -> { "data": { "key":"glsk_tenant_xxx", "namespace":"ns_acme", "scopes":["run","read"] } }
+
+# 3. The tenant uses ITS key — all calls are auto-scoped to ns_acme
+TENANT=glsk_tenant_xxx
+curl -s -X POST $EP/api/v1/sessions \
+  -H "authorization: Bearer $TENANT" -H 'content-type: application/json' \
+  -d '{"permissionMode":"auto"}'
+curl -s $EP/api/v1/sessions -H "authorization: Bearer $TENANT"   # only acme's sessions
+```
+
+The orchestrator can also act **inside** any namespace with its admin key by
+sending the `X-Glorp-Namespace` header (or `?ns=<id>` on the WebSocket, since
+browsers can't set headers there):
+
+```bash
+curl -s $EP/api/v1/sessions \
+  -H "authorization: Bearer $ADMIN" -H 'x-glorp-namespace: ns_acme'
+```
+
+Each namespace optionally carries its own model-provider credentials (POST
+`/models/providers` + `/models/profiles` with a tenant key), falling back to the
+station's defaults when unset — so each user can bring their own billing.
+
+Deprovision when a user leaves. This revokes the namespace's keys, stops its live
+sessions, and (with `?data=true`) deletes its data subtree and sandboxes. The
+`default` namespace can never be deleted:
+
+```bash
+curl -s -X DELETE "$EP/api/v1/namespaces/ns_acme?data=true" -H "authorization: Bearer $ADMIN"
+```
+
+Mint a bound key offline (no running server) with the CLI:
+
+```bash
+glorp station keys add acme-bot --namespace ns_acme   # scopes default to run,read
+```
+
 ## Headless permission modes (important)
 
 Unattended runs must **not** use `permissionMode: "normal"` — the agent will block

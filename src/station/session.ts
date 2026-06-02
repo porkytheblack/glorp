@@ -3,6 +3,7 @@
 import { Bridge } from "../shared/bridge.ts";
 import { buildGlorp } from "../agent/glorp.ts";
 import { GlorpStore } from "../agent/store.ts";
+import { CredentialsStore } from "../agent/credentials.ts";
 import type { GlorpHandle, BuildGlorpOptions } from "../agent/glorp-types.ts";
 import { EventStream } from "./event-stream.ts";
 import { SessionCredentialsStore } from "./credentials.ts";
@@ -68,10 +69,12 @@ export class StationSession {
   /** The session's credentials store (lazily created, retained for swaps). */
   private credentials(): SessionCredentialsStore {
     if (!this.credStore) {
-      this.credStore = new SessionCredentialsStore(this.init.dataDir, {
-        custom: this.customCredential,
-        profileId: this.init.profileId,
-      });
+      const base = this.init.fallbackDataDir ? new CredentialsStore(this.init.fallbackDataDir) : null;
+      this.credStore = new SessionCredentialsStore(
+        this.init.dataDir,
+        { custom: this.customCredential, profileId: this.init.profileId },
+        base,
+      );
     }
     return this.credStore;
   }

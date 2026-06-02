@@ -37,6 +37,52 @@ export interface SessionCredential {
 }
 
 /**
+ * A tenant namespace: an isolated data partition. Each namespace owns its own
+ * `dataDir` subtree (sessions, workspaces.json, credentials.json) and its own
+ * sandbox `workspaceRoot`, so one tenant's SessionManager can never touch
+ * another's. The synthesized `default` namespace points `dataDir`/`workspaceRoot`
+ * at the station's legacy roots, keeping existing single-tenant installs working
+ * with zero migration. Tenant namespaces are persisted in `namespaces.json`.
+ */
+export interface Namespace {
+  /** "default" or "ns_<slug>" — URL- and filesystem-path-safe, stable. */
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+  /** Absolute data subtree. For "default" this IS the station's legacy dataDir. */
+  dataDir: string;
+  /** Absolute sandbox root. For "default" this IS the station's workspaceRoot. */
+  workspaceRoot: string;
+}
+
+/** Public view of a namespace returned by the admin control-plane API. */
+export interface NamespaceDto {
+  id: string;
+  name: string;
+  slug: string;
+  created_at: string;
+  /** True only for the reserved, always-present `default` namespace. */
+  is_default: boolean;
+  /** Live+dormant session count. Present on detail reads; omitted from lists. */
+  session_count?: number;
+}
+
+/** Body accepted by `POST /namespaces`. */
+export interface CreateNamespaceInput {
+  name: string;
+  /** Optional explicit slug; otherwise derived from `name`. */
+  slug?: string;
+}
+
+/** Body accepted by `POST /namespaces/:id/keys` (mints a namespace-bound key). */
+export interface CreateNamespaceKeyInput {
+  name: string;
+  /** Tenant scopes. `admin` is rejected (it would defeat isolation). */
+  scopes?: string[];
+}
+
+/**
  * A first-class workspace: one project = one folder on disk = a collection of
  * chat sessions that all share that folder. Persisted in `workspaces.json`.
  */

@@ -1,24 +1,18 @@
 /**
- * REST route dispatch for Station. Matches `METHOD /path` against the spec's
- * surface and delegates to grouped handlers. WebSocket upgrades are handled
- * upstream in server.ts before this runs.
+ * REST route dispatch for Station. Global admin routes (`keys`, `namespaces`)
+ * and `templates` are wired once here; the per-namespace data-plane routes
+ * (sessions, workspaces, models, state, control, credentials, files) come from
+ * the request's already-resolved NamespaceBundle, so a request only ever touches
+ * its own namespace's data. Health + WebSocket upgrades are handled in server.ts.
  */
 
-import type { SessionManager } from "./manager.ts";
-import type { StationConfig } from "./config.ts";
-import type { CredentialsStore } from "../agent/credentials.ts";
-import type { TemplateStore } from "./templates/store.ts";
-import { sessionRoutes } from "./routes/sessions.ts";
-import { workspaceRoutes } from "./routes/workspaces.ts";
-import { stateRoutes } from "./routes/state.ts";
-import { controlRoutes } from "./routes/control.ts";
-import { modelRoutes } from "./routes/models.ts";
 import { templateRoutes } from "./routes/templates.ts";
-import { credentialRoutes } from "./routes/credentials.ts";
-import { fileRoutes } from "./routes/files.ts";
 import { keyRoutes } from "./routes/keys.ts";
-import { healthRoute } from "./routes/health.ts";
 import type { KeyStore } from "./auth/key-store.ts";
+import type { TemplateStore } from "./templates/store.ts";
+import type { NamespaceControlRoutes } from "./routes/namespaces.ts";
+import type { NamespaceBundle } from "./namespace-registry.ts";
+import type { RouteGroups } from "./route-groups.ts";
 import { errorJson } from "./respond.ts";
 
 const KEY_ID = /^\/keys\/([^/]+)$/;
@@ -30,89 +24,104 @@ const MODEL_PROFILE = /^\/models\/profiles\/([^/]+)$/;
 const TEMPLATE = /^\/templates\/([^/]+)$/;
 const WORKSPACE = /^\/workspaces\/([^/]+)$/;
 const WORKSPACE_SESSIONS = /^\/workspaces\/([^/]+)\/sessions$/;
+const NAMESPACE = /^\/namespaces\/([^/]+)$/;
+const NAMESPACE_KEYS = /^\/namespaces\/([^/]+)\/keys$/;
 
 export interface StationRouter {
-  route(req: Request, pathname: string): Promise<Response>;
+  route(req: Request, pathname: string, bundle: NamespaceBundle): Promise<Response>;
 }
 
 export function createStationRouter(
-  manager: SessionManager,
-  config: StationConfig,
-  credentials: CredentialsStore,
   templates: TemplateStore,
-  startedAt: number,
   keyStore: KeyStore,
+  namespaceCtl: NamespaceControlRoutes,
 ): StationRouter {
-  const sessions = sessionRoutes(manager, config);
-  const workspaces = workspaceRoutes(manager, config);
-  const state = stateRoutes(manager);
-  const control = controlRoutes(manager);
-  const models = modelRoutes(credentials);
   const tmpl = templateRoutes(templates);
-  const creds = credentialRoutes(manager);
-  const files = fileRoutes(manager, config);
   const keys = keyRoutes(keyStore);
 
   return {
-    async route(req, pathname): Promise<Response> {
+    async route(req, pathname, bundle): Promise<Response> {
       const m = req.method;
+      const g = bundle.routes;
 
-      if (pathname === "/health" && m === "GET") return healthRoute(manager, startedAt);
-
+      // --- API keys (admin scope, gated upstream) ---
       if (pathname === "/keys" && m === "POST") return keys.create(req);
       if (pathname === "/keys" && m === "GET") return keys.list();
       const keyDel = pathname.match(KEY_ID);
       if (keyDel && m === "DELETE") return keys.revoke(keyDel[1]!);
 
-      if (pathname === "/models/catalog" && m === "GET") return models.catalog();
-      if (pathname === "/models/providers" && m === "GET") return models.providers();
-      if (pathname === "/models/providers" && m === "POST") return models.addProvider(req);
-      if (pathname === "/models/profiles" && m === "GET") return models.profiles();
-      if (pathname === "/models/profiles" && m === "POST") return models.addProfile(req);
-      const act = pathname.match(ACTIVATE);
-      if (act && m === "POST") return models.activate(act[1]!);
-      const provDel = pathname.match(MODEL_PROVIDER);
-      if (provDel && m === "DELETE") return models.deleteProvider(provDel[1]!);
-      const profDel = pathname.match(MODEL_PROFILE);
-      if (profDel && m === "DELETE") return models.deleteProfile(profDel[1]!);
+      // --- Namespaces (admin scope, gated upstream) ---
+      if (pathname === "/namespaces") {
+        if (m === "POST") return namespaceCtl.create(req);
+        if (m === "GET") return namespaceCtl.list();
+        return methodNotAllowed();
+      }
+      const nsKeys = pathname.match(NAMESPACE_KEYS);
+      if (nsKeys) {
+        if (m === "POST") return namespaceCtl.createKey(nsKeys[1]!, req);
+        if (m === "GET") return namespaceCtl.listKeys(nsKeys[1]!);
+        return methodNotAllowed();
+      }
+      const nsOne = pathname.match(NAMESPACE);
+      if (nsOne) {
+        if (m === "GET") return namespaceCtl.get(nsOne[1]!);
+        if (m === "DELETE") return namespaceCtl.destroy(nsOne[1]!, req);
+        return methodNotAllowed();
+      }
 
+      // --- Models (per-namespace) ---
+      if (pathname === "/models/catalog" && m === "GET") return g.models.catalog();
+      if (pathname === "/models/providers" && m === "GET") return g.models.providers();
+      if (pathname === "/models/providers" && m === "POST") return g.models.addProvider(req);
+      if (pathname === "/models/profiles" && m === "GET") return g.models.profiles();
+      if (pathname === "/models/profiles" && m === "POST") return g.models.addProfile(req);
+      const act = pathname.match(ACTIVATE);
+      if (act && m === "POST") return g.models.activate(act[1]!);
+      const provDel = pathname.match(MODEL_PROVIDER);
+      if (provDel && m === "DELETE") return g.models.deleteProvider(provDel[1]!);
+      const profDel = pathname.match(MODEL_PROFILE);
+      if (profDel && m === "DELETE") return g.models.deleteProfile(profDel[1]!);
+
+      // --- Templates (global) ---
       if (pathname === "/templates" && m === "GET") return tmpl.list();
       const tm = pathname.match(TEMPLATE);
       if (tm && m === "GET") return tmpl.get(tm[1]!);
 
+      // --- Workspaces (per-namespace) ---
       if (pathname === "/workspaces") {
-        if (m === "GET") return workspaces.list();
-        if (m === "POST") return workspaces.create(req);
+        if (m === "GET") return g.workspaces.list();
+        if (m === "POST") return g.workspaces.create(req);
         return methodNotAllowed();
       }
       const wsSub = pathname.match(WORKSPACE_SESSIONS);
       if (wsSub) {
-        if (m === "GET") return workspaces.listSessions(wsSub[1]!);
-        if (m === "POST") return workspaces.createSession(wsSub[1]!, req);
+        if (m === "GET") return g.workspaces.listSessions(wsSub[1]!);
+        if (m === "POST") return g.workspaces.createSession(wsSub[1]!, req);
         return methodNotAllowed();
       }
       const wsMatch = pathname.match(WORKSPACE);
       if (wsMatch) {
         const id = wsMatch[1]!;
-        if (m === "GET") return workspaces.get(id);
-        if (m === "DELETE") return workspaces.destroy(id, req);
+        if (m === "GET") return g.workspaces.get(id);
+        if (m === "DELETE") return g.workspaces.destroy(id, req);
         return methodNotAllowed();
       }
 
+      // --- Sessions (per-namespace) ---
       if (pathname === "/sessions") {
-        if (m === "POST") return sessions.create(req);
-        if (m === "GET") return sessions.list();
+        if (m === "POST") return g.sessions.create(req);
+        if (m === "GET") return g.sessions.list();
         return methodNotAllowed();
       }
 
       const sub = pathname.match(SUBPATH);
-      if (sub) return routeSubpath(req, sub, { sessions, state, control, creds, files });
+      if (sub) return routeSubpath(req, sub, g);
 
       const sess = pathname.match(SESSION);
       if (sess) {
         const id = sess[1]!;
-        if (m === "GET") return sessions.get(id);
-        if (m === "DELETE") return sessions.destroy(id, req);
+        if (m === "GET") return g.sessions.get(id);
+        if (m === "DELETE") return g.sessions.destroy(id, req);
         return methodNotAllowed();
       }
 
@@ -121,16 +130,8 @@ export function createStationRouter(
   };
 }
 
-type SubGroups = {
-  sessions: ReturnType<typeof sessionRoutes>;
-  state: ReturnType<typeof stateRoutes>;
-  control: ReturnType<typeof controlRoutes>;
-  creds: ReturnType<typeof credentialRoutes>;
-  files: ReturnType<typeof fileRoutes>;
-};
-
-/** Dispatch `/sessions/:id/<resource>[/<rest>]`. */
-function routeSubpath(req: Request, m: RegExpMatchArray, g: SubGroups): Promise<Response> | Response {
+/** Dispatch `/sessions/:id/<resource>[/<rest>]` against the namespace's groups. */
+function routeSubpath(req: Request, m: RegExpMatchArray, g: RouteGroups): Promise<Response> | Response {
   const [, id, resource, rest] = m as unknown as [string, string, string, string | undefined];
   const method = req.method;
 

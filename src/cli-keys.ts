@@ -17,11 +17,17 @@ export async function runKeys(args: CliArgs): Promise<void> {
   try {
     if (args.stationKeysSub === "add") {
       if (!args.keyName) {
-        console.error("Usage: glorp station keys add <name> [--scopes admin,run,read]");
+        console.error("Usage: glorp station keys add <name> [--scopes admin,run,read] [--namespace <id>]");
         process.exit(1);
       }
-      const { key, record } = await store.create(args.keyName, args.scopes);
-      console.error(`Created key "${record.name}" (id ${record.id}, scopes: ${record.scopes.join(", ")}).`);
+      const scopes = args.namespace && !args.scopes ? ["run", "read"] : args.scopes;
+      if (args.namespace && (scopes ?? []).includes("admin")) {
+        console.error("A namespace-bound key cannot have the 'admin' scope (it would defeat isolation).");
+        process.exit(1);
+      }
+      const { key, record } = await store.create(args.keyName, scopes, { namespace: args.namespace ?? null });
+      const ns = record.namespace ? `, namespace: ${record.namespace}` : "";
+      console.error(`Created key "${record.name}" (id ${record.id}, scopes: ${record.scopes.join(", ")}${ns}).`);
       console.error("Store it now — it will not be shown again:\n");
       console.log(key);
     } else if (args.stationKeysSub === "revoke") {
@@ -38,7 +44,7 @@ export async function runKeys(args: CliArgs): Promise<void> {
         console.log("No API keys. Create one: glorp station keys add <name>");
       } else {
         for (const k of keys) {
-          const tags = [k.scopes.join(",") || "—", `last_used=${k.lastUsed ?? "never"}`];
+          const tags = [k.scopes.join(",") || "—", `ns=${k.namespace ?? "default"}`, `last_used=${k.lastUsed ?? "never"}`];
           if (k.revoked) tags.push("revoked");
           console.log(`${k.id}  ${k.keyPrefix}…  ${k.name}  [${tags.join("  ")}]`);
         }

@@ -24,7 +24,11 @@ export class KeyStore {
   }
 
   /** Generate a new key, persist its hash, and return the raw key ONCE. */
-  async create(name: string, scopes: string[] = ["admin"]): Promise<{ key: string; record: ApiKey }> {
+  async create(
+    name: string,
+    scopes: string[] = ["admin"],
+    opts: { namespace?: string | null } = {},
+  ): Promise<{ key: string; record: ApiKey }> {
     const key = KEY_PREFIX + randomBytes(24).toString("base64url");
     const record: ApiKey = {
       id: randomUUID(),
@@ -36,6 +40,7 @@ export class KeyStore {
       lastUsed: null,
       expiresAt: null,
       revoked: false,
+      namespace: opts.namespace ?? null,
     };
     await this.adapter.insert(record);
     return { key, record };

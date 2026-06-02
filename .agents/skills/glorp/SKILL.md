@@ -253,6 +253,36 @@ The key is **in memory only** — never persisted, logged, or returned (response
 
 ---
 
+## Multi-tenant namespaces
+
+Provision an isolated **namespace** per user so their sessions/workspaces/sandboxes/
+credentials can't see each other (data lives under `<dataDir>/namespaces/<id>/`,
+sandboxes under `<workspaceRoot>/<id>/`). Requires auth on. Admin-only control plane:
+
+```bash
+# Provision + mint a tenant-bound key (raw key returned once)
+curl -sX POST $EP/api/v1/namespaces -H "authorization: Bearer $ADMIN" \
+  -H 'content-type: application/json' -d '{"name":"acme"}'            # -> ns_acme
+curl -sX POST $EP/api/v1/namespaces/ns_acme/keys -H "authorization: Bearer $ADMIN" \
+  -H 'content-type: application/json' -d '{"name":"acme-bot"}'        # -> glsk_… (run,read)
+
+# Tenant uses ITS key — every call auto-scopes to ns_acme.
+curl -sX POST $EP/api/v1/sessions -H "authorization: Bearer $TENANT" \
+  -H 'content-type: application/json' -d '{"permissionMode":"auto"}'
+
+# Admin proxies into any namespace via a header (?ns=<id> for WebSocket):
+curl -s $EP/api/v1/sessions -H "authorization: Bearer $ADMIN" -H 'x-glorp-namespace: ns_acme'
+
+# Deprovision (revokes keys, stops sessions; ?data=true wipes the subtree).
+curl -sX DELETE "$EP/api/v1/namespaces/ns_acme?data=true" -H "authorization: Bearer $ADMIN"
+```
+
+Requests with no namespace resolve to the built-in `default` namespace (the legacy
+single-tenant layout) — existing setups keep working unchanged. Each namespace can
+hold its own model credentials, falling back to the station's defaults when unset.
+
+---
+
 ## Gotchas & safety
 
 - **Don't `bypass` against a real repo.** Reserve `bypass` for sandboxes you'll delete.
