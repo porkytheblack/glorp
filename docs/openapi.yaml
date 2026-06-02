@@ -253,6 +253,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WorkspaceDto" }
   /workspaces/{id}:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [workspaces]
       summary: Get a workspace + its sessions
@@ -318,6 +319,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SessionDto" }
   /sessions/{id}:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [sessions]
       summary: Get a session (poll `busy`/`state` here)
@@ -338,6 +340,7 @@ paths:
       responses:
         "204": { description: Destroyed }
   /sessions/{id}/messages:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     post:
       tags: [sessions]
       summary: Send a message to the agent
@@ -372,6 +375,7 @@ paths:
                 type: object
                 properties: { text: { type: string }, error: { type: string } }
   /sessions/{id}/files:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [sessions]
       summary: List files in the session's uploads/ exchange folder
@@ -407,6 +411,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
   /sessions/{id}/files/{path}:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [sessions]
       summary: Download a file from uploads/ (binary)
@@ -432,6 +437,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
   /sessions/{id}/result:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [sessions]
       summary: Latest agent answer + run status (one-call result fetch)
@@ -444,6 +450,7 @@ paths:
               schema: { $ref: "#/components/schemas/SessionResult" }
         "404": { $ref: "#/components/responses/NotFound" }
   /sessions/{id}/abort:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     post:
       tags: [sessions]
       summary: Abort the running turn

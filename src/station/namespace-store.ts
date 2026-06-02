@@ -84,11 +84,18 @@ export class NamespaceStore {
         throw new NamespaceError(`Invalid namespace id in ${this.filePath}: ${id}`);
       }
       const paths = this.tenantPaths(id);
+      // Trust nothing but the id: coerce name to a string, derive slug from the
+      // id (ignore any persisted slug), and validate createdAt is a real ISO
+      // date — so list()/sort and callers always get well-typed fields.
+      const createdAt = ns?.createdAt;
       namespaces[id] = {
         id,
-        name: ns?.name ?? id,
-        slug: ns?.slug ?? id.slice("ns_".length),
-        createdAt: ns?.createdAt ?? new Date(0).toISOString(),
+        name: typeof ns?.name === "string" ? ns.name : id,
+        slug: id.slice("ns_".length),
+        createdAt:
+          typeof createdAt === "string" && !Number.isNaN(Date.parse(createdAt))
+            ? createdAt
+            : new Date(0).toISOString(),
         dataDir: paths.dataDir,
         workspaceRoot: paths.workspaceRoot,
       };
