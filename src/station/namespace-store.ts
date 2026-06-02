@@ -50,16 +50,50 @@ export class NamespaceStore {
     this.data = this.load();
   }
 
+  /** Canonical, id-derived paths for a tenant namespace (never trusted from disk). */
+  private tenantPaths(id: string): { dataDir: string; workspaceRoot: string } {
+    return {
+      dataDir: path.join(this.stationDataDir, "namespaces", id),
+      workspaceRoot: path.join(this.stationWorkspaceRoot, id),
+    };
+  }
+
+  /**
+   * Load the persisted registry. A genuinely-absent file (ENOENT) means a fresh,
+   * single-tenant install → empty registry. ANY other failure (read error,
+   * malformed JSON, bad shape, tampered/invalid id) is fatal rather than silently
+   * resetting to empty — silently dropping the registry would orphan every tenant.
+   * `dataDir`/`workspaceRoot` are always re-derived from the id, so hand-tampered
+   * paths can't escape the canonical subtree and a relocated dataDir self-heals.
+   */
   private load(): NamespacesFile {
+    let raw: string;
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf-8")) as NamespacesFile;
-      if (parsed?.version === 1 && parsed.namespaces && typeof parsed.namespaces === "object") {
-        return parsed;
-      }
-    } catch {
-      /* missing or malformed — start fresh */
+      raw = fs.readFileSync(this.filePath, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, namespaces: {} };
+      throw err;
     }
-    return { version: 1, namespaces: {} };
+    const parsed = JSON.parse(raw) as NamespacesFile; // malformed JSON → throw
+    if (parsed?.version !== 1 || !parsed.namespaces || typeof parsed.namespaces !== "object") {
+      throw new NamespaceError(`Corrupt namespaces file: ${this.filePath}`);
+    }
+    const namespaces: Record<string, Namespace> = {};
+    for (const [id, ns] of Object.entries(parsed.namespaces)) {
+      if (id === DEFAULT_NAMESPACE_ID || !ID_RE.test(id)) {
+        throw new NamespaceError(`Invalid namespace id in ${this.filePath}: ${id}`);
+      }
+      const paths = this.tenantPaths(id);
+      namespaces[id] = {
+        id,
+        name: ns?.name ?? id,
+        slug: ns?.slug ?? id.slice("ns_".length),
+        createdAt: ns?.createdAt ?? new Date(0).toISOString(),
+        dataDir: paths.dataDir,
+        workspaceRoot: paths.workspaceRoot,
+      };
+    }
+    return { version: 1, namespaces };
   }
 
   private flush(): void {
@@ -109,8 +143,7 @@ export class NamespaceStore {
       name,
       slug,
       createdAt: new Date().toISOString(),
-      dataDir: path.join(this.stationDataDir, "namespaces", id),
-      workspaceRoot: path.join(this.stationWorkspaceRoot, id),
+      ...this.tenantPaths(id),
     };
     this.data.namespaces[id] = ns;
     this.flush();

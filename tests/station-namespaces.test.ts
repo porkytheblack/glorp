@@ -217,12 +217,15 @@ describe("namespace HTTP surface", () => {
     const tenant = (await call("POST", "/namespaces/ns_acme/keys", { key: admin, body: { name: "bot" } })).body.data.key;
     await call("POST", "/sessions", { key: tenant, body: { permissionMode: "auto" } });
     const nsDataDir = path.join(config.dataDir, "namespaces", "ns_acme");
+    const nsSandboxRoot = path.join(config.workspaceRoot, "ns_acme");
     expect(fs.existsSync(nsDataDir)).toBe(true);
+    expect(fs.existsSync(nsSandboxRoot)).toBe(true);
 
     const del = await call("DELETE", "/namespaces/ns_acme?data=true", { key: admin });
     expect(del.status).toBe(200);
     expect(del.body.data_removed).toBe(true);
     expect(fs.existsSync(nsDataDir)).toBe(false);
+    expect(fs.existsSync(nsSandboxRoot)).toBe(false);
     // The tenant key no longer authenticates.
     expect((await call("GET", "/sessions", { key: tenant })).status).toBe(401);
     // The default namespace is protected.

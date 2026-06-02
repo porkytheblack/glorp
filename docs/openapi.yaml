@@ -224,6 +224,7 @@ paths:
     get:
       tags: [workspaces]
       summary: List workspaces
+      parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
       responses:
         "200":
           description: OK
@@ -239,6 +240,7 @@ paths:
     post:
       tags: [workspaces]
       summary: Register a workspace (a folder on the host)
+      parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
       requestBody:
         required: true
         content:
@@ -270,7 +272,9 @@ paths:
     post:
       tags: [sessions]
       summary: Create a session inside a workspace
-      parameters: [{ $ref: "#/components/parameters/Id" }]
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/NamespaceHeader" }
       requestBody:
         content:
           application/json:
