@@ -1,6 +1,6 @@
 ---
 name: glorp
-description: Guide for downstream coding agents driving Glorp — especially Glorp Station (the remote multi-session control plane) and its sandboxes (Station-provisioned workspaces). Use when programmatically creating sessions, running coding agents over the REST/WebSocket API or the @porkytheblack/glorp-client SDK, provisioning sandboxes from templates, exchanging files, or wiring Glorp into CI/orchestration.
+description: Guide for downstream coding agents driving Glorp — especially Glorp Station (the remote multi-session control plane) and its sandboxes (Station-provisioned workspaces). Use when programmatically creating sessions, running coding agents over the REST/WebSocket API, the @porkytheblack/glorp-client SDK, or the @porkytheblack/glorp-mcp MCP server, provisioning tenant namespaces, sandboxes from templates, exchanging files, or wiring Glorp into CI/orchestration.
 ---
 
 # Driving Glorp & Glorp Station
@@ -73,7 +73,7 @@ Send it as `Authorization: Bearer glsk_…` on REST, or `?api_key=glsk_…` on t
 
 ## Recommended: the typed SDK
 
-Prefer [`@porkytheblack/glorp-client`](../../../packages/glorp-client/README.md) over raw
+Prefer [`@porkytheblack/glorp-client`](./docs/glorp-client.md) over raw
 curl when you're in a TS/JS context — it handles framing, reconnects, and errors.
 
 ```ts
@@ -140,8 +140,8 @@ curl -s -X POST $BASE/sessions/$ID/abort
 curl -s -X DELETE "$BASE/sessions/$ID?workspace=true"
 ```
 
-Key endpoints (full table in [`docs/station-usage.md`](../../../docs/station-usage.md),
-contract in [`docs/openapi.yaml`](../../../docs/openapi.yaml)):
+Key endpoints (full table in [`docs/station-usage.md`](./docs/station-usage.md),
+contract in [`docs/openapi.yaml`](./docs/openapi.yaml)):
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -283,6 +283,27 @@ hold its own model credentials, falling back to the station's defaults when unse
 
 ---
 
+## MCP server (for MCP-capable agents)
+
+If you're an MCP client (Claude Desktop/Code, Cursor, a custom orchestrator), you
+can drive a Station as **tools** instead of raw REST: run
+[`@porkytheblack/glorp-mcp`](./docs/glorp-mcp.md), which wraps the kit and speaks
+MCP over stdio (default) or streamable HTTP (`--http`, `POST /mcp`).
+
+```bash
+GLORP_ENDPOINT=$EP GLORP_API_KEY=$KEY npx @porkytheblack/glorp-mcp          # stdio
+GLORP_ENDPOINT=$EP GLORP_API_KEY=$KEY npx @porkytheblack/glorp-mcp --http   # HTTP /mcp
+```
+
+Tools (`glorp_*`): namespaces (`list/get/create/delete`, `mint_namespace_key`,
+`list_namespace_keys`), workspaces (`list/create/delete`), sessions (`run`, `list`,
+`get`, `send_message`, `session_result`, `abort`, `destroy`), and the agent roster
+(`list_agents`, `add_agent`, `switch_agent`, `remove_agent`). Each session/workspace/
+agent tool takes an optional `namespace` for admin proxying. Admin tools `403`
+cleanly if the configured key isn't admin. Full guide: [`docs/mcp.md`](./docs/mcp.md).
+
+---
+
 ## Gotchas & safety
 
 - **Don't `bypass` against a real repo.** Reserve `bypass` for sandboxes you'll delete.
@@ -298,9 +319,13 @@ hold its own model credentials, falling back to the station's defaults when unse
 
 ## Where to read more
 
-- [`docs/station-usage.md`](../../../docs/station-usage.md) — full usage guide (CLI, REST, WS, templates)
-- [`docs/openapi.yaml`](../../../docs/openapi.yaml) — the machine-readable contract
-- [`docs/remote-orchestration.md`](../../../docs/remote-orchestration.md) — driving Station remotely
-- [`docs/codebase/station-internals.md`](../../../docs/codebase/station-internals.md) — how Station works under the hood
-- [`docs/codebase/networking.md`](../../../docs/codebase/networking.md) — server/client/protocol/SDK internals
-- [`packages/glorp-client/README.md`](../../../packages/glorp-client/README.md) — the typed SDK
+Reference docs are bundled with this skill under [`./docs/`](./docs/):
+
+- [`docs/station-usage.md`](./docs/station-usage.md) — full usage guide (CLI, REST, WS, templates)
+- [`docs/openapi.yaml`](./docs/openapi.yaml) — the machine-readable contract
+- [`docs/remote-orchestration.md`](./docs/remote-orchestration.md) — driving Station remotely
+- [`docs/mcp.md`](./docs/mcp.md) — the MCP server (drive Glorp from any MCP agent)
+- [`docs/glorp-client.md`](./docs/glorp-client.md) — the typed SDK (`@porkytheblack/glorp-client`)
+- [`docs/glorp-mcp.md`](./docs/glorp-mcp.md) — the MCP server package (`@porkytheblack/glorp-mcp`)
+- [`docs/codebase/station-internals.md`](./docs/codebase/station-internals.md) — how Station works under the hood
+- [`docs/codebase/networking.md`](./docs/codebase/networking.md) — server/client/protocol/SDK internals

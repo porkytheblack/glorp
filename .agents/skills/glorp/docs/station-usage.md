@@ -110,7 +110,7 @@ Full walkthrough in [`remote-orchestration.md`](./remote-orchestration.md).
 For driving Station from another machine or your own orchestration, see
 [`remote-orchestration.md`](./remote-orchestration.md), the OpenAPI contract in
 [`openapi.yaml`](./openapi.yaml), and the typed client
-[`@porkytheblack/glorp-client`](../packages/glorp-client/README.md).
+[`@porkytheblack/glorp-client`](./glorp-client.md).
 
 ## REST API
 

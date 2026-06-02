@@ -5,7 +5,7 @@ an API-key-secured HTTP/WS API. This is the path for wiring Glorp into your own
 orchestration (cron jobs, CI, a `station-signal` job, etc.).
 
 - **HTTP/WS contract:** [`openapi.yaml`](./openapi.yaml) — works from any language.
-- **TypeScript client:** [`@porkytheblack/glorp-client`](../packages/glorp-client/README.md).
+- **TypeScript client:** [`@porkytheblack/glorp-client`](./glorp-client.md).
 
 ## 1. Run Station with auth, reachable on the network
 
@@ -168,12 +168,12 @@ glorp station keys add acme-bot --namespace ns_acme   # scopes default to run,re
 
 The TypeScript kit exposes this too — `client.namespaces.{create,list,get,delete,createKey,listKeys}`,
 and `client.forNamespace("ns_acme")` (or `run({ namespace })`) for admin proxying.
-See the [client README](../packages/glorp-client/README.md#multi-tenancy-namespaces).
+See the [client README](./glorp-client.md#multi-tenancy-namespaces).
 
 ## 4. Or expose it over MCP
 
 To let an MCP-capable agent (Claude Desktop/Code, Cursor, a custom orchestrator)
-drive a Station as tools, run [`@porkytheblack/glorp-mcp`](../packages/glorp-mcp/README.md)
+drive a Station as tools, run [`@porkytheblack/glorp-mcp`](./glorp-mcp.md)
 — an MCP server wrapping the kit, with stdio and streamable-HTTP transports:
 
 ```bash
