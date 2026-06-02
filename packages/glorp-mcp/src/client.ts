@@ -18,7 +18,7 @@ export interface McpContext {
 export function buildContext(): McpContext {
   const endpoint = process.env.GLORP_ENDPOINT;
   if (!endpoint) {
-    throw new Error("GLORP_ENDPOINT is required (the Station base URL, e.g. http://127.0.0.1:4271).");
+    throw new Error("GLORP_ENDPOINT is required (the Station base URL, e.g. https://glorp.example.com).");
   }
   const base = createClient({
     endpoint,

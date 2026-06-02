@@ -25,10 +25,12 @@ const call = (name: string, args: Record<string, unknown> = {}) =>
   client.callTool({ name, arguments: args }).then((r) => text(r as never));
 
 console.log("\nlist namespaces:\n" + (await call("glorp_list_namespaces")));
-console.log("\ncreate ns 'MCP Smoke':\n" + (await call("glorp_create_namespace", { name: "MCP Smoke" })));
-console.log("\nmint key:\n" + (await call("glorp_mint_namespace_key", { id: "ns_mcp-smoke", name: "smoke-bot" })));
-console.log("\nlist sessions in ns_mcp-smoke (admin proxy):\n" + (await call("glorp_list_sessions", { namespace: "ns_mcp-smoke" })));
-console.log("\ndelete ns (data=true):\n" + (await call("glorp_delete_namespace", { id: "ns_mcp-smoke", removeData: true })));
+const created = await call("glorp_create_namespace", { name: "MCP Smoke" });
+console.log("\ncreate ns 'MCP Smoke':\n" + created);
+const id = JSON.parse(created).id as string; // reuse the actual id (handles collision suffixes)
+console.log("\nmint key:\n" + (await call("glorp_mint_namespace_key", { id, name: "smoke-bot" })));
+console.log(`\nlist sessions in ${id} (admin proxy):\n` + (await call("glorp_list_sessions", { namespace: id })));
+console.log("\ndelete ns (data=true):\n" + (await call("glorp_delete_namespace", { id, removeData: true })));
 console.log("\nlist namespaces (after):\n" + (await call("glorp_list_namespaces")));
 
 await client.close();

@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   if (args.includes("--http")) {
     const host = flag(args, "--host") ?? "127.0.0.1";
     const port = Number(flag(args, "--port") ?? process.env.PORT ?? 8787);
-    startHttp(ctx, host, port);
+    await startHttp(ctx, host, port);
     return;
   }
 

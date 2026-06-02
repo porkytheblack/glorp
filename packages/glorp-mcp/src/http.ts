@@ -5,25 +5,48 @@
  * MCP endpoint itself (separate from the Glorp API key the tools use).
  */
 
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { buildServer } from "./server.js";
 import type { McpContext } from "./client.js";
 
-function readJson(req: IncomingMessage): Promise<unknown> {
+/** Cap on the request body — 413 beyond this. Keeps a client from buffering us OOM. */
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/** An error carrying the HTTP status the handler should return. */
+class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Read + parse a JSON body with a size cap; rejects HttpError(413|400). */
+function readJson(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > maxBytes) {
+        req.destroy();
+        reject(new HttpError(413, `Request body exceeds ${maxBytes} bytes`));
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
       if (!body) return resolve(undefined);
       try {
         resolve(JSON.parse(body));
-      } catch (err) {
-        reject(err);
+      } catch {
+        reject(new HttpError(400, "Invalid JSON body"));
       }
     });
-    req.on("error", reject);
+    req.on("error", (err) => reject(new HttpError(400, err.message)));
   });
 }
 
@@ -45,19 +68,29 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: McpContext
     await server.connect(transport);
     await transport.handleRequest(req, res, body);
   } catch (err) {
+    const status = err instanceof HttpError ? err.status : 500;
     if (!res.headersSent) {
-      res.writeHead(500, { "content-type": "application/json" });
+      res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
     }
   }
 }
 
-export function startHttp(ctx: McpContext, host: string, port: number) {
+/** Bind the HTTP server; resolves once listening, rejects on a bind error. */
+export function startHttp(ctx: McpContext, host: string, port: number): Promise<Server> {
   const token = process.env.MCP_AUTH_TOKEN;
   const httpServer = createServer((req, res) => void handle(req, res, ctx, token));
-  httpServer.listen(port, host, () => {
-    console.error(`[glorp-mcp] streamable HTTP listening on http://${host}:${port}/mcp`);
-    if (!token) console.error("[glorp-mcp] WARNING: no MCP_AUTH_TOKEN set — the MCP endpoint is unauthenticated.");
+  return new Promise<Server>((resolve, reject) => {
+    httpServer.on("error", (err) => {
+      // Before `listening`, this is a bind failure (EADDRINUSE/EACCES) → reject.
+      // After, the promise is already settled, so this just logs (no crash).
+      console.error("[glorp-mcp] http server error:", err instanceof Error ? err.message : err);
+      reject(err);
+    });
+    httpServer.listen(port, host, () => {
+      console.error(`[glorp-mcp] streamable HTTP listening on http://${host}:${port}/mcp`);
+      if (!token) console.error("[glorp-mcp] WARNING: no MCP_AUTH_TOKEN set — the MCP endpoint is unauthenticated.");
+      resolve(httpServer);
+    });
   });
-  return httpServer;
 }

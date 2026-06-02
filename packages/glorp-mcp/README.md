@@ -62,7 +62,7 @@ Station enforces scope. Every workspace/session/agent tool takes an optional
 
 ## Quick start
 
-```
+```text
 glorp_create_namespace { "name": "Acme" }                 -> { "id": "ns_acme" }
 glorp_mint_namespace_key { "id": "ns_acme", "name": "bot" } -> { "key": "glsk_…" }
 glorp_run { "prompt": "Scaffold a TS lib and test it", "namespace": "ns_acme" }
