@@ -1,0 +1,28 @@
+{
+  "name": "@porkytheblack/glorp-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing Glorp Station orchestration — namespaces, workspaces, sessions, and the multi-agent roster — as tools for any MCP-capable agent.",
+  "type": "module",
+  "license": "MIT",
+  "bin": { "glorp-mcp": "dist/index.js" },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "src", "README.md"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@porkytheblack/glorp-client": "file:../glorp-client",
+    "zod": "^3.23.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/porkytheblack/glorp.git",
+    "directory": "packages/glorp-mcp"
+  },
+  "keywords": ["glorp", "mcp", "model-context-protocol", "agent", "orchestration", "station"]
+}
