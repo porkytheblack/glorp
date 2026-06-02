@@ -9,7 +9,10 @@ export type ToolResult = {
 
 /** Wrap a value as MCP text content (JSON for objects). */
 export function ok(data: unknown): ToolResult {
-  const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  // A `void`/204 client call yields `undefined`; JSON.stringify(undefined) is
+  // itself `undefined`, which would make an invalid `{type:"text", text:undefined}`
+  // content block. Coerce to a valid payload so every tool returns clean content.
+  const text = typeof data === "string" ? data : JSON.stringify(data === undefined ? { ok: true } : data, null, 2);
   return { content: [{ type: "text", text }] };
 }
 
