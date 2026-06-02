@@ -361,11 +361,13 @@ paths:
                 wait: { type: boolean, default: false }
                 timeout_ms: { type: integer, description: "wait=true only: max ms to wait for the turn (default 120000)." }
                 auto_approve: { type: boolean, default: true, description: "wait=true only: auto-approve permission prompts." }
+                cleanup_agents: { type: boolean, default: true, description: "wait=true only: stop spawned agents after the turn." }
                 images:
                   type: array
                   description: Optional image attachments.
                   items:
                     type: object
+                    required: [data, media_type]
                     properties:
                       data: { type: string, description: base64-encoded image bytes }
                       media_type: { type: string, example: image/png }
