@@ -84,8 +84,10 @@ describe("glorp-client kit", () => {
     expect((await tenant.sessions.list()).sessions.map((x) => x.id)).toContain(s.id);
     // Default namespace (admin, no namespace) doesn't see the tenant's session.
     expect((await admin.sessions.list()).sessions.map((x) => x.id)).not.toContain(s.id);
-    // Admin proxies into the namespace via forNamespace().
+    // Admin proxies into the namespace via forNamespace() — without mutating the
+    // parent admin client, which stays on the default namespace.
     expect((await admin.forNamespace("ns_acme").sessions.list()).sessions.map((x) => x.id)).toContain(s.id);
+    expect((await admin.sessions.list()).sessions.map((x) => x.id)).not.toContain(s.id);
 
     // Deprovision wipes it and revokes the key.
     const del = await admin.namespaces.delete(ns.id, true);
@@ -96,6 +98,13 @@ describe("glorp-client kit", () => {
     } catch (err) {
       expect((err as GlorpRemoteError).status).toBe(401);
     }
+  });
+
+  it("rejects a blank namespace at config time", async () => {
+    const { endpoint, key } = await boot();
+    expect(() => createClient({ endpoint, apiKey: key, namespace: "   " })).toThrow(/namespace/);
+    // A valid namespace is trimmed and accepted.
+    expect(createClient({ endpoint, apiKey: key, namespace: " ns_acme " }).config.namespace).toBe("ns_acme");
   });
 
   it("throws a typed GlorpRemoteError on a bad key", async () => {

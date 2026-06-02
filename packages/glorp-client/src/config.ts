@@ -26,8 +26,19 @@ export interface GlorpConfig {
 
 let active: GlorpConfig | null = null;
 
+/**
+ * Trim a namespace and reject a blank/whitespace-only value (which would send an
+ * unusable `X-Glorp-Namespace` header). `undefined` (absent) is allowed.
+ */
+export function normalizeNamespace(ns?: string): string | undefined {
+  if (ns === undefined) return undefined;
+  const trimmed = ns.trim();
+  if (trimmed === "") throw new Error("glorp-client: `namespace` must not be blank.");
+  return trimmed;
+}
+
 function normalize(c: GlorpConfig): GlorpConfig {
-  return { ...c, endpoint: c.endpoint.replace(/\/+$/, "") };
+  return { ...c, endpoint: c.endpoint.replace(/\/+$/, ""), namespace: normalizeNamespace(c.namespace) };
 }
 
 /** Set the default client config (used by the top-level `run`/`streamSession`). */

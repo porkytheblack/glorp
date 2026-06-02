@@ -113,17 +113,17 @@ function buildClient(cfg: GlorpConfig) {
     namespaces: {
       list: () => req<{ namespaces: NamespaceDto[]; total: number }>("GET", "/namespaces"),
       create: (name: string, slug?: string) => req<NamespaceDto>("POST", "/namespaces", { name, slug }),
-      get: (id: string) => req<NamespaceDto>("GET", `/namespaces/${id}`),
+      get: (id: string) => req<NamespaceDto>("GET", `/namespaces/${encodeURIComponent(id)}`),
       /** Deprovision; `removeData` also wipes the namespace's data subtree + sandboxes. */
       delete: (id: string, removeData = false) =>
         req<{ deleted: boolean; data_removed: boolean }>(
           "DELETE",
-          `/namespaces/${id}${removeData ? "?data=true" : ""}`,
+          `/namespaces/${encodeURIComponent(id)}${removeData ? "?data=true" : ""}`,
         ),
       /** Mint a key bound to this namespace (raw key returned once; `admin` scope rejected). */
       createKey: (id: string, name: string, scopes?: string[]) =>
-        req<MintedKey>("POST", `/namespaces/${id}/keys`, { name, scopes }),
-      listKeys: (id: string) => req<ApiKeyPublic[]>("GET", `/namespaces/${id}/keys`),
+        req<MintedKey>("POST", `/namespaces/${encodeURIComponent(id)}/keys`, { name, scopes }),
+      listKeys: (id: string) => req<ApiKeyPublic[]>("GET", `/namespaces/${encodeURIComponent(id)}/keys`),
     },
 
     run: (o: RunOptions): Promise<RunHandle> => runWith(cfg, o),

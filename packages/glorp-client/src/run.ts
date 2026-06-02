@@ -7,7 +7,7 @@
 
 import { request } from "./rest.js";
 import { streamSessionWith, type SessionStream } from "./ws.js";
-import type { GlorpConfig } from "./config.js";
+import { normalizeNamespace, type GlorpConfig } from "./config.js";
 import type { BridgeEvent, PermissionMode, SessionDto, SessionResult } from "./contract.js";
 
 export interface RunOptions {
@@ -77,7 +77,8 @@ export function handle(cfg: GlorpConfig, sessionId: string): RunHandle {
 /** Create a session, send the first prompt, and return a run handle. */
 export async function runWith(baseCfg: GlorpConfig, opts: RunOptions): Promise<RunHandle> {
   // A per-run namespace overrides the configured one (admin proxy into a tenant).
-  const cfg = opts.namespace ? { ...baseCfg, namespace: opts.namespace } : baseCfg;
+  const namespace = normalizeNamespace(opts.namespace);
+  const cfg = namespace ? { ...baseCfg, namespace } : baseCfg;
   const created = opts.workspaceId
     ? await request<SessionDto>(cfg, "POST", `/workspaces/${opts.workspaceId}/sessions`, sessionBody(opts))
     : await request<SessionDto>(cfg, "POST", "/sessions", { workspace: opts.workspace, ...sessionBody(opts) });
