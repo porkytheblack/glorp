@@ -455,5 +455,3 @@ JSON status object (`server.ts:142`). The dashboard's own code is out of scope.
 | `src/station/auth/memory-key-storage.ts` | In-memory key adapter (tests). |
 | `src/station/auth/sqlite-key-storage.ts` | Optional `better-sqlite3` key adapter (lazy-loaded). |
 | `src/station/auth/index.ts` | Public re-exports of the auth layer. |
-</content>
-</invoke>

@@ -8,7 +8,7 @@ MCP-capable agent (Claude Desktop/Code, Cursor, custom orchestrators) can call.
 It's a thin wrapper over [`@porkytheblack/glorp-client`](./glorp-client.md):
 the Station still enforces auth and tenant isolation; this just speaks MCP.
 
-```
+```text
 ┌─ MCP agent ─────────┐   MCP    ┌─ glorp-mcp ─┐   HTTP/WS   ┌─ Glorp Station ─┐
 │ Claude Code / Desk- │ ───────▶ │ tools →     │ ──────────▶ │ namespaces,     │
 │ top / Cursor / …    │ stdio /  │ glorp-client│  (api key)  │ sessions, agents│

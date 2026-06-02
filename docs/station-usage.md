@@ -50,7 +50,7 @@ glorp station [options]
   --bypass                Default permission mode: bypass (no prompts)
 ```
 
-> Station binds to `127.0.0.1` by default and ships **no authentication** (v1). Browser requests are limited to same-origin or loopback origins, but non-browser clients on the host can still call the API. Run it on a trusted machine, or put it behind a reverse proxy / SSH tunnel if you need remote access.
+> Station binds to `127.0.0.1` by default. A **non-loopback bind requires an API key automatically** (see [Authentication & remote access](#authentication--remote-access) below) — never expose Station on a public interface without it. On loopback, same-origin/loopback browser requests are allowed and non-browser clients on the host can still reach the API, so only run it on a trusted machine or behind a reverse proxy / SSH tunnel.
 
 ### `station.json`
 

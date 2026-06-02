@@ -36,7 +36,7 @@ Scopes: `admin` (everything, incl. key management), `run` (create/run sessions),
 TLS at a reverse proxy (Caddy/nginx) in front of Station and talk `https://` /
 `wss://`. Example (Caddy):
 
-```
+```caddyfile
 glorp.example.com {
   reverse_proxy 127.0.0.1:4271
 }
@@ -72,7 +72,7 @@ curl -s $EP/api/v1/sessions/<id>/result -H "authorization: Bearer $KEY"
 Stream events live over WebSocket (the key goes in the query string because
 browsers can't set WS headers):
 
-```
+```text
 wss://glorp.example.com/api/v1/sessions/<id>/events?api_key=glsk_xxx
 ```
 

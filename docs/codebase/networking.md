@@ -494,5 +494,3 @@ standalone SDK's HTTP/WS contract.
 | `packages/glorp-client/src/errors.ts` | `GlorpRemoteError` |
 | `packages/glorp-client/scripts/sync-contract.ts` | Vendor/check the contract from `src/station/` |
 | `docs/openapi.yaml` | OpenAPI spec for the Station API (SDK's contract) |
-</content>
-</invoke>

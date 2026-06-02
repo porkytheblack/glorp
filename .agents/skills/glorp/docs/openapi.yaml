@@ -359,6 +359,16 @@ paths:
               properties:
                 text: { type: string }
                 wait: { type: boolean, default: false }
+                timeout_ms: { type: integer, description: "wait=true only: max ms to wait for the turn (default 120000)." }
+                auto_approve: { type: boolean, default: true, description: "wait=true only: auto-approve permission prompts." }
+                images:
+                  type: array
+                  description: Optional image attachments.
+                  items:
+                    type: object
+                    properties:
+                      data: { type: string, description: base64-encoded image bytes }
+                      media_type: { type: string, example: image/png }
       responses:
         "202":
           description: Accepted (async)

@@ -97,8 +97,8 @@ Station is **not** a scheduler, a queue, or a CI system. It does not decide when
 
 ### Out of scope — explicitly excluded from v1
 
-- **Authentication and authorization.** Station binds to localhost or a private network. If you need auth, put it behind a reverse proxy. We are not building a user system.
-- **User accounts and multi-tenancy.** One Station instance = one admin. Everyone with API access is equal.
+- **Authentication and authorization.** *(Shipped after v1.)* Station now supports API-key auth, required automatically on any non-loopback bind. See [`station-usage.md`](./station-usage.md#authentication--remote-access).
+- **User accounts and multi-tenancy.** *(Partially shipped after v1.)* Isolated **namespaces** (per-tenant data partitions + namespace-bound keys) now exist; full RBAC / SSO / per-user billing remain out of scope. See [`station-usage.md`](./station-usage.md#multi-tenant-namespaces).
 - **Rate limiting or usage quotas.** Model providers handle this.
 - **Container/VM isolation.** Sessions run as the Station process user. Workspaces are directories. The permission system is the safety layer.
 - **Automatic session scheduling.** No cron, no git-hook triggers. Station is a runtime, not a scheduler.

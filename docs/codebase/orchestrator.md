@@ -42,7 +42,7 @@ or resumed, and so peers can tell who is busy.
 
 ### High-level component map
 
-```
+```text
 Orchestrator (orchestrator.ts)
 ├── OrchestratorEventBus (events.ts) ── typed event fan-out to consumers
 ├── Scheduler (scheduler.ts) ───────── 1 foreground / N background display slots
@@ -377,7 +377,7 @@ interrupted` (`:21`). Processing states (`AgentProcessingState`,
 `FileMeshAdapter` (`src/orchestrator/mesh-setup.ts:16`) implements glove-mesh's
 `MeshAdapter` using the filesystem as transport. Layout under `<meshDir>`:
 
-```
+```text
 <meshDir>/
 ├── agents/<agentId>.json        identity (tombstoned to status:"completed" on unregister)
 ├── inbox/<recipientId>/*.json    pending messages
