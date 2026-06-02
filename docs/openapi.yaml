@@ -7,6 +7,13 @@ info:
     agents over an API-key-secured HTTP/WS API. All endpoints are served under
     the stable `/api/v1` prefix (and, for backwards compatibility, at the root).
     Auth is required whenever Station is bound to a non-loopback host.
+
+
+    Multi-tenancy: an admin key can provision isolated **namespaces** (one per
+    user/tenant) and mint namespace-bound keys. A tenant key transparently scopes
+    every call to its own namespace; an admin key can act in any namespace by
+    sending `X-Glorp-Namespace: <id>`. Requests with no namespace resolve to the
+    built-in `default` namespace (the legacy, single-tenant layout).
 servers:
   - url: "{endpoint}/api/v1"
     variables:
@@ -20,6 +27,7 @@ security:
 tags:
   - name: health
   - name: keys
+  - name: namespaces
   - name: workspaces
   - name: sessions
 
@@ -105,10 +113,118 @@ paths:
                     properties: { revoked: { type: boolean } }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /namespaces:
+    post:
+      tags: [namespaces]
+      summary: Provision a tenant namespace (scope admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateNamespaceInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NamespaceDto" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    get:
+      tags: [namespaces]
+      summary: List namespaces (scope admin) — always includes `default`
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespaces:
+                    type: array
+                    items: { $ref: "#/components/schemas/NamespaceDto" }
+                  total: { type: integer }
+  /namespaces/{id}:
+    get:
+      tags: [namespaces]
+      summary: Get a namespace + its session count (scope admin)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NamespaceDto" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [namespaces]
+      summary: Deprovision a namespace (scope admin) — revokes its keys, stops its sessions
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: data, in: query, schema: { type: boolean }, description: "Also delete the namespace's on-disk data subtree and sandbox root. The `default` namespace can never be deleted." }
+      responses:
+        "200":
+          description: Deprovisioned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+                  data_removed: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /namespaces/{id}/keys:
+    post:
+      tags: [namespaces]
+      summary: Mint an API key bound to this namespace (scope admin)
+      description: The minted key is scoped to the namespace and may NOT carry the `admin` scope. The raw key is returned once.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateNamespaceKeyInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - $ref: "#/components/schemas/ApiKeyPublic"
+                      - type: object
+                        properties:
+                          key: { type: string, description: The raw key — shown only here. }
+                          namespace: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      tags: [namespaces]
+      summary: List the keys bound to this namespace (scope admin)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApiKeyPublic" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /workspaces:
     get:
       tags: [workspaces]
       summary: List workspaces
+      parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
       responses:
         "200":
           description: OK
@@ -124,6 +240,7 @@ paths:
     post:
       tags: [workspaces]
       summary: Register a workspace (a folder on the host)
+      parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
       requestBody:
         required: true
         content:
@@ -136,6 +253,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WorkspaceDto" }
   /workspaces/{id}:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [workspaces]
       summary: Get a workspace + its sessions
@@ -155,7 +273,9 @@ paths:
     post:
       tags: [sessions]
       summary: Create a session inside a workspace
-      parameters: [{ $ref: "#/components/parameters/Id" }]
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/NamespaceHeader" }
       requestBody:
         content:
           application/json:
@@ -170,7 +290,8 @@ paths:
   /sessions:
     get:
       tags: [sessions]
-      summary: List sessions
+      summary: List sessions (scoped to the resolved namespace)
+      parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
       responses:
         "200":
           description: OK
@@ -185,7 +306,8 @@ paths:
                   total: { type: integer }
     post:
       tags: [sessions]
-      summary: Create a session
+      summary: Create a session (in the resolved namespace)
+      parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
       requestBody:
         content:
           application/json:
@@ -197,6 +319,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SessionDto" }
   /sessions/{id}:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [sessions]
       summary: Get a session (poll `busy`/`state` here)
@@ -217,6 +340,7 @@ paths:
       responses:
         "204": { description: Destroyed }
   /sessions/{id}/messages:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     post:
       tags: [sessions]
       summary: Send a message to the agent
@@ -251,6 +375,7 @@ paths:
                 type: object
                 properties: { text: { type: string }, error: { type: string } }
   /sessions/{id}/files:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [sessions]
       summary: List files in the session's uploads/ exchange folder
@@ -286,6 +411,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
   /sessions/{id}/files/{path}:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [sessions]
       summary: Download a file from uploads/ (binary)
@@ -311,6 +437,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
   /sessions/{id}/result:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     get:
       tags: [sessions]
       summary: Latest agent answer + run status (one-call result fetch)
@@ -323,6 +450,7 @@ paths:
               schema: { $ref: "#/components/schemas/SessionResult" }
         "404": { $ref: "#/components/responses/NotFound" }
   /sessions/{id}/abort:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
     post:
       tags: [sessions]
       summary: Abort the running turn
@@ -351,6 +479,15 @@ components:
       in: path
       required: true
       schema: { type: string }
+    NamespaceHeader:
+      name: X-Glorp-Namespace
+      in: header
+      required: false
+      schema: { type: string }
+      description: >
+        Admin keys only: act inside this namespace. Tenant keys are bound to
+        their own namespace and a mismatching value is rejected (403). Omit to
+        use the key's own namespace (or `default`).
   responses:
     NotFound:
       description: Resource not found
@@ -389,6 +526,31 @@ components:
         lastUsed: { type: [string, "null"], format: date-time }
         expiresAt: { type: [string, "null"], format: date-time }
         revoked: { type: boolean }
+        namespace: { type: [string, "null"], description: Bound namespace, or null for unbound (admin/default) keys. }
+    NamespaceDto:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        created_at: { type: string, format: date-time }
+        is_default: { type: boolean }
+        session_count: { type: integer, description: Present on detail reads; omitted from lists. }
+    CreateNamespaceInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        slug: { type: string, description: Optional explicit slug; otherwise derived from name. }
+    CreateNamespaceKeyInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        scopes:
+          type: array
+          items: { type: string, enum: [run, read] }
+          description: Defaults to [run, read]. The `admin` scope is rejected.
     WorkspaceDto:
       type: object
       properties:

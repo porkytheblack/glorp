@@ -8,17 +8,39 @@
  */
 
 import * as path from "node:path";
-import { SessionManager } from "./manager.ts";
+import type { SessionManager } from "./manager.ts";
 import { createStationRouter } from "./router.ts";
 import { makeWsData, handleWsOpen, handleWsClose, handleWsMessage, type WsData } from "./ws.ts";
 import { CredentialsStore } from "../agent/credentials.ts";
 import { TemplateStore } from "./templates/store.ts";
-import { WorkspaceStore } from "./workspace-store.ts";
-import { provision } from "./templates/engine.ts";
+import { NamespaceStore, DEFAULT_NAMESPACE_ID } from "./namespace-store.ts";
+import { NamespaceRegistry, NamespaceNotFoundError, type NamespaceBundle } from "./namespace-registry.ts";
+import { namespaceControlRoutes } from "./routes/namespaces.ts";
+import { healthRoute } from "./routes/health.ts";
 import { KeyStore } from "./auth/key-store.ts";
-import { requireAuth, requireScope } from "./auth/middleware.ts";
+import { requireAuth, requireScope, NamespaceForbiddenError } from "./auth/middleware.ts";
+import type { ApiKey } from "./auth/types.ts";
 import { authRequired, type StationConfig } from "./config.ts";
 import { json } from "./respond.ts";
+import { withCors, rejectBrowserOrigin, preflight } from "./cors.ts";
+export { isAllowedBrowserOrigin } from "./cors.ts";
+
+/** Admin-only route prefixes — gated to the `admin` scope, namespace-agnostic. */
+function isAdminRoute(routePath: string): boolean {
+  return (
+    routePath === "/keys" ||
+    routePath.startsWith("/keys/") ||
+    routePath === "/namespaces" ||
+    routePath.startsWith("/namespaces/")
+  );
+}
+
+/** Map a namespace-resolution failure to the right HTTP status. */
+function namespaceError(err: unknown): Response {
+  if (err instanceof NamespaceForbiddenError) return json({ error: "forbidden", message: err.message }, 403);
+  if (err instanceof NamespaceNotFoundError) return json({ error: "not_found", message: err.message }, 404);
+  return json({ error: "internal", message: err instanceof Error ? err.message : String(err) }, 500);
+}
 
 const WS_PATH = /^\/sessions\/([^/]+)\/events$/;
 
@@ -32,48 +54,6 @@ function stripApiPrefix(pathname: string): string {
   return pathname;
 }
 
-const CORS_BASE: Record<string, string> = {
-  "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
-  "access-control-allow-headers": "authorization, content-type",
-};
-
-function withCors(req: Request, url: URL, resp: Response): Response {
-  const origin = req.headers.get("origin");
-  if (origin && isAllowedBrowserOrigin(origin, url)) {
-    resp.headers.set("access-control-allow-origin", origin);
-    resp.headers.set("vary", "origin");
-  }
-  for (const [k, v] of Object.entries(CORS_BASE)) resp.headers.set(k, v);
-  return resp;
-}
-
-export function isAllowedBrowserOrigin(origin: string | null, requestUrl: URL): boolean {
-  if (!origin) return true;
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    return false;
-  }
-  if (parsed.origin === requestUrl.origin) return true;
-  return isLoopback(parsed.hostname) && isLoopback(requestUrl.hostname);
-}
-
-function isLoopback(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
-}
-
-function rejectBrowserOrigin(req: Request, url: URL): Response | null {
-  return isAllowedBrowserOrigin(req.headers.get("origin"), url)
-    ? null
-    : json({ error: "forbidden_origin", message: "Origin not allowed" }, 403);
-}
-
-function preflight(req: Request, url: URL): Response {
-  const blocked = rejectBrowserOrigin(req, url);
-  return blocked ? withCors(req, url, blocked) : withCors(req, url, new Response(null, { status: 204 }));
-}
-
 export interface StationHandle {
   port: number;
   manager: SessionManager;
@@ -81,25 +61,15 @@ export interface StationHandle {
 }
 
 export async function startStation(config: StationConfig): Promise<StationHandle> {
-  const credentials = new CredentialsStore(config.dataDir);
+  const stationCredentials = new CredentialsStore(config.dataDir);
   const templates = new TemplateStore(config.templatesDir);
-  const workspaces = new WorkspaceStore(config.dataDir);
-  const manager = new SessionManager({
-    dataDir: config.dataDir,
-    workspaceRoot: config.workspaceRoot,
-    defaultProvider: config.defaultProvider,
-    defaultModel: config.defaultModel,
-    permissionMode: config.permissionMode,
-    workspaces,
-    templates: {
-      has: (name) => templates.has(name),
-      provision: (name, params, workspace) => provision(templates.get(name)!, params, workspace),
-    },
-  });
+  const namespaceStore = new NamespaceStore(config.dataDir, config.workspaceRoot);
+  const registry = new NamespaceRegistry(namespaceStore, config, templates, stationCredentials);
   const startedAt = Date.now();
   const keyStore = new KeyStore(config.auth?.keyStorage ?? path.join(config.dataDir, "glorp-keys.json"));
   const authOn = authRequired(config);
-  const router = createStationRouter(manager, config, credentials, templates, startedAt, keyStore);
+  const namespaceCtl = namespaceControlRoutes(namespaceStore, registry, keyStore, config);
+  const router = createStationRouter(templates, keyStore, namespaceCtl);
 
   const server = Bun.serve<WsData>({
     hostname: config.hostname,
@@ -118,11 +88,21 @@ export async function startStation(config: StationConfig): Promise<StationHandle
 
       const wsMatch = routePath.match(WS_PATH);
       if (wsMatch && req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+        let key: ApiKey | null = null;
         if (authOn) {
           const auth = await requireAuth(req, url, keyStore);
           if (!auth.ok) return withCors(req, url, auth.response);
+          key = auth.key;
         }
-        const session = manager.getOrRehydrate(wsMatch[1]!);
+        let bundle: NamespaceBundle;
+        try {
+          // Browsers can't set headers on a WebSocket, so accept `?ns=` too.
+          const requested = req.headers.get("x-glorp-namespace") ?? url.searchParams.get("ns");
+          bundle = registry.bundleForKey(key, requested);
+        } catch (err) {
+          return withCors(req, url, namespaceError(err));
+        }
+        const session = bundle.manager.getOrRehydrate(wsMatch[1]!);
         if (!session) {
           return withCors(req, url, json({ error: "not_found", message: "Session not found" }, 404));
         }
@@ -134,18 +114,37 @@ export async function startStation(config: StationConfig): Promise<StationHandle
         return withCors(req, url, json({ status: "ok", service: "glorp-station" }));
       }
 
-      // API-key auth for every REST route except health.
-      if (authOn && routePath !== "/health") {
+      // Health is open (no auth, no namespace) and reports across all namespaces.
+      if (routePath === "/health" && req.method === "GET") {
+        return withCors(req, url, healthRoute(registry, startedAt));
+      }
+
+      // API-key auth + admin gate for the relevant routes.
+      let key: ApiKey | null = null;
+      if (authOn) {
         const auth = await requireAuth(req, url, keyStore);
         if (!auth.ok) return withCors(req, url, auth.response);
-        if (routePath === "/keys" || routePath.startsWith("/keys/")) {
+        key = auth.key;
+        if (isAdminRoute(routePath)) {
           const denied = requireScope(auth.key, "admin");
           if (denied) return withCors(req, url, denied);
         }
       }
 
+      // Resolve the namespace bundle. Admin routes operate cross-namespace via
+      // the control plane, so they don't honor X-Glorp-Namespace (and never 404
+      // on a not-yet-created namespace) — they always get the default bundle.
+      let bundle: NamespaceBundle;
       try {
-        return withCors(req, url, await router.route(req, routePath));
+        bundle = isAdminRoute(routePath)
+          ? registry.resolve(DEFAULT_NAMESPACE_ID)
+          : registry.bundleForKey(key, req.headers.get("x-glorp-namespace"));
+      } catch (err) {
+        return withCors(req, url, namespaceError(err));
+      }
+
+      try {
+        return withCors(req, url, await router.route(req, routePath, bundle));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return withCors(req, url, json({ error: "internal", message }, 500));
@@ -182,9 +181,10 @@ export async function startStation(config: StationConfig): Promise<StationHandle
 
   return {
     port,
-    manager,
+    // Back-compat handle: the default namespace's manager.
+    manager: registry.resolve(DEFAULT_NAMESPACE_ID).manager,
     async stop() {
-      await manager.shutdownAll();
+      for (const bundle of registry.liveBundles()) await bundle.manager.shutdownAll();
       await keyStore.close().catch(() => {});
       server.stop();
       console.log("[glorp-station] stopped");

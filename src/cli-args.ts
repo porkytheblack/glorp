@@ -34,6 +34,8 @@ export interface CliArgs {
   keyId?: string;
   /** `--scopes a,b,c` for `keys add`. */
   scopes?: string[];
+  /** `--namespace <id>` for `keys add`: bind the key to a tenant namespace. */
+  namespace?: string;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
@@ -82,6 +84,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
     if (a === "--data-dir") { args.dataDir = argv[++i]; continue; }
     if (a === "--workspace-root") { args.workspaceRoot = path.resolve(argv[++i] ?? "."); continue; }
     if (a === "--scopes") { args.scopes = (argv[++i] ?? "").split(",").map((s) => s.trim()).filter(Boolean); continue; }
+    if (a === "--namespace") { args.namespace = argv[++i]; continue; }
     if (a === "-p" || a === "--print") {
       args.command = "headless";
       args.prompt = argv[++i];
@@ -127,6 +130,7 @@ STATION OPTIONS
       --data-dir <dir>     State directory (default: ~/.glorp)
       --workspace-root <d> Base dir for auto-provisioned workspaces
       --scopes <a,b>       Scopes for 'keys add' (default: admin)
+      --namespace <id>     Bind a 'keys add' key to a tenant namespace
 
 ENV
   ANTHROPIC_API_KEY        Default provider if set

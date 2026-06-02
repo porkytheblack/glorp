@@ -19,10 +19,13 @@ const _assertions: [
   Equal<C.PermissionMode, PermissionMode>,
   Equal<C.SessionLifecycle, T.SessionLifecycle>,
   Equal<C.SessionCredential, T.SessionCredential>,
+  Equal<C.NamespaceDto, T.NamespaceDto>,
+  Equal<C.CreateNamespaceInput, T.CreateNamespaceInput>,
+  Equal<C.CreateNamespaceKeyInput, T.CreateNamespaceKeyInput>,
   Equal<C.WorkspaceDto, T.WorkspaceDto>,
   Equal<C.CreateWorkspaceInput, T.CreateWorkspaceInput>,
   Equal<C.CreateSessionInput, T.CreateSessionInput>,
   Equal<C.SessionDto, T.SessionDto>,
-] = [true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true];
 
 void _assertions;

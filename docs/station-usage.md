@@ -85,6 +85,28 @@ glorp station keys revoke <id>
 Send the key as `Authorization: Bearer glsk_…` (REST) or `?api_key=glsk_…` (the
 WebSocket, which can't set headers from a browser). `/health` stays open.
 
+### Multi-tenant namespaces
+
+Run one Station for many users by giving each an isolated **namespace** (its own
+sessions, workspaces, sandboxes, and model credentials). An admin key provisions
+namespaces and mints namespace-bound keys; a tenant key transparently scopes every
+call to its own namespace. Requests with no namespace use the built-in `default`
+namespace, so single-tenant setups are unchanged. Namespaces require auth on.
+
+```bash
+# Admin: provision a namespace and mint a tenant key (raw key shown once)
+curl -sX POST $EP/api/v1/namespaces -H "authorization: Bearer $ADMIN" \
+  -H 'content-type: application/json' -d '{"name":"acme"}'                  # -> ns_acme
+curl -sX POST $EP/api/v1/namespaces/ns_acme/keys -H "authorization: Bearer $ADMIN" \
+  -H 'content-type: application/json' -d '{"name":"acme-bot"}'             # -> glsk_…
+
+glorp station keys add acme-bot --namespace ns_acme   # ...or mint one offline via CLI
+```
+
+Admin keys can act inside any namespace with the `X-Glorp-Namespace: <id>` header
+(`?ns=<id>` on the WebSocket). Deprovision with `DELETE /namespaces/:id?data=true`.
+Full walkthrough in [`remote-orchestration.md`](./remote-orchestration.md).
+
 For driving Station from another machine or your own orchestration, see
 [`remote-orchestration.md`](./remote-orchestration.md), the OpenAPI contract in
 [`openapi.yaml`](./openapi.yaml), and the typed client
@@ -120,6 +142,12 @@ Every path is served at the stable `/api/v1` prefix **and** at the bare root
 | `GET` | `/templates`, `/templates/:name` | Setup templates |
 | `GET` | `/models/providers`, `/models/profiles` | Configured models (keys redacted) |
 | `POST` | `/models/profiles/:id/activate` | Set the Station-wide default profile |
+| `POST` | `/namespaces` | Provision a tenant namespace (admin) |
+| `GET` | `/namespaces` | List namespaces (admin; always includes `default`) |
+| `GET` | `/namespaces/:id` | Namespace detail + session count (admin) |
+| `DELETE` | `/namespaces/:id[?data=true]` | Deprovision a namespace (admin) |
+| `POST` | `/namespaces/:id/keys` | Mint a namespace-bound API key (admin) |
+| `GET` | `/namespaces/:id/keys` | List a namespace's keys (admin) |
 | `GET` | `/health` | Health check |
 
 ### `POST /sessions` body

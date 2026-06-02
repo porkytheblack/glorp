@@ -17,6 +17,12 @@ export interface ApiKey {
   lastUsed: string | null;
   expiresAt: string | null;
   revoked: boolean;
+  /**
+   * Tenant namespace this key is bound to. `null`/`undefined` means unbound —
+   * the key resolves to the `default` namespace. A bound (tenant) key may act
+   * ONLY in its own namespace; an `admin`-scoped key may target any namespace.
+   */
+  namespace?: string | null;
 }
 
 /** Public view of a key — never includes the hash. */

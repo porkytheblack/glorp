@@ -7,6 +7,11 @@ export interface StationSessionInit {
   /** Id of the first-class workspace this session belongs to. */
   workspaceId?: string | null;
   dataDir: string;
+  /**
+   * Station data dir used as a credentials fallback when this session lives in a
+   * tenant namespace. Unset (or equal to `dataDir`) for the default namespace.
+   */
+  fallbackDataDir?: string;
   provider?: string;
   model?: string;
   profileId?: string;

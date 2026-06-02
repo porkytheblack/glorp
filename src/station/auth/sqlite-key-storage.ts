@@ -47,20 +47,28 @@ export class SqliteKeyStorage implements ApiKeyStorageAdapter {
         id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE,
         key_prefix TEXT NOT NULL, scopes TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL, last_used TEXT, expires_at TEXT,
-        revoked INTEGER NOT NULL DEFAULT 0)`,
+        revoked INTEGER NOT NULL DEFAULT 0, namespace TEXT)`,
     );
+    // Additive migration for DBs created before namespaces existed. SQLite throws
+    // "duplicate column name" when the column is already present — ignore that.
+    try {
+      this.db.exec(`ALTER TABLE ${this.table} ADD COLUMN namespace TEXT`);
+    } catch {
+      /* column already exists */
+    }
   }
 
   insert(r: ApiKey): void {
     this.db
       .prepare(
-        `INSERT INTO ${this.table} (id,name,key_hash,key_prefix,scopes,created_at,last_used,expires_at,revoked)
-         VALUES (@id,@name,@key_hash,@key_prefix,@scopes,@created_at,@last_used,@expires_at,@revoked)`,
+        `INSERT INTO ${this.table} (id,name,key_hash,key_prefix,scopes,created_at,last_used,expires_at,revoked,namespace)
+         VALUES (@id,@name,@key_hash,@key_prefix,@scopes,@created_at,@last_used,@expires_at,@revoked,@namespace)`,
       )
       .run({
         id: r.id, name: r.name, key_hash: r.keyHash, key_prefix: r.keyPrefix,
         scopes: JSON.stringify(r.scopes), created_at: r.createdAt,
         last_used: r.lastUsed, expires_at: r.expiresAt, revoked: r.revoked ? 1 : 0,
+        namespace: r.namespace ?? null,
       });
   }
 
@@ -98,5 +106,6 @@ function rowToKey(row: any): ApiKey {
     id: row.id, name: row.name, keyHash: row.key_hash, keyPrefix: row.key_prefix,
     scopes: JSON.parse(row.scopes), createdAt: row.created_at,
     lastUsed: row.last_used ?? null, expiresAt: row.expires_at ?? null, revoked: Boolean(row.revoked),
+    namespace: row.namespace ?? null,
   };
 }

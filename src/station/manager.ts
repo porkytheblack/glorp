@@ -28,10 +28,30 @@ export interface StationManagerConfig {
   templates?: TemplateProvisioner;
   /** First-class workspace registry. Defaults to one rooted at `dataDir`. */
   workspaces?: WorkspaceStore;
+  /**
+   * Station data dir used as a credentials fallback when this manager serves a
+   * tenant namespace (so a namespace without its own keys uses the station's).
+   * Unset (or equal to `dataDir`) for the default namespace.
+   */
+  fallbackDataDir?: string;
+  /**
+   * Confine every session's workspace to `workspaceRoot`. Set for tenant
+   * namespaces so a tenant can never point a session at another namespace's
+   * subtree (or anywhere on the host). The default namespace leaves this off so
+   * the operator keeps the power-user ability to attach an arbitrary host repo.
+   */
+  confineWorkspaces?: boolean;
 }
 
 export class SessionExistsError extends Error {}
 export class WorkspaceError extends Error {}
+
+/**
+ * A session id must be a safe single path segment — it is interpolated into
+ * workspace and snapshot paths, so `.`/`..`/slashes would escape the namespace
+ * subtree. Mirrors the namespace-id boundary in namespace-store.ts.
+ */
+const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,120}$/;
 
 export class SessionManager {
   private sessions = new Map<string, StationSession>();
@@ -44,6 +64,9 @@ export class SessionManager {
   /** Create a brand-new session. Validates/provisions the workspace up front. */
   async create(input: CreateSessionInput): Promise<StationSession> {
     const id = input.sessionId ?? newSessionId();
+    if (input.sessionId !== undefined && !SESSION_ID_RE.test(input.sessionId)) {
+      throw new WorkspaceError(`Invalid sessionId: must match ${SESSION_ID_RE}`);
+    }
     if (this.sessions.has(id) || snapshotExists(this.config.dataDir, id)) {
       throw new SessionExistsError(`Session ${id} already exists`);
     }
@@ -95,6 +118,7 @@ export class SessionManager {
       workspace,
       workspaceId,
       dataDir: this.config.dataDir,
+      fallbackDataDir: this.config.fallbackDataDir,
       provider: input.provider ?? this.config.defaultProvider,
       model: input.model ?? this.config.defaultModel,
       profileId: input.profileId,
@@ -162,6 +186,7 @@ export class SessionManager {
   createWorkspace(input: CreateWorkspaceInput): WorkspaceDto {
     if (!input.path) throw new WorkspaceError("A workspace 'path' is required");
     const resolved = path.resolve(input.path);
+    this.assertConfined(resolved);
     this.validateWorkspace(resolved);
     return workspaceDto(this.workspaces.create({ path: resolved, name: input.name }), 0);
   }
@@ -242,6 +267,12 @@ export class SessionManager {
   }
 
   private resolveWorkspacePath(input: CreateSessionInput, id: string): string {
+    const resolved = this.resolveWorkspaceCandidate(input, id);
+    this.assertConfined(resolved);
+    return resolved;
+  }
+
+  private resolveWorkspaceCandidate(input: CreateSessionInput, id: string): string {
     if (input.workspaceId) {
       const ws = this.workspaces.get(input.workspaceId);
       if (!ws) throw new WorkspaceError(`Unknown workspace: ${input.workspaceId}`);
@@ -249,6 +280,21 @@ export class SessionManager {
     }
     if (input.workspace) return path.resolve(input.workspace);
     return path.join(this.config.workspaceRoot, id);
+  }
+
+  /**
+   * In a tenant namespace, every workspace must live strictly under (or at) the
+   * namespace's `workspaceRoot`. Stops a tenant from pointing a session at
+   * another namespace's subtree or anywhere else on the host. No-op for the
+   * default namespace (confineWorkspaces off).
+   */
+  private assertConfined(dir: string): void {
+    if (!this.config.confineWorkspaces) return;
+    const root = path.resolve(this.config.workspaceRoot);
+    const p = path.resolve(dir);
+    if (p !== root && !p.startsWith(root + path.sep)) {
+      throw new WorkspaceError(`Workspace must be within the namespace root`);
+    }
   }
 
   /** Fail fast if the workspace can't be created or written to. */

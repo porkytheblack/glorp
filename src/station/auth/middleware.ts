@@ -6,6 +6,7 @@
  */
 
 import { errorJson } from "../respond.ts";
+import { DEFAULT_NAMESPACE_ID } from "../namespace-store.ts";
 import type { KeyStore } from "./key-store.ts";
 import type { ApiKey } from "./types.ts";
 
@@ -32,4 +33,32 @@ export async function requireAuth(req: Request, url: URL, keyStore: KeyStore): P
 export function requireScope(key: ApiKey, scope: string): Response | null {
   if (key.scopes.includes("admin") || key.scopes.includes(scope)) return null;
   return errorJson("forbidden", `Missing required scope: ${scope}`, 403);
+}
+
+/** Thrown when a tenant key tries to act in a namespace it isn't bound to. */
+export class NamespaceForbiddenError extends Error {
+  constructor(requested: string) {
+    super(`Not authorized for namespace: ${requested}`);
+  }
+}
+
+/**
+ * Resolve the namespace a request targets, enforcing tenancy:
+ *  - no key (auth off) → the `default` namespace; a requested header is ignored
+ *    (without authentication there is no tenant to isolate — namespaces require
+ *    auth to be meaningful).
+ *  - a tenant key (bound to a namespace) may act ONLY in its own namespace; a
+ *    mismatching `X-Glorp-Namespace` is a 403.
+ *  - an `admin`-scoped key may target ANY namespace via the header; with no
+ *    header it falls back to its own binding (or `default` when unbound).
+ */
+export function selectNamespaceId(key: ApiKey | null, requested: string | null): string {
+  if (!key) return DEFAULT_NAMESPACE_ID;
+  const bound = key.namespace ?? null;
+  const isAdmin = key.scopes.includes("admin");
+  if (requested && requested !== bound) {
+    if (!isAdmin) throw new NamespaceForbiddenError(requested);
+    return requested;
+  }
+  return bound ?? DEFAULT_NAMESPACE_ID;
 }

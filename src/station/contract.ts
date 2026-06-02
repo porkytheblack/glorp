@@ -21,6 +21,28 @@ export interface SessionCredential {
   model?: string;
 }
 
+/** Public view of a namespace returned by the admin control-plane API. */
+export interface NamespaceDto {
+  id: string;
+  name: string;
+  slug: string;
+  created_at: string;
+  is_default: boolean;
+  session_count?: number;
+}
+
+/** Body accepted by `POST /namespaces`. */
+export interface CreateNamespaceInput {
+  name: string;
+  slug?: string;
+}
+
+/** Body accepted by `POST /namespaces/:id/keys` (mints a namespace-bound key). */
+export interface CreateNamespaceKeyInput {
+  name: string;
+  scopes?: string[];
+}
+
 /** Public view of a workspace returned by the REST API. */
 export interface WorkspaceDto {
   id: string;
@@ -120,6 +142,8 @@ export interface ApiKeyPublic {
   lastUsed: string | null;
   expiresAt: string | null;
   revoked: boolean;
+  /** Bound namespace, or null for unbound (admin/default) keys. */
+  namespace?: string | null;
 }
 
 /**
