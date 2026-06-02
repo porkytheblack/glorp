@@ -66,8 +66,35 @@ const { text } = await glorp.sessions.sendMessageAndWait(s.id, "Now add tests.")
 const { key } = await glorp.keys.create("worker", ["run"]);
 ```
 
-Namespaces: `workspaces`, `sessions`, `models`, `keys`, plus `run()` and
-`streamSession()`.
+API groups: `workspaces`, `sessions`, `models`, `keys`, `namespaces`, plus
+`run()`, `streamSession()`, and `forNamespace()`.
+
+## Multi-tenancy (namespaces)
+
+A Station can host isolated **namespaces** (one per user). An admin key provisions
+them and mints namespace-bound keys; a tenant key transparently scopes every call.
+
+```ts
+const admin = createClient({ endpoint, apiKey: adminKey });
+
+// provision a tenant + mint its key (raw key returned once)
+const ns = await admin.namespaces.create("Acme");          // -> { id: "ns_acme", … }
+const { key } = await admin.namespaces.createKey(ns.id, "acme-bot");
+
+// the tenant uses ITS key — every call is auto-scoped to ns_acme
+const tenant = createClient({ endpoint, apiKey: key });
+await tenant.sessions.create({ permissionMode: "bypass" });
+
+// an admin can act inside any namespace via forNamespace() (or { namespace } on run())
+await admin.forNamespace("ns_acme").sessions.list();
+await admin.run({ namespace: "ns_acme", workspace: "/srv/x", prompt: "…" });
+
+// deprovision (revokes keys, stops sessions; `true` also wipes the data subtree)
+await admin.namespaces.delete(ns.id, true);
+```
+
+`admin.namespaces` also exposes `list()`, `get(id)`, and `listKeys(id)`. Namespaces
+require the Station to run with auth on.
 
 ## Errors
 
@@ -88,6 +115,7 @@ catch (e) {
 configure({
   endpoint: "https://glorp.example.com",  // required
   apiKey: "glsk_…",                        // required unless the server is auth-off
+  namespace: "ns_acme",                    // optional (admin keys: act inside a namespace)
   timeoutMs: 30_000,                       // optional per-request timeout
   fetch: customFetch,                      // optional (Node < 18, testing)
   WebSocketImpl: WebSocket,                // optional (e.g. Node's `ws`)

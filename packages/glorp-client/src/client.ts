@@ -15,11 +15,15 @@ import type {
   BridgeEvent,
   CreateSessionInput,
   FileListResponse,
+  NamespaceDto,
   PermissionGrant,
   SessionDto,
   SessionResult,
   WorkspaceDto,
 } from "./contract.js";
+
+/** The raw key returned once on creation (with its bound namespace). */
+type MintedKey = { id: string; name: string; key: string; keyPrefix: string; scopes: string[]; namespace?: string | null };
 
 /** Encode a workspace-relative path for a URL, keeping `/` separators. */
 function encodePath(p: string): string {
@@ -28,8 +32,7 @@ function encodePath(p: string): string {
 
 type Roster = { agents: AgentInfo[]; active_agent_id: string };
 
-export function createClient(opts?: GlorpConfig) {
-  const cfg = resolveConfig(opts);
+function buildClient(cfg: GlorpConfig) {
   const req = <T>(method: string, path: string, body?: unknown) => request<T>(cfg, method, path, body);
 
   return {
@@ -101,10 +104,26 @@ export function createClient(opts?: GlorpConfig) {
     },
 
     keys: {
-      create: (name: string, scopes?: string[]) =>
-        req<{ id: string; name: string; key: string; keyPrefix: string; scopes: string[] }>("POST", "/keys", { name, scopes }),
+      create: (name: string, scopes?: string[]) => req<MintedKey>("POST", "/keys", { name, scopes }),
       list: () => req<ApiKeyPublic[]>("GET", "/keys"),
       revoke: (id: string) => req<{ revoked: boolean }>("DELETE", `/keys/${id}`),
+    },
+
+    // Multi-tenancy admin control plane (requires an admin key).
+    namespaces: {
+      list: () => req<{ namespaces: NamespaceDto[]; total: number }>("GET", "/namespaces"),
+      create: (name: string, slug?: string) => req<NamespaceDto>("POST", "/namespaces", { name, slug }),
+      get: (id: string) => req<NamespaceDto>("GET", `/namespaces/${id}`),
+      /** Deprovision; `removeData` also wipes the namespace's data subtree + sandboxes. */
+      delete: (id: string, removeData = false) =>
+        req<{ deleted: boolean; data_removed: boolean }>(
+          "DELETE",
+          `/namespaces/${id}${removeData ? "?data=true" : ""}`,
+        ),
+      /** Mint a key bound to this namespace (raw key returned once; `admin` scope rejected). */
+      createKey: (id: string, name: string, scopes?: string[]) =>
+        req<MintedKey>("POST", `/namespaces/${id}/keys`, { name, scopes }),
+      listKeys: (id: string) => req<ApiKeyPublic[]>("GET", `/namespaces/${id}/keys`),
     },
 
     run: (o: RunOptions): Promise<RunHandle> => runWith(cfg, o),
@@ -113,4 +132,17 @@ export function createClient(opts?: GlorpConfig) {
   };
 }
 
-export type GlorpClient = ReturnType<typeof createClient>;
+export type GlorpClient = ReturnType<typeof buildClient> & {
+  /** A client bound to a namespace — an admin key uses this to act inside `ns`. */
+  forNamespace(namespace: string): GlorpClient;
+};
+
+/**
+ * Create a typed client over the Station REST/WS API. Pass no opts to use the
+ * config from `configure()` / env. `forNamespace(ns)` returns a client bound to
+ * a namespace (admin keys use it to act inside a tenant).
+ */
+export function createClient(opts?: GlorpConfig): GlorpClient {
+  const cfg = resolveConfig(opts);
+  return { ...buildClient(cfg), forNamespace: (namespace: string) => createClient({ ...cfg, namespace }) };
+}

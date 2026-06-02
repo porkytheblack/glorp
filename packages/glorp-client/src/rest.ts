@@ -11,11 +11,18 @@ function safeParse(text: string): unknown {
   }
 }
 
+/** Auth + namespace headers shared by every request. */
+function baseHeaders(cfg: GlorpConfig): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (cfg.apiKey) headers["authorization"] = `Bearer ${cfg.apiKey}`;
+  if (cfg.namespace) headers["x-glorp-namespace"] = cfg.namespace;
+  return headers;
+}
+
 export async function request<T>(cfg: GlorpConfig, method: string, path: string, body?: unknown): Promise<T> {
   const doFetch = cfg.fetch ?? globalThis.fetch;
-  const headers: Record<string, string> = {};
+  const headers = baseHeaders(cfg);
   if (body !== undefined) headers["content-type"] = "application/json";
-  if (cfg.apiKey) headers["authorization"] = `Bearer ${cfg.apiKey}`;
 
   const res = await doFetch(`${apiBase(cfg)}${path}`, {
     method,
@@ -41,8 +48,7 @@ export async function request<T>(cfg: GlorpConfig, method: string, path: string,
 /** Upload `multipart/form-data`; lets fetch set the boundary content-type. */
 export async function requestForm<T>(cfg: GlorpConfig, path: string, form: FormData): Promise<T> {
   const doFetch = cfg.fetch ?? globalThis.fetch;
-  const headers: Record<string, string> = {};
-  if (cfg.apiKey) headers["authorization"] = `Bearer ${cfg.apiKey}`;
+  const headers = baseHeaders(cfg);
 
   const res = await doFetch(`${apiBase(cfg)}${path}`, {
     method: "POST",
@@ -62,8 +68,7 @@ export async function requestForm<T>(cfg: GlorpConfig, path: string, form: FormD
 /** Download raw bytes (e.g. a generated file) as a `Uint8Array`. */
 export async function requestBinary(cfg: GlorpConfig, method: string, path: string): Promise<Uint8Array> {
   const doFetch = cfg.fetch ?? globalThis.fetch;
-  const headers: Record<string, string> = {};
-  if (cfg.apiKey) headers["authorization"] = `Bearer ${cfg.apiKey}`;
+  const headers = baseHeaders(cfg);
 
   const res = await doFetch(`${apiBase(cfg)}${path}`, {
     method,

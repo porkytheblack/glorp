@@ -166,6 +166,10 @@ Mint a bound key offline (no running server) with the CLI:
 glorp station keys add acme-bot --namespace ns_acme   # scopes default to run,read
 ```
 
+The TypeScript kit exposes this too — `client.namespaces.{create,list,get,delete,createKey,listKeys}`,
+and `client.forNamespace("ns_acme")` (or `run({ namespace })`) for admin proxying.
+See the [client README](../packages/glorp-client/README.md#multi-tenancy-namespaces).
+
 ## Headless permission modes (important)
 
 Unattended runs must **not** use `permissionMode: "normal"` — the agent will block

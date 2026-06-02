@@ -10,6 +10,12 @@ export interface GlorpConfig {
   endpoint: string;
   /** API key (Bearer). Required unless the server runs auth-off on loopback. */
   apiKey?: string;
+  /**
+   * Target a tenant namespace. Sent as the `X-Glorp-Namespace` header on REST
+   * (and `&ns=` on the WebSocket). Admin keys use this to act inside a namespace;
+   * a namespace-bound tenant key doesn't need it (its key already scopes it).
+   */
+  namespace?: string;
   /** Override the global `fetch` (e.g. for Node < 18 or testing). */
   fetch?: typeof fetch;
   /** WebSocket implementation (e.g. Node's `ws`) when not in a browser/Bun. */

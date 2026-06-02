@@ -66,6 +66,38 @@ describe("glorp-client kit", () => {
     expect(Array.isArray(keys)).toBe(true);
   });
 
+  it("provisions namespaces, mints tenant keys, and isolates them via the SDK", async () => {
+    const { endpoint, key } = await boot();
+    const admin = createClient({ endpoint, apiKey: key });
+
+    // Admin control plane: provision + mint a namespace-bound key.
+    const ns = await admin.namespaces.create("Acme");
+    expect(ns.id).toBe("ns_acme");
+    expect(ns.is_default).toBe(false);
+    const minted = await admin.namespaces.createKey(ns.id, "acme-bot");
+    expect(minted.namespace).toBe("ns_acme");
+    expect(minted.scopes).not.toContain("admin");
+
+    // Tenant client (its key is namespace-bound — no header needed).
+    const tenant = createClient({ endpoint, apiKey: minted.key });
+    const s = await tenant.sessions.create({ permissionMode: "bypass" });
+    expect((await tenant.sessions.list()).sessions.map((x) => x.id)).toContain(s.id);
+    // Default namespace (admin, no namespace) doesn't see the tenant's session.
+    expect((await admin.sessions.list()).sessions.map((x) => x.id)).not.toContain(s.id);
+    // Admin proxies into the namespace via forNamespace().
+    expect((await admin.forNamespace("ns_acme").sessions.list()).sessions.map((x) => x.id)).toContain(s.id);
+
+    // Deprovision wipes it and revokes the key.
+    const del = await admin.namespaces.delete(ns.id, true);
+    expect(del.deleted).toBe(true);
+    try {
+      await tenant.sessions.list();
+      throw new Error("expected 401 after deprovision");
+    } catch (err) {
+      expect((err as GlorpRemoteError).status).toBe(401);
+    }
+  });
+
   it("throws a typed GlorpRemoteError on a bad key", async () => {
     const { endpoint } = await boot();
     const client = createClient({ endpoint, apiKey: "glsk_wrong" });

@@ -22,6 +22,8 @@ export interface RunOptions {
   profileId?: string;
   template?: string;
   params?: Record<string, string>;
+  /** Target a tenant namespace for this run (admin keys only; overrides config). */
+  namespace?: string;
 }
 
 export interface ResultOptions {
@@ -73,7 +75,9 @@ export function handle(cfg: GlorpConfig, sessionId: string): RunHandle {
 }
 
 /** Create a session, send the first prompt, and return a run handle. */
-export async function runWith(cfg: GlorpConfig, opts: RunOptions): Promise<RunHandle> {
+export async function runWith(baseCfg: GlorpConfig, opts: RunOptions): Promise<RunHandle> {
+  // A per-run namespace overrides the configured one (admin proxy into a tenant).
+  const cfg = opts.namespace ? { ...baseCfg, namespace: opts.namespace } : baseCfg;
   const created = opts.workspaceId
     ? await request<SessionDto>(cfg, "POST", `/workspaces/${opts.workspaceId}/sessions`, sessionBody(opts))
     : await request<SessionDto>(cfg, "POST", "/sessions", { workspace: opts.workspace, ...sessionBody(opts) });
