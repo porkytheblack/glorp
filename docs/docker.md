@@ -83,9 +83,38 @@ State lives in the `glorp-data` and `glorp-workspaces` named volumes.
 `docker compose down` keeps them; `docker compose down -v` wipes them (fresh
 keys + empty workspaces next boot).
 
+## Batteries-included image (media + documents + skills)
+
+The default `Dockerfile` is lean — good when you only orchestrate. For agents
+that need to **create documents, video, images, or audio**, build the full
+variant, which bakes in the whole toolchain so sessions can produce real
+deliverables with zero setup:
+
+```bash
+docker build -f docker/Dockerfile.full -t glorp-station:full .
+docker run -d --name glorp -p 4271:4271 \
+  -v glorp-data:/data -v glorp-workspaces:/workspaces \
+  -v "$HOME/.glorp/credentials.json:/data/credentials.json:ro" \
+  glorp-station:full
+```
+
+What's inside (`docker/Dockerfile.full`, ~3.4 GB):
+
+- **Runtimes:** Node 20 + npm, Python 3 + pip, Rust (rustup), plus the base `bun`.
+- **Documents:** LibreOffice (headless docx/pptx/xlsx ↔ pdf), pandoc, poppler,
+  ghostscript, qpdf; Python `python-pptx` / `python-docx` / `openpyxl` /
+  `pypdf` / `pdfplumber` / `reportlab` / `weasyprint`.
+- **Video / audio:** ffmpeg, sox, lame.
+- **Images:** ImageMagick, libvips, webp, optipng, jpegoptim, Pillow.
+- **Fonts:** DejaVu, Liberation, Noto (incl. CJK + colour emoji).
+- **Skills:** the Anthropic agent skills (`docx`, `pptx`, `pdf`, `xlsx`, and more)
+  installed into `~/.agents/skills/` so Glorp's extensions-loader surfaces them
+  for **every** session. Wire your own source in `docker/skills-install.sh`
+  (override `ANTHROPIC_SKILLS_REPO`).
+
 ## Image notes
 
-The image runs Station from source on the `oven/bun` base (bun is present so
+The lean image runs Station from source on the `oven/bun` base (bun is present so
 agents can run `bun`/`bunx`; `git`, `curl`, `python3` are installed — extend the
 `apt-get` line for your stack). For a smaller runtime you can instead compile a
 single binary (`bun run build:cli` → `dist/glorp`) in a build stage and copy it
