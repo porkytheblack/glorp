@@ -26,7 +26,10 @@ if git clone --depth 1 "$REPO" /tmp/askills 2>/dev/null; then
   count=0
   while IFS= read -r f; do
     d="$(dirname "$f")"
-    cp -R "$d" "$SKILLS_DIR/$(basename "$d")" && count=$((count + 1))
+    dest="$SKILLS_DIR/$(basename "$d")"
+    # Copy the bundle's *contents* into dest so re-running refreshes in place
+    # instead of nesting as <name>/<name>/ when dest already exists.
+    mkdir -p "$dest" && cp -R "$d"/. "$dest"/ && count=$((count + 1))
   done < <(find /tmp/askills -maxdepth 4 -name SKILL.md)
   while IFS= read -r r; do
     pip3 install --break-system-packages --no-cache-dir -r "$r" >/dev/null 2>&1 || echo "[skills] WARN deps: $r"

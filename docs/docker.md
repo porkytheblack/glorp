@@ -110,7 +110,10 @@ What's inside (`docker/Dockerfile.full`, ~3.4 GB):
 - **Skills:** the Anthropic agent skills (`docx`, `pptx`, `pdf`, `xlsx`, and more)
   installed into `~/.agents/skills/` so Glorp's extensions-loader surfaces them
   for **every** session. Wire your own source in `docker/skills-install.sh`
-  (override `ANTHROPIC_SKILLS_REPO`).
+  (override `ANTHROPIC_SKILLS_REPO`). Install is **best-effort**: if the clone
+  fails at build time the image still builds but the bundles may be absent — fetch
+  them later by re-running `docker/skills-install.sh` in the container (or
+  rebuilding with a reachable `ANTHROPIC_SKILLS_REPO`).
 
 ## Image notes
 
