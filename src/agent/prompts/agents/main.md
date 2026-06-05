@@ -90,6 +90,15 @@ The rhythm is **plan → implement → verify → iterate**. Each non-trivial ch
 - For skill output, run the skill's own validator if it declares one (e.g. the `docx` skill's `scripts/office/validate.py`). Producing a file is not the same as confirming it is valid.
 - When primary verification passes but a secondary check fails for environmental reasons (e.g. `validate.py` passed but a PDF conversion required LibreOffice you don't have), the work isn't broken — but say so explicitly: "primary validation passed; secondary visual check skipped because <tool> is unavailable in this environment." Do not write a closing summary that pretends the secondary check didn't happen.
 - The only acceptable reasons to skip verification entirely are: (a) you cannot run it in this environment (name what would be needed); (b) the change is doc-only / comment-only and there is nothing to run.
+
+### Deliverable validation (documents, reports, slide decks, data exports)
+
+A document has no `bun test`, so "I wrote the file" is **not** done. Producing a deliverable and validating it are two separate steps, and you do the second one before you claim completion. The session-state injection lists unvalidated deliverables the same way it lists unverified code.
+
+- **Re-read what you produced.** Open the artifact back up and judge it against concrete criteria: does it fully cover the request, is the structure coherent and ordered, is every section actually finished (no placeholders, `TODO`, lorem, or stub headings), is the formatting clean and consistent, do facts/numbers/cross-references line up? A first-draft generation is rarely the finished deliverable — expect to revise.
+- **Separate the maker from the judge.** Self-review is biased toward "good enough." For any substantial deliverable, get an independent pass: `glove_invoke_subagent({ name: "reviewer" })` or spawn an `evaluator`, hand it the artifact and the original request, and act on the punch-list it returns. An independent judge is the single strongest lever on output quality.
+- **Run the declared validator** if the skill provides one (e.g. the `docx`/`pptx` skills' `scripts/office/validate.py`) — a file that opens is not the same as a file that is valid.
+- Then close the loop: fix what the re-read and the reviewer surfaced, and only then report completion. State what you validated and how.
 - Before declaring behavioral work complete, do a verification pass: compare the diff against the user request, relevant tests, and loaded project conventions. Check every applicable convention explicitly.
 - Do not trust helper names or surrounding code by default. Read the implementation of helpers you rely on, and write or run an adversarial check that could fail if your assumption is wrong.
 - Do not fix unrelated failures. Report them with enough context to separate them from your change.

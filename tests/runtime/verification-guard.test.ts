@@ -122,6 +122,36 @@ describe("withVerificationEnforcement", () => {
     }
   });
 
+  test("uses document guidance when pending work is all documents", async () => {
+    const tracker = new VerificationTracker();
+    tracker.recordMutation("uploads/report.docx");
+    const inner = mockModel({ text: "The document is complete." });
+    const guarded = withVerificationEnforcement(inner, tracker);
+    await guarded.prompt(
+      { messages: [], system: "" } as any, async () => {}, undefined,
+    );
+    expect((inner as any)._calls).toHaveLength(2);
+    const retryMessages = (inner as any)._calls[1] as Message[];
+    const lastMsg = retryMessages.at(-1);
+    expect(lastMsg?.text).toContain("document/artifact deliverable");
+    expect(lastMsg?.text).toContain("reviewer");
+    expect(lastMsg?.text).not.toContain("Run the test suite");
+  });
+
+  test("uses code guidance when any pending file is source", async () => {
+    const tracker = new VerificationTracker();
+    tracker.recordMutation("uploads/report.docx");
+    tracker.recordMutation("src/app.ts");
+    const inner = mockModel({ text: "The work is complete." });
+    const guarded = withVerificationEnforcement(inner, tracker);
+    await guarded.prompt(
+      { messages: [], system: "" } as any, async () => {}, undefined,
+    );
+    expect((inner as any)._calls).toHaveLength(2);
+    const lastMsg = ((inner as any)._calls[1] as Message[]).at(-1);
+    expect(lastMsg?.text).toContain("Run the test suite");
+  });
+
   test("preserves model name", () => {
     const tracker = new VerificationTracker();
     const inner = mockModel({});
