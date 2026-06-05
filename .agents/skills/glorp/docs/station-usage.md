@@ -139,6 +139,16 @@ Every path is served at the stable `/api/v1` prefix **and** at the bare root
 | `POST` | `/sessions/:id/files` | Upload file(s) into `uploads/` (`multipart/form-data`) |
 | `GET` | `/sessions/:id/files/:path` | Download a file from `uploads/` (binary) |
 | `DELETE` | `/sessions/:id/files/:path` | Delete a file from `uploads/` |
+| `GET` | `/workspaces` | List first-class workspaces |
+| `POST` | `/workspaces` | Create a workspace (mints a folder under `workspaceRoot` when `path` is omitted) |
+| `GET` | `/workspaces/:id` | Workspace detail + its sessions |
+| `DELETE` | `/workspaces/:id[?sessions=true]` | Remove a workspace (optionally its sessions) |
+| `POST` | `/workspaces/:id/sessions` | Create a session inside the workspace |
+| `POST` | `/workspaces/:id/mcp` | Install/refresh an MCP provider (code-as-tools) |
+| `GET` | `/workspaces/:id/mcp` | List installed MCP providers (tokens redacted) |
+| `POST` | `/workspaces/:id/mcp/sync` | Re-introspect + sync all providers |
+| `POST` | `/workspaces/:id/mcp/:provider/sync` | Sync one provider |
+| `DELETE` | `/workspaces/:id/mcp/:provider` | Remove one provider |
 | `GET` | `/templates`, `/templates/:name` | Setup templates |
 | `GET` | `/models/providers`, `/models/profiles` | Configured models (keys redacted) |
 | `POST` | `/models/profiles/:id/activate` | Set the Station-wide default profile |
@@ -277,6 +287,48 @@ curl -s -X POST localhost:4271/sessions \
   -H 'content-type: application/json' \
   -d '{"template":"next-app","params":{"repo":"me/my-repo"}}'
 ```
+
+---
+
+## MCP workspaces
+
+Provision a workspace with **external MCP tools as code**, then drive it with plain
+prompts. Glorp introspects the MCP server, deterministically generates one typed
+wrapper per tool into the workspace, and writes a `0600` keyfile. The agent calls the
+tools and self-authenticates **at call time** — tokens never enter the model's context.
+See `src/mcpgen/README.md` in the glorp repository for the generated layout.
+
+```bash
+# 1. Create a workspace (mints a managed folder under workspaceRoot).
+WS=$(curl -s -X POST localhost:4271/workspaces \
+  -H 'content-type: application/json' -d '{"name":"acme"}' | jq -r .id)
+
+# 2. Install an MCP provider, with one or more named identities.
+curl -s -X POST "localhost:4271/workspaces/$WS/mcp" \
+  -H 'content-type: application/json' -d '{
+    "provider": "linear",
+    "url": "https://mcp.linear.com",
+    "defaultIdentity": "acme",
+    "identities": [
+      { "name": "acme", "token": "lin_...", "label": "Acme Corp" },
+      { "name": "personal", "token": "lin_..." }
+    ]
+  }'
+# → { "provider":"linear", "added":["create_issue", ...], "removed":[], "changed":[], "unchanged":0 }
+
+# 3. Thereafter: create sessions in the workspace and just send prompts.
+curl -s -X POST "localhost:4271/workspaces/$WS/sessions" \
+  -H 'content-type: application/json' -d '{}'
+```
+
+- **Identities** — a provider can hold several named tokens (e.g. multiple Linear
+  workspaces). A call targets one via the generated wrapper's `{ identity }` argument,
+  else the configured default, else the first. Names + labels are public
+  (`mcp/identities.json`); tokens stay in `.secrets/keys.json` and are never returned.
+- **Update** — `POST /workspaces/:id/mcp/sync` re-introspects every provider (fail-soft
+  per provider); `…/mcp/:provider/sync` does one. Regeneration is deterministic, so an
+  unchanged sync rewrites nothing. Each call returns an `{ added, removed, changed, unchanged }` diff.
+- **Remove** — `DELETE /workspaces/:id/mcp/:provider`.
 
 ---
 

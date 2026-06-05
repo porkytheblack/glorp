@@ -239,7 +239,7 @@ paths:
                   total: { type: integer }
     post:
       tags: [workspaces]
-      summary: Register a workspace (a folder on the host)
+      summary: Create a workspace (mints a managed folder under workspaceRoot when path is omitted)
       parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
       requestBody:
         required: true
@@ -286,6 +286,88 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SessionDto" }
+  /workspaces/{id}/mcp:
+    parameters: [{ $ref: "#/components/parameters/NamespaceHeader" }]
+    get:
+      tags: [workspaces]
+      summary: List installed MCP providers (tokens redacted)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items: { $ref: "#/components/schemas/McpProviderDto" }
+                  total: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [workspaces]
+      summary: Install or refresh one MCP provider (deterministic code-as-tools codegen)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProvisionMcpInput" }
+      responses:
+        "201":
+          description: Provisioned — returns the tool-level diff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/McpSyncDiff" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /workspaces/{id}/mcp/sync:
+    post:
+      tags: [workspaces]
+      summary: Re-introspect and sync every installed provider (fail-soft)
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/NamespaceHeader" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/McpSyncDiff" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /workspaces/{id}/mcp/{provider}:
+    delete:
+      tags: [workspaces]
+      summary: Remove one MCP provider
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: provider, in: path, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/NamespaceHeader" }
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /workspaces/{id}/mcp/{provider}/sync:
+    post:
+      tags: [workspaces]
+      summary: Re-introspect and sync one provider
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: provider, in: path, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/NamespaceHeader" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/McpSyncDiff" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /sessions:
     get:
@@ -585,7 +667,48 @@ components:
       type: object
       properties:
         name: { type: string }
-        path: { type: string }
+        path: { type: string, description: Existing host folder. Omit to mint a managed folder under workspaceRoot. }
+    McpIdentityInput:
+      type: object
+      required: [name, token]
+      properties:
+        name: { type: string }
+        token: { type: string, writeOnly: true, description: Bearer token (never returned). }
+        label: { type: string }
+    ProvisionMcpInput:
+      type: object
+      required: [provider, url, identities]
+      properties:
+        provider: { type: string }
+        url: { type: string, description: MCP server URL (Streamable HTTP). }
+        identities:
+          type: array
+          items: { $ref: "#/components/schemas/McpIdentityInput" }
+        defaultIdentity: { type: string }
+    McpSyncDiff:
+      type: object
+      properties:
+        provider: { type: string }
+        added: { type: array, items: { type: string } }
+        removed: { type: array, items: { type: string } }
+        changed: { type: array, items: { type: string } }
+        unchanged: { type: integer }
+        error: { type: string }
+    McpProviderDto:
+      type: object
+      properties:
+        provider: { type: string }
+        url: { type: string }
+        default_identity: { type: [string, "null"] }
+        identities:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              label: { type: string }
+        tools: { type: array, items: { type: string } }
+        synced_at: { type: string, format: date-time }
     CreateSessionInput:
       type: object
       properties:

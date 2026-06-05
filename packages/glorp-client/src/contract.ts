@@ -180,3 +180,38 @@ export interface EventEnvelope {
   seq: number;
   event: BridgeEvent;
 }
+
+/** One MCP identity (e.g. a Linear workspace) supplied at provision time. */
+export interface McpIdentityInput {
+  name: string;
+  token: string;
+  label?: string;
+}
+
+/** Body accepted by `POST /workspaces/:id/mcp` — install or refresh one MCP provider. */
+export interface ProvisionMcpInput {
+  provider: string;
+  url: string;
+  identities: McpIdentityInput[];
+  defaultIdentity?: string;
+}
+
+/** Tool-level diff returned by an MCP add/sync. */
+export interface McpSyncDiff {
+  provider: string;
+  added: string[];
+  removed: string[];
+  changed: string[];
+  unchanged: number;
+  error?: string;
+}
+
+/** Public view of an installed MCP provider (never includes tokens). */
+export interface McpProviderDto {
+  provider: string;
+  url: string;
+  default_identity: string | null;
+  identities: Array<{ name: string; label?: string }>;
+  tools: string[];
+  synced_at: string;
+}

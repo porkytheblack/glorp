@@ -13,6 +13,7 @@ import type { TemplateStore } from "./templates/store.ts";
 import type { NamespaceControlRoutes } from "./routes/namespaces.ts";
 import type { NamespaceBundle } from "./namespace-registry.ts";
 import type { RouteGroups } from "./route-groups.ts";
+import { matchWorkspaceRoute } from "./route-workspaces.ts";
 import { errorJson } from "./respond.ts";
 
 const KEY_ID = /^\/keys\/([^/]+)$/;
@@ -22,8 +23,6 @@ const ACTIVATE = /^\/models\/profiles\/([^/]+)\/activate$/;
 const MODEL_PROVIDER = /^\/models\/providers\/([^/]+)$/;
 const MODEL_PROFILE = /^\/models\/profiles\/([^/]+)$/;
 const TEMPLATE = /^\/templates\/([^/]+)$/;
-const WORKSPACE = /^\/workspaces\/([^/]+)$/;
-const WORKSPACE_SESSIONS = /^\/workspaces\/([^/]+)\/sessions$/;
 const NAMESPACE = /^\/namespaces\/([^/]+)$/;
 const NAMESPACE_KEYS = /^\/namespaces\/([^/]+)\/keys$/;
 
@@ -87,25 +86,9 @@ export function createStationRouter(
       const tm = pathname.match(TEMPLATE);
       if (tm && m === "GET") return tmpl.get(tm[1]!);
 
-      // --- Workspaces (per-namespace) ---
-      if (pathname === "/workspaces") {
-        if (m === "GET") return g.workspaces.list();
-        if (m === "POST") return g.workspaces.create(req);
-        return methodNotAllowed();
-      }
-      const wsSub = pathname.match(WORKSPACE_SESSIONS);
-      if (wsSub) {
-        if (m === "GET") return g.workspaces.listSessions(wsSub[1]!);
-        if (m === "POST") return g.workspaces.createSession(wsSub[1]!, req);
-        return methodNotAllowed();
-      }
-      const wsMatch = pathname.match(WORKSPACE);
-      if (wsMatch) {
-        const id = wsMatch[1]!;
-        if (m === "GET") return g.workspaces.get(id);
-        if (m === "DELETE") return g.workspaces.destroy(id, req);
-        return methodNotAllowed();
-      }
+      // --- Workspaces + MCP provisioning (per-namespace) ---
+      const ws = matchWorkspaceRoute(req, pathname, g);
+      if (ws) return ws;
 
       // --- Sessions (per-namespace) ---
       if (pathname === "/sessions") {

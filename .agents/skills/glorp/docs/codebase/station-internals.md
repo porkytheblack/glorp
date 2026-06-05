@@ -122,7 +122,10 @@ regex + method checks against the pre-stripped path:
 - `/keys` CRUD (`router.ts:62-65`) — admin-scope gated upstream.
 - `/models/...` — catalog, providers, profiles, activate (`router.ts:67-77`).
 - `/templates`, `/templates/:name` (`router.ts:79-81`).
-- `/workspaces`, `/workspaces/:id`, `/workspaces/:id/sessions` (`router.ts:83-100`).
+- `/workspaces…` → `matchWorkspaceRoute` (`route-workspaces.ts`): list/create,
+  `/workspaces/:id`, `/workspaces/:id/sessions`, and the MCP provisioning sub-routes
+  `/workspaces/:id/mcp` (GET list · POST install), `…/mcp/sync`,
+  `…/mcp/:provider/sync`, and `…/mcp/:provider` (DELETE).
 - `/sessions`, `/sessions/:id` (`router.ts:102-117`).
 - `/sessions/:id/<resource>[/<rest>]` → `routeSubpath` (`router.ts:133`), a
   `switch` over the sub-resource: `messages`, `abort`, `permission-mode`,
@@ -158,11 +161,19 @@ Response helpers live in `src/station/respond.ts`: `json`, `errorJson`
   configured host/port.
 
 ### workspaces.ts — first-class workspaces
-Register folders and manage their sessions: `list`, `create` (requires a `path`),
+Register folders and manage their sessions: `list`, `create` (mints a managed folder
+under `workspaceRoot` when no `path` is given),
 `get` (includes the session list), `destroy` (`?sessions=true` cascades a destroy
 of member sessions), `listSessions`, and `createSession` (delegates to
 `createSessionResponse` with `workspaceId` injected). 404s are uniform via
 `notFound` (`workspaces.ts:82`).
+
+### mcp.ts — MCP provisioning (code-as-tools)
+Workspace-scoped install/list/sync/remove of external MCP providers, delegating to the
+`src/mcpgen` engine against the workspace's folder: `add` (introspect → generate; 201 +
+diff), `list` (providers from the manifest, tokens redacted), `syncAll` / `syncOne`
+(re-introspect + diff), `remove` (204). The tool lister is injectable so tests provision
+without the network. Dispatch lives in `route-workspaces.ts`.
 
 ### state.ts — read-only queries
 All use `manager.getOrRehydrate` and read through `session.peekStore()` (no model

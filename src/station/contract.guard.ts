@@ -26,6 +26,10 @@ const _assertions: [
   Equal<C.CreateWorkspaceInput, T.CreateWorkspaceInput>,
   Equal<C.CreateSessionInput, T.CreateSessionInput>,
   Equal<C.SessionDto, T.SessionDto>,
-] = [true, true, true, true, true, true, true, true, true, true];
+  Equal<C.McpIdentityInput, T.McpIdentityInput>,
+  Equal<C.ProvisionMcpInput, T.ProvisionMcpInput>,
+  Equal<C.McpSyncDiff, T.McpSyncDiff>,
+  Equal<C.McpProviderDto, T.McpProviderDto>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true];
 
 void _assertions;
