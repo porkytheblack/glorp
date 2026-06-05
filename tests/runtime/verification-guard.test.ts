@@ -133,15 +133,31 @@ describe("withVerificationEnforcement", () => {
     expect((inner as any)._calls).toHaveLength(2);
     const retryMessages = (inner as any)._calls[1] as Message[];
     const lastMsg = retryMessages.at(-1);
-    expect(lastMsg?.text).toContain("document/artifact deliverable");
+    expect(lastMsg?.text).toContain("Document / report");
     expect(lastMsg?.text).toContain("reviewer");
     expect(lastMsg?.text).not.toContain("Run the test suite");
   });
 
-  test("uses code guidance when any pending file is source", async () => {
+  test("uses web guidance when pending work is a website", async () => {
+    const tracker = new VerificationTracker();
+    tracker.recordMutation("site/index.html");
+    const inner = mockModel({ text: "The website is ready." });
+    const guarded = withVerificationEnforcement(inner, tracker);
+    await guarded.prompt(
+      { messages: [], system: "" } as any, async () => {}, undefined,
+    );
+    expect((inner as any)._calls).toHaveLength(2);
+    const lastMsg = ((inner as any)._calls[1] as Message[]).at(-1);
+    expect(lastMsg?.text).toContain("Web / UI");
+    expect(lastMsg?.text).toContain("playwright");
+    expect(lastMsg?.text).not.toContain("Run the test suite");
+  });
+
+  test("composes guidance for every pending category at once", async () => {
     const tracker = new VerificationTracker();
     tracker.recordMutation("uploads/report.docx");
     tracker.recordMutation("src/app.ts");
+    tracker.recordMutation("site/index.html");
     const inner = mockModel({ text: "The work is complete." });
     const guarded = withVerificationEnforcement(inner, tracker);
     await guarded.prompt(
@@ -149,7 +165,9 @@ describe("withVerificationEnforcement", () => {
     );
     expect((inner as any)._calls).toHaveLength(2);
     const lastMsg = ((inner as any)._calls[1] as Message[]).at(-1);
-    expect(lastMsg?.text).toContain("Run the test suite");
+    expect(lastMsg?.text).toContain("Run the test suite"); // code
+    expect(lastMsg?.text).toContain("Web / UI");           // web
+    expect(lastMsg?.text).toContain("Document / report");  // document
   });
 
   test("preserves model name", () => {

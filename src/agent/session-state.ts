@@ -2,6 +2,7 @@ import type { InboxItem, Message, Task } from "glove-core/core";
 import type { PlanDocument } from "../shared/events.ts";
 import type { OriginalRequest } from "./store-snapshot.ts";
 import type { VerificationStatus } from "./runtime/verification-tracker.ts";
+import { renderPendingBlocks } from "./runtime/verification-categories.ts";
 
 export interface SessionState {
   plan: PlanDocument | null;
@@ -110,31 +111,9 @@ function buildSessionStateMessage(state: SessionState): Message | null {
 function renderVerification(status: VerificationStatus | null | undefined): string {
   if (!status) return "";
   const failed = status.failedVerifications ?? [];
-  const docs = status.pendingDocs ?? [];
-  const allDocs = status.pendingFiles.length > 0 && docs.length === status.pendingFiles.length;
   const blocks: string[] = [];
   if (status.pendingFiles.length > 0) {
-    const header = allDocs
-      ? "Unvalidated deliverables (re-read the artifact and check it against the request before claiming completion):"
-      : "Unverified mutations (run a test/build/typecheck before claiming completion):";
-    const lines = [header];
-    for (const file of status.pendingFiles.slice(0, 20)) lines.push(`- ${file}`);
-    if (status.pendingFiles.length > 20) {
-      lines.push(`- ...and ${status.pendingFiles.length - 20} more`);
-    }
-    if (allDocs) {
-      lines.push(
-        "These are document/artifact deliverables — there is no typecheck/test for them.",
-        "Validate by re-reading the file and judging it against concrete criteria",
-        "(completeness, coherence, no placeholders, clean formatting, internal consistency),",
-        "running any declared validator, and for substantial work an independent reviewer pass.",
-      );
-    } else if (status.lastVerificationKind) {
-      lines.push(`Last verification observed: ${status.lastVerificationKind} — but it predates the changes above.`);
-    } else {
-      lines.push("No verification command has run in this session yet.");
-    }
-    blocks.push(lines.join("\n"));
+    blocks.push(renderPendingBlocks(status));
   }
   if (failed.length > 0) {
     const lines = [

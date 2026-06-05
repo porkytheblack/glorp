@@ -1,24 +1,23 @@
 /**
- * Pure pattern helpers for the verification tracker. Extracted so the
- * tracker stays focused on state transitions and to keep both files under
- * the project's readability ceiling.
+ * Pure pattern helpers for the verification tracker.
  *
- * Two modalities are recognised:
- *  - CODE work, verified by running a toolchain command (test/typecheck/
- *    lint/build). See VERIFICATION_PATTERNS.
- *  - DOCUMENT/artifact deliverables (.docx, .pptx, .pdf, …), which have no
- *    universal "run the tests" command. Those are verified by re-reading the
- *    artifact, running a declared validator, or handing it to an independent
- *    evaluator/reviewer. See isDocumentPath.
+ * The tracker is "category aware" (see verification-categories.ts): every
+ * deliverable belongs to a category, and a category is satisfied by one or
+ * more *clear signals*. The signals that come from a shell command are
+ * derived here:
+ *
+ *  - "command"  — a code toolchain run (test / typecheck / lint / build)
+ *  - "validator"— a declared artifact validator (e.g. office validate.py)
+ *  - "browser"  — driving a real browser (playwright / puppeteer / cypress)
+ *
+ * The remaining signals ("reread", "reviewer") come from non-bash tools and
+ * are derived in the tracker itself.
  */
 
-/**
- * Patterns that count as "the agent ran a code verification command."
- * Conservative on purpose: better to miss a real verification (forcing the
- * agent to be explicit) than to mark an unrelated command as verification.
- */
-export const VERIFICATION_PATTERNS: ReadonlyArray<RegExp> = [
-  // Test runners
+export type ClearSignal = "command" | "validator" | "browser" | "reread" | "reviewer";
+
+/** Code toolchain commands: test / typecheck / lint / build. */
+const TOOLCHAIN_PATTERNS: ReadonlyArray<RegExp> = [
   /\b(bun|npm|pnpm|yarn|deno)(\s+run)?\s+test\b/,
   /\bbun\s+test\b/,
   /\bnpx\s+vitest\b/,
@@ -31,7 +30,6 @@ export const VERIFICATION_PATTERNS: ReadonlyArray<RegExp> = [
   /\bcargo\s+test\b/,
   /\brspec\b/,
   /\bphpunit\b/,
-  // Typecheckers
   /\b(bunx|npx|pnpx|yarn(\s+dlx)?)\s+tsc\b/,
   /\btsc\b(?!-)/, // bare `tsc` but not `tsconfig.json`
   /\bgo\s+vet\b/,
@@ -39,31 +37,41 @@ export const VERIFICATION_PATTERNS: ReadonlyArray<RegExp> = [
   /\bcargo\s+clippy\b/,
   /\bmypy\b/,
   /\bpyright\b/,
-  // Linters / formatters (formatters check that nothing changed)
   /\b(bun|npm|pnpm|yarn)\s+(run\s+)?lint\b/,
   /\beslint\b/,
   /\bruff(\s+check)?\b/,
   /\bbiome\s+check\b/,
   /\brubocop\b/,
   /\bgolangci-lint\b/,
-  // Build
   /\b(bun|npm|pnpm|yarn)\s+(run\s+)?build\b/,
   /\bcargo\s+build\b/,
   /\bgo\s+build\b/,
-  // Skill-declared validators that crop up in this codebase
-  /scripts\/office\/validate\.py\b/,
-  /scripts\/accept_changes\.py\b/,
 ];
 
-/**
- * Extensions that mark a file as a document/artifact deliverable rather
- * than source code. These have no toolchain "test" — they are checked by
- * re-reading, a declared validator, or an independent reviewer pass.
- */
-const DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set([
-  ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls",
-  ".pdf", ".odt", ".odp", ".ods", ".rtf", ".epub", ".csv",
-]);
+/** Declared artifact validators (documents, slide decks, data). */
+const VALIDATOR_PATTERNS: ReadonlyArray<RegExp> = [
+  /scripts\/office\/validate\.py\b/,
+  /scripts\/accept_changes\.py\b/,
+  /\bvalidate\.py\b/,
+  /\bjsonschema\b/,
+  /\bcsvlint\b/,
+];
+
+/** Commands that drive a real browser to exercise a web deliverable. */
+const BROWSER_PATTERNS: ReadonlyArray<RegExp> = [
+  /\bplaywright\b/,
+  /\bpuppeteer\b/,
+  /\bcypress\b/,
+  /\bselenium\b/,
+  /\bwebdriver\b/,
+  /\blighthouse\b/,
+];
+
+const SIGNAL_GROUPS: ReadonlyArray<readonly [ClearSignal, ReadonlyArray<RegExp>]> = [
+  ["command", TOOLCHAIN_PATTERNS],
+  ["validator", VALIDATOR_PATTERNS],
+  ["browser", BROWSER_PATTERNS],
+];
 
 /** Tool calls whose successful completion records a file mutation. */
 export const MUTATING_TOOLS: ReadonlySet<string> = new Set(["write", "edit", "apply_patch"]);
@@ -71,28 +79,37 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set(["write", "edit", "ap
 /** Subagent roles that count as an independent evaluation of a deliverable. */
 const EVALUATOR_ROLES: ReadonlySet<string> = new Set(["reviewer", "evaluator"]);
 
-/** Does this bash command look like a test/build/typecheck/lint run? */
-export function looksLikeVerification(command: string): boolean {
-  for (const pattern of VERIFICATION_PATTERNS) {
-    if (pattern.test(command)) return true;
+/** Which clear signals a shell command produces (may be several, or none). */
+export function commandSignals(command: string): ClearSignal[] {
+  const out: ClearSignal[] = [];
+  for (const [signal, patterns] of SIGNAL_GROUPS) {
+    if (patterns.some((p) => p.test(command))) out.push(signal);
   }
-  return false;
+  return out;
 }
 
-/** Is this path a document/artifact deliverable (vs. source code)? */
-export function isDocumentPath(filePath: string): boolean {
-  const dot = filePath.lastIndexOf(".");
-  if (dot < 0) return false;
-  return DOCUMENT_EXTENSIONS.has(filePath.slice(dot).toLowerCase());
+/** Does this bash command look like any kind of objective check? */
+export function looksLikeVerification(command: string): boolean {
+  return commandSignals(command).length > 0;
 }
 
 /** Label for the matched verification pattern, or null. */
 export function matchedPatternFor(command: string): string | null {
-  for (const pattern of VERIFICATION_PATTERNS) {
-    const match = command.match(pattern);
-    if (match) return match[0];
+  for (const [, patterns] of SIGNAL_GROUPS) {
+    for (const pattern of patterns) {
+      const match = command.match(pattern);
+      if (match) return match[0];
+    }
   }
   return null;
+}
+
+/** Lowercased file extension including the dot (e.g. ".docx"), or "". */
+export function fileExt(filePath: string): string {
+  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  const name = slash >= 0 ? filePath.slice(slash + 1) : filePath;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot).toLowerCase() : "";
 }
 
 /** Read a file path from a tool input shape, trying common key names. */

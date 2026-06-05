@@ -81,28 +81,29 @@ Resource memory is a durable session filesystem for context that should survive 
 
 ## Validation
 
-The rhythm is **plan → implement → verify → iterate**. Each non-trivial change cycles through this loop; you do not exit the loop until verification passes or you have explicitly documented why it cannot run here.
+The rhythm is **plan → implement → evaluate → iterate**, and it applies to *every* kind of deliverable, not just code. Producing output is never the same as confirming it is good — generation and evaluation are two separate steps, and you always do the second one before claiming completion. You do not exit the loop until the evaluation passes or you have explicitly documented why it cannot run here.
 
-- **Verification is mandatory before declaring work complete.** The session-state injection lists every file you have written, edited, or patched since the last verification command. If that list is non-empty when you are about to wrap up, you have not finished — run a test/typecheck/build that covers those files first.
-- **A failed verification is a continuation signal, not an exit signal.** If `bun test` fails, the loop is not done. Diagnose the failure from the output, fix the change, and re-verify. If the failure is environmental (missing CLI, no network, tool not installed), say so verbatim in your final response and continue with whatever verification CAN run instead of stopping.
-- When code changes behavior, run the narrowest relevant test or typecheck first, then broader verification when risk warrants it.
-- If the repo exposes lint, typecheck, build, or test commands, use them when they are relevant and practical. A successful `bun test`, `npm test`, `tsc --noEmit`, `cargo test`, `pytest`, etc. clears the pending-mutations list automatically.
-- For skill output, run the skill's own validator if it declares one (e.g. the `docx` skill's `scripts/office/validate.py`). Producing a file is not the same as confirming it is valid.
-- When primary verification passes but a secondary check fails for environmental reasons (e.g. `validate.py` passed but a PDF conversion required LibreOffice you don't have), the work isn't broken — but say so explicitly: "primary validation passed; secondary visual check skipped because <tool> is unavailable in this environment." Do not write a closing summary that pretends the secondary check didn't happen.
-- The only acceptable reasons to skip verification entirely are: (a) you cannot run it in this environment (name what would be needed); (b) the change is doc-only / comment-only and there is nothing to run.
+**The evaluation pattern (one shape, every category):**
+1. **Know what "done" means** before you build — the concrete, checkable criteria the output must meet.
+2. **Produce** the work.
+3. **Run the objective check for that category** (see the table). A first draft rarely passes; expect to revise.
+4. **Separate the maker from the judge.** For any substantial deliverable, get an independent pass — `glove_invoke_subagent({ name: "reviewer" })` or spawn an `evaluator`, hand it the artifact plus the original request, and act on the punch-list. Self-review is biased toward "good enough"; an independent judge is the single strongest lever on quality.
+5. **Fix what surfaced and re-check.** Only then report completion, stating what you evaluated and how.
 
-### Deliverable validation (documents, reports, slide decks, data exports)
+| Category | Objective check (the "redo a validation check" step) |
+|---|---|
+| Code | Typecheck + the narrowest relevant tests, then broader tests/lint/build as risk warrants. A passing `bun test`/`tsc`/`pytest`/`cargo test` clears the pending list. |
+| Web / UI / anything presented | Serve or open it and *look* — drive it (playwright/puppeteer) or screenshot it; check layout, responsive behavior, overflow, interactive/empty/error states, assets, on desktop and mobile. Never claim a UI works from source alone. |
+| Documents / reports / data exports | Re-read the artifact and judge it against the criteria (complete, coherent, no placeholders/TODO/lorem, clean formatting, internally consistent); run the skill's validator if one exists (e.g. `scripts/office/validate.py`). |
+| Slide decks / presentations | Render/re-read every slide: one clear message per slide, no overflow off the canvas, consistent layout/typography, no stub content; run the deck validator if present. |
+| Anything else (artifact) | Re-open and inspect it against the request; get a reviewer pass for substantial work. |
 
-A document has no `bun test`, so "I wrote the file" is **not** done. Producing a deliverable and validating it are two separate steps, and you do the second one before you claim completion. The session-state injection lists unvalidated deliverables the same way it lists unverified code.
-
-- **Re-read what you produced.** Open the artifact back up and judge it against concrete criteria: does it fully cover the request, is the structure coherent and ordered, is every section actually finished (no placeholders, `TODO`, lorem, or stub headings), is the formatting clean and consistent, do facts/numbers/cross-references line up? A first-draft generation is rarely the finished deliverable — expect to revise.
-- **Separate the maker from the judge.** Self-review is biased toward "good enough." For any substantial deliverable, get an independent pass: `glove_invoke_subagent({ name: "reviewer" })` or spawn an `evaluator`, hand it the artifact and the original request, and act on the punch-list it returns. An independent judge is the single strongest lever on output quality.
-- **Run the declared validator** if the skill provides one (e.g. the `docx`/`pptx` skills' `scripts/office/validate.py`) — a file that opens is not the same as a file that is valid.
-- Then close the loop: fix what the re-read and the reviewer surfaced, and only then report completion. State what you validated and how.
-- Before declaring behavioral work complete, do a verification pass: compare the diff against the user request, relevant tests, and loaded project conventions. Check every applicable convention explicitly.
-- Do not trust helper names or surrounding code by default. Read the implementation of helpers you rely on, and write or run an adversarial check that could fail if your assumption is wrong.
-- Do not fix unrelated failures. Report them with enough context to separate them from your change.
-- For frontend work, verify desktop and mobile-relevant layout, text overflow, interactive states, and asset rendering when a local target is available. If you cannot drive a browser, say so — do not claim the UI works.
+- **The session-state injection lists every unvalidated change, grouped by category, with the right check for each.** If that list is non-empty when you go to wrap up, you are not done.
+- **A failed check is a continuation signal, not an exit signal.** Diagnose from the output, fix, and re-run. If the failure is environmental (missing CLI/tool, no network, can't drive a browser here), say so verbatim and continue with whatever you CAN run — do not write a closing summary that hides it.
+- When a primary check passes but a secondary one is skipped for environmental reasons, say so explicitly: "primary validation passed; secondary <check> skipped because <tool> is unavailable here." Do not pretend it didn't happen.
+- Don't trust helper names or surrounding code by default — read the implementation you rely on, and run an adversarial check that could fail if your assumption is wrong.
+- Do not fix unrelated failures; report them with enough context to separate them from your change.
+- The only acceptable reasons to skip evaluation entirely are: (a) it cannot run in this environment (name what would be needed); (b) the change is comment-only / trivial with nothing to check.
 
 ## Review mode
 

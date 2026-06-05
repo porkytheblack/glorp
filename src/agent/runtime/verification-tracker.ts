@@ -1,17 +1,20 @@
 import type { ToolResultData } from "glove-core/core";
 import {
+  type ClearSignal,
   MUTATING_TOOLS,
+  commandSignals,
   firstLine,
   firstToken,
-  isDocumentPath,
   looksLikeVerification,
   matchedPatternFor,
   readCommand,
   readEvaluatorRole,
   readPath,
 } from "./verification-patterns.ts";
+import { classifyPath, groupByCategory } from "./verification-categories.ts";
 
-export { looksLikeVerification, isDocumentPath } from "./verification-patterns.ts";
+export { looksLikeVerification } from "./verification-patterns.ts";
+export { classifyPath } from "./verification-categories.ts";
 
 export interface FailedVerification {
   /** Pattern label (e.g. "bun test", "validate.py") or raw command head. */
@@ -23,30 +26,23 @@ export interface FailedVerification {
   at: number;
 }
 
+/** Signals from objective checks clear the failed-verification ring. */
+const OBJECTIVE_SIGNALS: ReadonlySet<ClearSignal> = new Set(["command", "validator", "browser"]);
+
 const FAILED_VERIFICATION_BUFFER = 5;
 
 /**
- * Stateful tracker for "what the agent changed" vs "what the agent has
- * checked since." Reset is implicit: a successful verification clears the
- * pending list, since at that point the agent has seen whatever the
- * verification said about its changes.
- *
- * Two modalities are tracked together. CODE mutations clear only when a
- * toolchain command (test/typecheck/lint/build) passes. DOCUMENT/artifact
- * deliverables (.docx, .pptx, …) have no universal test, so they also clear
- * when the agent re-reads the artifact or hands it to an independent
- * reviewer/evaluator — the document analogue of "redo a validation check."
- *
- * Failures are a different story. A test that errors is NOT a pass — the
- * agent should iterate before declaring the work complete. We keep a small
- * ring of recent failed verifications so the session-state inject can
- * surface them. A subsequent successful verification clears the ring; a new
- * user turn also clears it (the user has moved on).
+ * Stateful tracker for "what the agent changed" vs "what it validated since."
+ * Category aware: every mutated file is classified (code / web / document /
+ * presentation / artifact — see verification-categories.ts) and clears only
+ * when an action it accepts as evaluation occurs (tests clear code, a browser
+ * drive clears web, re-read or an independent reviewer clears docs/decks/
+ * artifacts). One pattern across all deliverables. Failures are tracked apart:
+ * a check that errors is not a pass, so a bounded ring surfaces recent
+ * failures until a passing objective check or a new user turn clears it.
  */
 export class VerificationTracker {
   private mutations = new Map<string, number>();
-  /** Subset of `mutations` whose paths are document/artifact deliverables. */
-  private docs = new Set<string>();
   private lastVerifiedAt: number | null = null;
   private lastVerificationKind: string | null = null;
   private failedVerifications: FailedVerification[] = [];
@@ -54,38 +50,53 @@ export class VerificationTracker {
   /** Mark a file as modified by a successful write/edit/apply_patch. */
   recordMutation(filePath: string, at: number = Date.now()): void {
     this.mutations.set(filePath, at);
-    if (isDocumentPath(filePath)) this.docs.add(filePath);
-    else this.docs.delete(filePath);
   }
 
   /**
-   * Mark that the agent ran a verification command and it passed. Clears
-   * pending mutations AND the failed-verification ring — the agent worked
-   * through whatever was broken.
+   * Record a passing objective check (toolchain command, declared validator,
+   * or browser drive). Clears pending files whose category accepts any of the
+   * given signals, plus the failed-verification ring.
    */
-  recordVerification(kind: string, at: number = Date.now()): void {
-    this.lastVerifiedAt = at;
-    this.lastVerificationKind = kind;
-    this.mutations.clear();
-    this.docs.clear();
+  recordPassingCheck(signals: ClearSignal[], kind: string, at: number = Date.now()): void {
+    this.clearBySignals(signals, at, kind);
     this.failedVerifications = [];
   }
 
   /**
-   * Mark that a document deliverable was validated by re-reading it or by an
-   * independent reviewer/evaluator pass. Clears only document mutations —
-   * code still needs a real toolchain check. When `filePath` is given, only
-   * that artifact clears; otherwise every pending document clears (a reviewer
-   * judged the whole set).
+   * Back-compat shorthand: a passing code toolchain command. Equivalent to
+   * recordPassingCheck(["command"], kind).
    */
-  recordDocumentReview(filePath?: string, kind = "document review", at: number = Date.now()): void {
-    if (filePath) {
-      if (!this.docs.has(filePath)) return;
-      this.docs.delete(filePath);
-      this.mutations.delete(filePath);
-    } else {
-      for (const path of this.docs) this.mutations.delete(path);
-      this.docs.clear();
+  recordVerification(kind: string, at: number = Date.now()): void {
+    this.recordPassingCheck(["command"], kind, at);
+  }
+
+  /**
+   * Record an independent reviewer/evaluator pass. Clears every pending file
+   * whose category accepts a reviewer (documents, decks, web, artifacts) —
+   * but NOT code, which still needs an objective toolchain check, and NOT the
+   * failed-verification ring.
+   */
+  recordReviewPass(kind = "reviewer review", at: number = Date.now()): void {
+    this.clearBySignals(["reviewer"], at, kind);
+  }
+
+  /**
+   * Record that the agent re-read a produced artifact (self-review). Clears
+   * just that file, and only if its category accepts a re-read.
+   */
+  recordRereadPass(filePath: string, at: number = Date.now()): void {
+    if (!this.mutations.has(filePath)) return;
+    if (!classifyPath(filePath).clearedBy.has("reread")) return;
+    this.mutations.delete(filePath);
+    this.lastVerifiedAt = at;
+    this.lastVerificationKind = "re-read artifact";
+  }
+
+  /** Remove every pending file whose category accepts one of `signals`. */
+  private clearBySignals(signals: ClearSignal[], at: number, kind: string): void {
+    for (const path of [...this.mutations.keys()]) {
+      const cat = classifyPath(path);
+      if (signals.some((s) => cat.clearedBy.has(s))) this.mutations.delete(path);
     }
     this.lastVerifiedAt = at;
     this.lastVerificationKind = kind;
@@ -102,10 +113,7 @@ export class VerificationTracker {
     }
   }
 
-  /**
-   * Called when a new user message arrives — implicit signal that the
-   * user has moved on from whatever the agent was deliberating about.
-   */
+  /** New user message — the user has moved on from prior deliberation. */
   onUserTurn(): void {
     this.failedVerifications = [];
   }
@@ -113,7 +121,6 @@ export class VerificationTracker {
   /** Wipe all state — used when starting a fresh session. */
   reset(): void {
     this.mutations.clear();
-    this.docs.clear();
     this.lastVerifiedAt = null;
     this.lastVerificationKind = null;
     this.failedVerifications = [];
@@ -121,9 +128,10 @@ export class VerificationTracker {
 
   /** Inspect tracker state for session-state injection / UI. */
   status(): VerificationStatus {
+    const pendingFiles = [...this.mutations.keys()].sort();
     return {
-      pendingFiles: [...this.mutations.keys()].sort(),
-      pendingDocs: [...this.docs].sort(),
+      pendingFiles,
+      pendingByCategory: groupByCategory(pendingFiles),
       lastVerifiedAt: this.lastVerifiedAt,
       lastVerificationKind: this.lastVerificationKind,
       failedVerifications: [...this.failedVerifications],
@@ -133,11 +141,7 @@ export class VerificationTracker {
   /**
    * Feed a tool result through the tracker. Returns true when the call was
    * acted on. Designed to be called from the subscriber's `tool_use_result`
-   * branch.
-   *
-   * Verification-pattern bash commands are recorded whether they pass or
-   * fail. Re-reading a pending document, or invoking an evaluator/reviewer
-   * subagent, counts as a document validation pass.
+   * branch. See the class doc for the clearing model.
    */
   observe(toolName: string, input: unknown, result: ToolResultData): boolean {
     if (toolName === "bash") {
@@ -145,7 +149,7 @@ export class VerificationTracker {
       if (command && looksLikeVerification(command)) {
         const kind = matchedPatternFor(command) ?? firstToken(command);
         if (result.status === "success") {
-          this.recordVerification(kind);
+          this.recordPassingCheck(commandSignals(command), kind);
         } else {
           this.recordFailedVerification(
             kind,
@@ -164,20 +168,20 @@ export class VerificationTracker {
         return true;
       }
     }
-    // Re-reading a document the agent already produced is a self-review pass.
+    // Re-reading a produced artifact is a self-review pass.
     if (toolName === "read") {
       const filePath = readPath(input);
-      if (filePath && this.docs.has(filePath)) {
-        this.recordDocumentReview(filePath, "re-read artifact");
+      if (filePath && this.mutations.has(filePath)) {
+        this.recordRereadPass(filePath);
         return true;
       }
     }
-    // Handing the deliverable to an independent reviewer/evaluator clears the
-    // whole pending-document set — the article's generator/evaluator split.
+    // Handing work to an independent reviewer/evaluator clears review-eligible
+    // categories — the article's generator/evaluator split.
     if (toolName === "glove_invoke_subagent" || toolName === "spawn_agent") {
       const role = readEvaluatorRole(input);
-      if (role && this.docs.size > 0) {
-        this.recordDocumentReview(undefined, `${role} review`);
+      if (role) {
+        this.recordReviewPass(`${role} review`);
         return true;
       }
     }
@@ -187,8 +191,8 @@ export class VerificationTracker {
 
 export interface VerificationStatus {
   pendingFiles: string[];
-  /** Subset of pendingFiles that are document/artifact deliverables. */
-  pendingDocs?: string[];
+  /** Pending file paths grouped by deliverable category id. */
+  pendingByCategory?: Record<string, string[]>;
   lastVerifiedAt: number | null;
   lastVerificationKind: string | null;
   /** Optional for back-compat with status objects produced before this field existed. */
