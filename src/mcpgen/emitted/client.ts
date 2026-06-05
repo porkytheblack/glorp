@@ -4,8 +4,8 @@
  * Dependency-free: uses only node: builtins + fetch, so the workspace needs
  * no install step. The per-identity bearer token is read from the secret
  * keyfile *at call time* — it never enters process.env, and only the tool
- * result is returned to the caller. Generated file: do not edit by hand;
- * `glorp mcp sync` overwrites it.
+ * result is returned to the caller. Generated file: do not edit by hand — it
+ * is regenerated on MCP sync.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -96,7 +96,9 @@ async function initSession(url: string, token: string): Promise<string | null> {
   });
   if (json?.error) throw new Error(`MCP initialize: ${json.error.message ?? "error"}`);
   const sid = res.headers.get("mcp-session-id");
-  await post(url, token, sid, "notifications/initialized").catch(() => {});
+  await post(url, token, sid, "notifications/initialized").catch((err) => {
+    console.error(`[mcp] notifications/initialized failed for ${url}:`, err);
+  });
   return sid;
 }
 

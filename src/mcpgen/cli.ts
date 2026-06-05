@@ -17,14 +17,25 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
+/** A flag's value, or undefined when missing, empty, or itself another `--flag`. */
+function valueAt(args: string[], i: number): string | undefined {
+  const v = args[i];
+  return v && !v.startsWith("--") ? v : undefined;
+}
+
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
-  return i >= 0 ? args[i + 1] : undefined;
+  return i >= 0 ? valueAt(args, i + 1) : undefined;
 }
 
 function flags(args: string[], name: string): string[] {
   const out: string[] = [];
-  for (let i = 0; i < args.length; i++) if (args[i] === `--${name}` && args[i + 1]) out.push(args[i + 1]!);
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === `--${name}`) {
+      const v = valueAt(args, i + 1);
+      if (v) out.push(v);
+    }
+  }
   return out;
 }
 

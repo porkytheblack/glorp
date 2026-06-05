@@ -11,7 +11,7 @@ thereafter the backend only sends prompts.
 
 ## What gets generated
 
-```
+```text
 <workspace>/
   .claude/skills/mcp/SKILL.md   # teaches the agent the convention (auto-loaded by glorp)
   mcp/

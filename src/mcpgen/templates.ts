@@ -32,7 +32,7 @@ export function renderToolFile(provider: string, tool: ToolDef): string {
   const fn = exportName(tool.name);
   const doc = tool.description ? `\n * ${commentSafe(tool.description)}` : "";
   return [
-    `// Generated from MCP tool "${commentSafe(tool.name)}". Do not edit — \`glorp mcp sync\` overwrites this.`,
+    `// Generated from MCP tool "${commentSafe(tool.name)}". Do not edit — regenerated on MCP sync.`,
     `import { callTool } from "../_runtime/client.ts";`,
     ``,
     inputInterface(iface, tool.inputSchema),
