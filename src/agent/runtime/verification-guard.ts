@@ -10,26 +10,13 @@
 
 import type { Message, ModelAdapter, SubscriberAdapter } from "glove-core/core";
 import type { VerificationTracker } from "./verification-tracker.ts";
+import { enforcementPrompt, groupByCategory } from "./verification-categories.ts";
 import { modelResultHasToolCall, visibleMessageText } from "./model-guards.ts";
 import { isAgentSender } from "./intent-detect.ts";
 
-const VERIFY_FIRST_PROMPT = [
-  "[internal verification enforcement]",
-  "You are about to declare the work complete, but there are unverified",
-  "file mutations or recent failed verifications. Before claiming completion:",
-  "",
-  "1. Run the typecheck command (e.g. `tsc --noEmit` or equivalent)",
-  "2. Run the test suite (e.g. `bun test` or equivalent)",
-  "3. Run the linter if configured",
-  "",
-  "Only declare completion after all verification commands pass.",
-  "If a verification fails, fix the issue and re-run.",
-  "If verification genuinely cannot run, explain why explicitly.",
-].join("\n");
-
 /** Keywords/phrases that signal the agent believes work is done. */
 const COMPLETION_SIGNALS = [
-  /\b(?:all|everything|the work|implementation|task|changes?)\s+(?:is|are)\s+(?:complete|done|finished|ready)\b/i,
+  /\b(?:all|everything|the work|implementation|task|changes?|document|deliverable|report|file|artifact|deck|slides?|presentation|draft|website|site|page|app|ui|design)\s+(?:is|are)\s+(?:complete|done|finished|ready)\b/i,
   /\bi(?:'ve| have)\s+(?:completed|finished|done|implemented)\b/i,
   /\bthat(?:'s| is)\s+(?:all|everything|it)\b.*(?:done|complete|ready|finished)/i,
   /\bwork is (?:now )?done\b/i,
@@ -75,13 +62,16 @@ export function withVerificationEnforcement(
 
       if (!looksLikeCompletion(result.messages)) return result;
 
-      // Agent claims completion but hasn't verified — force verification
+      // Agent claims completion but hasn't validated — force the evaluation
+      // appropriate to whatever categories of work are pending.
+      const byCategory = status.pendingByCategory ?? groupByCategory(status.pendingFiles);
+      const prompt = enforcementPrompt(byCategory, hasFailed);
       return model.prompt({
         ...request,
         messages: [
           ...request.messages,
           ...result.messages,
-          { sender: "user", text: VERIFY_FIRST_PROMPT, is_skill_injection: true } as Message,
+          { sender: "user", text: prompt, is_skill_injection: true } as Message,
         ],
       }, notify, signal);
     },

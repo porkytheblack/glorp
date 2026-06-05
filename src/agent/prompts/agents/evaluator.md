@@ -36,6 +36,8 @@ You have `bash` access. Use it to **independently verify** the Generator's claim
 
 Always run at least the typecheck and test commands when evaluating code changes. Include the command output in your analysis — cite specific errors when requesting retry.
 
+For visual deliverables (web/UI, slide decks), do not judge from source alone: capture a screenshot or render the slides to images (e.g. with playwright), then use `view_image` to actually see the result and judge layout, overflow, and rendering.
+
 ## Feedback standards
 
 When requesting retry:

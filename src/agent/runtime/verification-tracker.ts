@@ -1,60 +1,20 @@
 import type { ToolResultData } from "glove-core/core";
+import {
+  type ClearSignal,
+  MUTATING_TOOLS,
+  commandSignals,
+  firstLine,
+  firstToken,
+  looksLikeVerification,
+  matchedPatternFor,
+  readCommand,
+  readEvaluatorRole,
+  readPath,
+} from "./verification-patterns.ts";
+import { classifyPath, groupByCategory } from "./verification-categories.ts";
 
-/**
- * Patterns that count as "the agent ran a verification command."
- *
- * Matched against the raw `command` string of a successful `bash` tool
- * call. Conservative on purpose: we'd rather miss a real verification
- * (forcing the agent to be explicit) than mark an unrelated command as
- * verification and let unverified work pass through.
- *
- * Add new patterns here as new toolchains show up. The pattern must
- * appear somewhere in the command — anchoring is intentional only
- * where the command would be ambiguous otherwise.
- */
-const VERIFICATION_PATTERNS: ReadonlyArray<RegExp> = [
-  // Test runners
-  /\b(bun|npm|pnpm|yarn|deno)(\s+run)?\s+test\b/,
-  /\bbun\s+test\b/,
-  /\bnpx\s+vitest\b/,
-  /\bvitest(\s+run)?\b/,
-  /\bjest\b/,
-  /\bpytest\b/,
-  /\bpython\s+-m\s+pytest\b/,
-  /\bunittest\b/,
-  /\bgo\s+test\b/,
-  /\bcargo\s+test\b/,
-  /\brspec\b/,
-  /\bphpunit\b/,
-  // Typecheckers
-  /\b(bunx|npx|pnpx|yarn(\s+dlx)?)\s+tsc\b/,
-  /\btsc\b(?!-)/, // bare `tsc` but not `tsconfig.json`
-  /\bgo\s+vet\b/,
-  /\bcargo\s+check\b/,
-  /\bcargo\s+clippy\b/,
-  /\bmypy\b/,
-  /\bpyright\b/,
-  // Linters / formatters (formatters check that nothing changed)
-  /\b(bun|npm|pnpm|yarn)\s+(run\s+)?lint\b/,
-  /\beslint\b/,
-  /\bruff(\s+check)?\b/,
-  /\bbiome\s+check\b/,
-  /\brubocop\b/,
-  /\bgolangci-lint\b/,
-  // Build
-  /\b(bun|npm|pnpm|yarn)\s+(run\s+)?build\b/,
-  /\bcargo\s+build\b/,
-  /\bgo\s+build\b/,
-  // Skill-declared validators that crop up in this codebase
-  /scripts\/office\/validate\.py\b/,
-  /scripts\/accept_changes\.py\b/,
-];
-
-/** Tool calls whose successful completion records a file mutation. */
-const MUTATING_TOOLS = new Set(["write", "edit", "apply_patch"]);
-
-/** Tool calls that count as verification on success. */
-const VERIFICATION_TOOLS = new Set<string>(); // bash handled specially
+export { looksLikeVerification } from "./verification-patterns.ts";
+export { classifyPath } from "./verification-categories.ts";
 
 export interface FailedVerification {
   /** Pattern label (e.g. "bun test", "validate.py") or raw command head. */
@@ -66,21 +26,20 @@ export interface FailedVerification {
   at: number;
 }
 
+/** Signals from objective checks clear the failed-verification ring. */
+const OBJECTIVE_SIGNALS: ReadonlySet<ClearSignal> = new Set(["command", "validator", "browser"]);
+
 const FAILED_VERIFICATION_BUFFER = 5;
 
 /**
- * Stateful tracker for "what the agent changed" vs "what the agent has
- * checked since." Reset is implicit: a successful verification clears the
- * pending list, since at that point the agent has seen whatever the
- * verification said about its changes.
- *
- * Failures are a different story. A test that errors is NOT a pass — the
- * agent should iterate (fix, try an alternative, or document the
- * environmental constraint) before declaring the work complete. We keep a
- * small ring of recent failed verifications so the session-state inject
- * can surface them. A subsequent successful verification clears the ring
- * (the agent worked through it); a new user turn also clears it (the
- * user has moved on).
+ * Stateful tracker for "what the agent changed" vs "what it validated since."
+ * Category aware: every mutated file is classified (code / web / document /
+ * presentation / artifact — see verification-categories.ts) and clears only
+ * when an action it accepts as evaluation occurs (tests clear code, a browser
+ * drive clears web, re-read or an independent reviewer clears docs/decks/
+ * artifacts). One pattern across all deliverables. Failures are tracked apart:
+ * a check that errors is not a pass, so a bounded ring surfaces recent
+ * failures until a passing objective check or a new user turn clears it.
  */
 export class VerificationTracker {
   private mutations = new Map<string, number>();
@@ -94,21 +53,53 @@ export class VerificationTracker {
   }
 
   /**
-   * Mark that the agent ran a verification command and it passed. Clears
-   * pending mutations AND the failed-verification ring — the agent worked
-   * through whatever was broken.
+   * Record a passing objective check (toolchain command, declared validator,
+   * or browser drive). Clears matching pending files plus the failed ring.
    */
+  recordPassingCheck(signals: ClearSignal[], kind: string, at: number = Date.now()): void {
+    this.clearBySignals(signals, at, kind);
+    this.failedVerifications = [];
+  }
+
+  /** Back-compat shorthand: a passing code toolchain command. */
   recordVerification(kind: string, at: number = Date.now()): void {
+    this.recordPassingCheck(["command"], kind, at);
+  }
+
+  /**
+   * Record a non-objective validation pass (reviewer/evaluator, or a visual
+   * look via view_image). Clears category-matching files; never code/the ring.
+   */
+  recordReviewPass(
+    kind = "reviewer review",
+    signals: ClearSignal[] = ["reviewer"],
+    at: number = Date.now(),
+  ): void {
+    this.clearBySignals(signals, at, kind);
+  }
+
+  /** Re-reading a produced artifact (self-review) clears just that file. */
+  recordRereadPass(filePath: string, at: number = Date.now()): void {
+    if (!this.mutations.has(filePath)) return;
+    if (!classifyPath(filePath).clearedBy.has("reread")) return;
+    this.mutations.delete(filePath);
+    this.lastVerifiedAt = at;
+    this.lastVerificationKind = "re-read artifact";
+  }
+
+  /** Remove every pending file whose category accepts one of `signals`. */
+  private clearBySignals(signals: ClearSignal[], at: number, kind: string): void {
+    for (const path of [...this.mutations.keys()]) {
+      const cat = classifyPath(path);
+      if (signals.some((s) => cat.clearedBy.has(s))) this.mutations.delete(path);
+    }
     this.lastVerifiedAt = at;
     this.lastVerificationKind = kind;
-    this.mutations.clear();
-    this.failedVerifications = [];
   }
 
   /**
    * Mark a verification attempt that failed. Pending mutations are NOT
-   * cleared — they still need a passing check. Stored in a bounded ring
-   * so the session state can surface the most recent failures.
+   * cleared — they still need a passing check.
    */
   recordFailedVerification(kind: string, message: string, commandHead: string, at: number = Date.now()): void {
     this.failedVerifications.push({ kind, message, commandHead, at });
@@ -117,10 +108,7 @@ export class VerificationTracker {
     }
   }
 
-  /**
-   * Called when a new user message arrives — implicit signal that the
-   * user has moved on from whatever the agent was deliberating about.
-   */
+  /** New user message — the user has moved on from prior deliberation. */
   onUserTurn(): void {
     this.failedVerifications = [];
   }
@@ -135,8 +123,10 @@ export class VerificationTracker {
 
   /** Inspect tracker state for session-state injection / UI. */
   status(): VerificationStatus {
+    const pendingFiles = [...this.mutations.keys()].sort();
     return {
-      pendingFiles: [...this.mutations.keys()].sort(),
+      pendingFiles,
+      pendingByCategory: groupByCategory(pendingFiles),
       lastVerifiedAt: this.lastVerifiedAt,
       lastVerificationKind: this.lastVerificationKind,
       failedVerifications: [...this.failedVerifications],
@@ -144,13 +134,9 @@ export class VerificationTracker {
   }
 
   /**
-   * Feed a tool result through the tracker. Returns true when the call
-   * was acted on (so callers can log it if useful). Designed to be
-   * called from the subscriber's `tool_use_result` branch.
-   *
-   * Verification-pattern bash commands are recorded whether they pass or
-   * fail — failures land in the failed-verification ring so the agent
-   * has to iterate or explicitly document why it cannot.
+   * Feed a tool result through the tracker. Returns true when the call was
+   * acted on. Designed to be called from the subscriber's `tool_use_result`
+   * branch. See the class doc for the clearing model.
    */
   observe(toolName: string, input: unknown, result: ToolResultData): boolean {
     if (toolName === "bash") {
@@ -158,7 +144,7 @@ export class VerificationTracker {
       if (command && looksLikeVerification(command)) {
         const kind = matchedPatternFor(command) ?? firstToken(command);
         if (result.status === "success") {
-          this.recordVerification(kind);
+          this.recordPassingCheck(commandSignals(command), kind);
         } else {
           this.recordFailedVerification(
             kind,
@@ -177,9 +163,27 @@ export class VerificationTracker {
         return true;
       }
     }
-    if (VERIFICATION_TOOLS.has(toolName)) {
-      this.recordVerification(toolName);
+    // Re-reading a produced artifact is a self-review pass.
+    if (toolName === "read") {
+      const filePath = readPath(input);
+      if (filePath && this.mutations.has(filePath)) {
+        this.recordRereadPass(filePath);
+        return true;
+      }
+    }
+    // Looking at a screenshot/render is the visual check for web & decks.
+    if (toolName === "view_image") {
+      this.recordReviewPass("viewed image", ["visual"]);
       return true;
+    }
+    // Handing work to an independent reviewer/evaluator clears review-eligible
+    // categories — the article's generator/evaluator split.
+    if (toolName === "glove_invoke_subagent" || toolName === "spawn_agent") {
+      const role = readEvaluatorRole(input);
+      if (role) {
+        this.recordReviewPass(`${role} review`);
+        return true;
+      }
     }
     return false;
   }
@@ -187,49 +191,10 @@ export class VerificationTracker {
 
 export interface VerificationStatus {
   pendingFiles: string[];
+  /** Pending file paths grouped by deliverable category id. */
+  pendingByCategory?: Record<string, string[]>;
   lastVerifiedAt: number | null;
   lastVerificationKind: string | null;
   /** Optional for back-compat with status objects produced before this field existed. */
   failedVerifications?: FailedVerification[];
-}
-
-/** Does this bash command look like a test/build/typecheck/lint run? */
-export function looksLikeVerification(command: string): boolean {
-  for (const pattern of VERIFICATION_PATTERNS) {
-    if (pattern.test(command)) return true;
-  }
-  return false;
-}
-
-function matchedPatternFor(command: string): string | null {
-  for (const pattern of VERIFICATION_PATTERNS) {
-    const match = command.match(pattern);
-    if (match) return match[0];
-  }
-  return null;
-}
-
-function readPath(input: unknown): string | null {
-  if (!input || typeof input !== "object") return null;
-  const candidates = ["path", "file_path", "filePath"];
-  for (const key of candidates) {
-    const v = (input as Record<string, unknown>)[key];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
-}
-
-function readCommand(input: unknown): string | null {
-  if (!input || typeof input !== "object") return null;
-  const v = (input as Record<string, unknown>).command;
-  return typeof v === "string" ? v : null;
-}
-
-function firstToken(command: string): string {
-  return command.trim().split(/\s+/)[0] ?? "bash";
-}
-
-function firstLine(command: string): string {
-  const line = command.trim().split("\n")[0] ?? "";
-  return line.length > 200 ? `${line.slice(0, 200)}…` : line;
 }

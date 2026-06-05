@@ -17,6 +17,7 @@ import type { ModelAdapter, SubscriberAdapter } from "glove-core/core";
 import type { ResourceFsAdapter } from "glove-memory";
 import { GlorpStore } from "../agent/store.ts";
 import { createToolRegistry, registerTools } from "../agent/tools/registry.ts";
+import { withImageToolResults } from "../agent/runtime/image-tool-results.ts";
 import { NoopDisplayManager } from "./noop-display.ts";
 import { mountAgentMesh, teardownAgentMesh, type FileMeshAdapter } from "./mesh-setup.ts";
 import { roleDef, rolePrompt } from "./role-registry.ts";
@@ -85,7 +86,7 @@ export async function buildAgentFromBlueprint(
 
   const builder = new Glove({
     store,
-    model: config.model,
+    model: withImageToolResults(config.model),
     displayManager: config.display as any,
     serverMode: true,
     systemPrompt: blueprint.systemPrompt,
@@ -143,7 +144,7 @@ export function defineOrchestratorAgent(
       // factory above always returns a GlorpStore — narrow it so store-backed
       // tools (the plan tool) get the concrete type they require.
       const store = (ctx.store as GlorpStore | undefined) ?? new GlorpStore(uid, dataDir);
-      const model = buildSubprocessModel();
+      const model = withImageToolResults(buildSubprocessModel());
 
       const builder = new Glove({
         store, model,

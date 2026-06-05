@@ -2,6 +2,7 @@ import type { InboxItem, Message, Task } from "glove-core/core";
 import type { PlanDocument } from "../shared/events.ts";
 import type { OriginalRequest } from "./store-snapshot.ts";
 import type { VerificationStatus } from "./runtime/verification-tracker.ts";
+import { renderPendingBlocks } from "./runtime/verification-categories.ts";
 
 export interface SessionState {
   plan: PlanDocument | null;
@@ -112,17 +113,7 @@ function renderVerification(status: VerificationStatus | null | undefined): stri
   const failed = status.failedVerifications ?? [];
   const blocks: string[] = [];
   if (status.pendingFiles.length > 0) {
-    const lines = ["Unverified mutations (run a test/build/typecheck before claiming completion):"];
-    for (const file of status.pendingFiles.slice(0, 20)) lines.push(`- ${file}`);
-    if (status.pendingFiles.length > 20) {
-      lines.push(`- ...and ${status.pendingFiles.length - 20} more`);
-    }
-    if (status.lastVerificationKind) {
-      lines.push(`Last verification observed: ${status.lastVerificationKind} — but it predates the changes above.`);
-    } else {
-      lines.push("No verification command has run in this session yet.");
-    }
-    blocks.push(lines.join("\n"));
+    blocks.push(renderPendingBlocks(status));
   }
   if (failed.length > 0) {
     const lines = [

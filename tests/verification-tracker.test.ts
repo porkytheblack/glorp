@@ -151,10 +151,88 @@ describe("VerificationTracker.observe", () => {
     t.reset();
     expect(t.status()).toEqual({
       pendingFiles: [],
+      pendingByCategory: {},
       lastVerifiedAt: null,
       lastVerificationKind: null,
       failedVerifications: [],
     });
+  });
+});
+
+describe("VerificationTracker — category-aware evaluation", () => {
+  test("mutations are grouped by deliverable category", () => {
+    const t = new VerificationTracker();
+    t.observe("write", { path: "src/app.ts" }, { status: "success", data: "ok" });
+    t.observe("write", { path: "uploads/report.docx" }, { status: "success", data: "ok" });
+    t.observe("write", { path: "site/index.html" }, { status: "success", data: "ok" });
+    t.observe("write", { path: "deck.pptx" }, { status: "success", data: "ok" });
+    expect(t.status().pendingByCategory).toEqual({
+      code: ["src/app.ts"],
+      document: ["uploads/report.docx"],
+      web: ["site/index.html"],
+      presentation: ["deck.pptx"],
+    });
+  });
+
+  test("running tests clears code but not documents or web", () => {
+    const t = new VerificationTracker();
+    t.observe("write", { path: "src/app.ts" }, { status: "success", data: "ok" });
+    t.observe("write", { path: "report.docx" }, { status: "success", data: "ok" });
+    t.observe("write", { path: "page.html" }, { status: "success", data: "ok" });
+    t.observe("bash", { command: "bun test" }, { status: "success", data: "passed" });
+    expect(t.status().pendingFiles).toEqual(["page.html", "report.docx"]);
+  });
+
+  test("driving a browser clears web deliverables", () => {
+    const t = new VerificationTracker();
+    t.observe("write", { path: "page.html" }, { status: "success", data: "ok" });
+    t.observe("bash", { command: "npx playwright test e2e/" }, { status: "success", data: "ok" });
+    expect(t.status().pendingFiles).toEqual([]);
+  });
+
+  test("a declared validator clears documents and decks", () => {
+    const t = new VerificationTracker();
+    t.observe("write", { path: "report.docx" }, { status: "success", data: "ok" });
+    t.observe("write", { path: "deck.pptx" }, { status: "success", data: "ok" });
+    t.observe("bash", { command: "python scripts/office/validate.py report.docx" }, { status: "success", data: "ok" });
+    expect(t.status().pendingFiles).toEqual([]);
+  });
+
+  test("re-reading a produced artifact clears just that file (self-review)", () => {
+    const t = new VerificationTracker();
+    t.observe("edit", { path: "deck.pptx", old_string: "a", new_string: "b" }, { status: "success", data: "ok" });
+    t.observe("write", { path: "report.docx" }, { status: "success", data: "ok" });
+    t.observe("read", { path: "deck.pptx" }, { status: "success", data: "..." });
+    expect(t.status().pendingFiles).toEqual(["report.docx"]);
+  });
+
+  test("re-reading code does NOT clear it — code needs an objective check", () => {
+    const t = new VerificationTracker();
+    t.observe("write", { path: "src/app.ts" }, { status: "success", data: "ok" });
+    t.observe("read", { path: "src/app.ts" }, { status: "success", data: "..." });
+    expect(t.status().pendingFiles).toEqual(["src/app.ts"]);
+  });
+
+  test("an independent reviewer pass clears review-eligible work but not code", () => {
+    const t = new VerificationTracker();
+    t.observe("write", { path: "report.docx" }, { status: "success", data: "ok" });
+    t.observe("write", { path: "page.html" }, { status: "success", data: "ok" });
+    t.observe("write", { path: "src/app.ts" }, { status: "success", data: "ok" });
+    t.observe("glove_invoke_subagent", { name: "reviewer" }, { status: "success", data: "punch list" });
+    expect(t.status().pendingFiles).toEqual(["src/app.ts"]);
+  });
+
+  test("spawning an evaluator clears review-eligible deliverables", () => {
+    const t = new VerificationTracker();
+    t.observe("write", { path: "out/summary.pdf" }, { status: "success", data: "ok" });
+    t.observe("spawn_agent", { role: "evaluator", task: "judge it" }, { status: "success", data: "ok" });
+    expect(t.status().pendingFiles).toEqual([]);
+  });
+
+  test("unknown extensions fall back to the artifact category", () => {
+    const t = new VerificationTracker();
+    t.observe("write", { path: "out/bundle.zip" }, { status: "success", data: "ok" });
+    expect(t.status().pendingByCategory).toEqual({ artifact: ["out/bundle.zip"] });
   });
 });
 
