@@ -51,7 +51,7 @@ function safeKey(key: string): string {
 }
 
 function oneLine(s: string): string {
-  return s.replace(/\s+/g, " ").trim().slice(0, 160);
+  return s.replace(/\s+/g, " ").replace(/\*\//g, "* /").trim().slice(0, 160);
 }
 
 /** Render `export interface <name> { ... }` for a tool's input schema. */

@@ -1,6 +1,7 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { generateProvider } from "./generate.ts";
+import { writePublicDocs } from "./docs.ts";
 import { introspectToken, readSecretKeys, removeSecretKeys } from "./keys.ts";
 import { listToolsViaMcp } from "./introspect.ts";
 import { readManifest, writeManifest } from "./manifest.ts";
@@ -51,6 +52,7 @@ export function removeProvider(workspaceDir: string, provider: string): void {
   writeManifest(workspaceDir, manifest);
   removeSecretKeys(workspaceDir, provider);
   rmSync(join(workspaceDir, "mcp", provider), { recursive: true, force: true });
+  writePublicDocs(workspaceDir, manifest); // drop the provider from identities.json / index.md
 }
 
 /** Rebuild a spec from the on-disk manifest (public) + keyfile (tokens). */

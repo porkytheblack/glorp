@@ -105,8 +105,16 @@ export async function callTool(sel: CallSelector, input: unknown): Promise<any> 
   const { name, token } = resolveIdentity(sel.provider, sel.identity);
   const url = serverUrl(sel.provider);
   const key = `${url}::${name}`;
-  if (!sessions.has(key)) sessions.set(key, initSession(url, token));
-  const sessionId = await sessions.get(key)!;
+  let pending = sessions.get(key);
+  if (!pending) {
+    // Don't cache a failed handshake — drop it so the next call retries.
+    pending = initSession(url, token).catch((err) => {
+      sessions.delete(key);
+      throw err;
+    });
+    sessions.set(key, pending);
+  }
+  const sessionId = await pending;
   const { json } = await post(url, token, sessionId, "tools/call", { name: sel.tool, arguments: input ?? {} });
   if (json?.error) throw new Error(`${sel.provider}.${sel.tool}: ${json.error.message ?? "error"}`);
   return json.result;

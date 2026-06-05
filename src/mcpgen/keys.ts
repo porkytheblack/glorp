@@ -45,6 +45,8 @@ export function introspectToken(spec: ProviderSpec): string {
 function flush(workspaceDir: string, all: SecretFile): void {
   const path = keyfilePath(workspaceDir);
   writeIfChanged(path, JSON.stringify(all, null, 2) + "\n", 0o600);
+  // Never let a provisioned secret get committed if the workspace is a repo.
+  writeIfChanged(join(workspaceDir, ".secrets", ".gitignore"), "*\n");
   try {
     chmodSync(path, 0o600);
   } catch {

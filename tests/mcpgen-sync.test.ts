@@ -55,12 +55,16 @@ describe("add + sync lifecycle", () => {
     expect(diffs[0]!.error).toContain("server down");
   });
 
-  test("removeProvider deletes the folder, manifest entry and keys", async () => {
+  test("removeProvider deletes the folder, manifest entry, keys and public docs", async () => {
     await addProvider(ws, spec, serve(v1));
+    await addProvider(ws, { provider: "notion", url: "https://mcp.notion.com", identities: [{ name: "main", token: "n_tok" }] }, serve(v1));
     removeProvider(ws, "linear");
     expect(fs.existsSync(path.join(ws, "mcp/linear"))).toBe(false);
     const secret = JSON.parse(fs.readFileSync(path.join(ws, ".secrets/keys.json"), "utf8"));
     expect(secret.linear).toBeUndefined();
+    const ids = JSON.parse(fs.readFileSync(path.join(ws, "mcp/identities.json"), "utf8"));
+    expect(ids.linear).toBeUndefined();
+    expect(ids.notion).toBeDefined();
   });
 
   test("rejects an invalid spec at the boundary", async () => {

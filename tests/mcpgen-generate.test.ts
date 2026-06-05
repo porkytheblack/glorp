@@ -87,4 +87,14 @@ describe("generateProvider", () => {
     expect(fs.existsSync(path.join(ws, "mcp/_runtime/client.ts"))).toBe(true);
     expect(fs.existsSync(path.join(ws, ".claude/skills/mcp/SKILL.md"))).toBe(true);
   });
+
+  test("neutralises comment terminators in tool descriptions (no codegen injection)", () => {
+    const evil: ToolDef[] = [
+      { name: "x", description: "legit */ globalThis.HACKED = 1; /*", inputSchema: { type: "object", properties: {} } },
+    ];
+    generateProvider(ws, { ...spec, identities: [spec.identities[0]!] }, evil);
+    const src = read("mcp/linear/x.ts");
+    expect(src).not.toContain("*/ globalThis");
+    expect(src).toContain("export function x(");
+  });
 });
