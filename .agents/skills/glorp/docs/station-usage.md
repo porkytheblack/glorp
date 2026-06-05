@@ -296,7 +296,7 @@ Provision a workspace with **external MCP tools as code**, then drive it with pl
 prompts. Glorp introspects the MCP server, deterministically generates one typed
 wrapper per tool into the workspace, and writes a `0600` keyfile. The agent calls the
 tools and self-authenticates **at call time** — tokens never enter the model's context.
-See [`../src/mcpgen/README.md`](../src/mcpgen/README.md) for the generated layout.
+See `src/mcpgen/README.md` in the glorp repository for the generated layout.
 
 ```bash
 # 1. Create a workspace (mints a managed folder under workspaceRoot).

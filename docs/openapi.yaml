@@ -673,7 +673,7 @@ components:
       required: [name, token]
       properties:
         name: { type: string }
-        token: { type: string, description: Bearer token (write-only; never returned). }
+        token: { type: string, writeOnly: true, description: Bearer token (never returned). }
         label: { type: string }
     ProvisionMcpInput:
       type: object
@@ -699,7 +699,7 @@ components:
       properties:
         provider: { type: string }
         url: { type: string }
-        default_identity: { type: string, nullable: true }
+        default_identity: { type: [string, "null"] }
         identities:
           type: array
           items:
