@@ -18,6 +18,7 @@ import {
   lsTool,
   planTool,
   readTool,
+  viewImageTool,
   showInfoTool,
   spawnAgentTool,
   transmissionTool,
@@ -27,6 +28,7 @@ import {
 
 export const MAIN_AGENT_TOOLS = [
   "read",
+  "view_image",
   "write",
   "edit",
   "apply_patch",
@@ -45,10 +47,11 @@ export const MAIN_AGENT_TOOLS = [
   "ask_text",
 ] as const;
 
-export const READ_ONLY_TOOLS = ["read", "grep", "glob", "ls", "web_fetch", "list_agents"] as const;
+export const READ_ONLY_TOOLS = ["read", "view_image", "grep", "glob", "ls", "web_fetch", "list_agents"] as const;
 
 export type ToolName =
   | "read"
+  | "view_image"
   | "write"
   | "edit"
   | "apply_patch"
@@ -85,6 +88,7 @@ type ToolFactory = () => GloveFoldArgs<any>;
 export function createToolRegistry(deps: ToolRegistryDeps): Record<ToolName, ToolFactory> {
   return {
     read: () => readTool(deps.workspace),
+    view_image: () => viewImageTool(deps.workspace),
     write: () => writeTool(deps.workspace),
     edit: () => editTool(deps.workspace),
     apply_patch: () => applyPatchTool(deps.workspace),

@@ -93,9 +93,9 @@ The rhythm is **plan → implement → evaluate → iterate**, and it applies to
 | Category | Objective check (the "redo a validation check" step) |
 |---|---|
 | Code | Typecheck + the narrowest relevant tests, then broader tests/lint/build as risk warrants. A passing `bun test`/`tsc`/`pytest`/`cargo test` clears the pending list. |
-| Web / UI / anything presented | Serve or open it and *look* — drive it (playwright/puppeteer) or screenshot it; check layout, responsive behavior, overflow, interactive/empty/error states, assets, on desktop and mobile. Never claim a UI works from source alone. |
+| Web / UI / anything presented | Serve or open it, capture a screenshot (e.g. playwright), then **`view_image` the screenshot to actually see it** — never claim a UI works from source alone. Check layout, responsive behavior, overflow, interactive/empty/error states, assets, on desktop and mobile. |
 | Documents / reports / data exports | Re-read the artifact and judge it against the criteria (complete, coherent, no placeholders/TODO/lorem, clean formatting, internally consistent); run the skill's validator if one exists (e.g. `scripts/office/validate.py`). |
-| Slide decks / presentations | Render/re-read every slide: one clear message per slide, no overflow off the canvas, consistent layout/typography, no stub content; run the deck validator if present. |
+| Slide decks / presentations | Render slides to images and **`view_image`** them: one clear message per slide, no overflow off the canvas, consistent layout/typography, no stub content; run the deck validator if present. |
 | Anything else (artifact) | Re-open and inspect it against the request; get a reviewer pass for substantial work. |
 
 - **The session-state injection lists every unvalidated change, grouped by category, with the right check for each.** If that list is non-empty when you go to wrap up, you are not done.

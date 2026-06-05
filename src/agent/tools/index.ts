@@ -1,4 +1,5 @@
 export { readTool } from "./read.ts";
+export { viewImageTool } from "./view-image.ts";
 export { writeTool } from "./write.ts";
 export { editTool } from "./edit.ts";
 export { applyPatchTool } from "./apply-patch.ts";

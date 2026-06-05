@@ -14,7 +14,7 @@
  * are derived in the tracker itself.
  */
 
-export type ClearSignal = "command" | "validator" | "browser" | "reread" | "reviewer";
+export type ClearSignal = "command" | "validator" | "browser" | "reread" | "reviewer" | "visual";
 
 /** Code toolchain commands: test / typecheck / lint / build. */
 const TOOLCHAIN_PATTERNS: ReadonlyArray<RegExp> = [

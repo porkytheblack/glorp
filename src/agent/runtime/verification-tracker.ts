@@ -54,36 +54,31 @@ export class VerificationTracker {
 
   /**
    * Record a passing objective check (toolchain command, declared validator,
-   * or browser drive). Clears pending files whose category accepts any of the
-   * given signals, plus the failed-verification ring.
+   * or browser drive). Clears matching pending files plus the failed ring.
    */
   recordPassingCheck(signals: ClearSignal[], kind: string, at: number = Date.now()): void {
     this.clearBySignals(signals, at, kind);
     this.failedVerifications = [];
   }
 
-  /**
-   * Back-compat shorthand: a passing code toolchain command. Equivalent to
-   * recordPassingCheck(["command"], kind).
-   */
+  /** Back-compat shorthand: a passing code toolchain command. */
   recordVerification(kind: string, at: number = Date.now()): void {
     this.recordPassingCheck(["command"], kind, at);
   }
 
   /**
-   * Record an independent reviewer/evaluator pass. Clears every pending file
-   * whose category accepts a reviewer (documents, decks, web, artifacts) —
-   * but NOT code, which still needs an objective toolchain check, and NOT the
-   * failed-verification ring.
+   * Record a non-objective validation pass (reviewer/evaluator, or a visual
+   * look via view_image). Clears category-matching files; never code/the ring.
    */
-  recordReviewPass(kind = "reviewer review", at: number = Date.now()): void {
-    this.clearBySignals(["reviewer"], at, kind);
+  recordReviewPass(
+    kind = "reviewer review",
+    signals: ClearSignal[] = ["reviewer"],
+    at: number = Date.now(),
+  ): void {
+    this.clearBySignals(signals, at, kind);
   }
 
-  /**
-   * Record that the agent re-read a produced artifact (self-review). Clears
-   * just that file, and only if its category accepts a re-read.
-   */
+  /** Re-reading a produced artifact (self-review) clears just that file. */
   recordRereadPass(filePath: string, at: number = Date.now()): void {
     if (!this.mutations.has(filePath)) return;
     if (!classifyPath(filePath).clearedBy.has("reread")) return;
@@ -175,6 +170,11 @@ export class VerificationTracker {
         this.recordRereadPass(filePath);
         return true;
       }
+    }
+    // Looking at a screenshot/render is the visual check for web & decks.
+    if (toolName === "view_image") {
+      this.recordReviewPass("viewed image", ["visual"]);
+      return true;
     }
     // Handing work to an independent reviewer/evaluator clears review-eligible
     // categories — the article's generator/evaluator split.
