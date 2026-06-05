@@ -1,0 +1,46 @@
+import { inputInterface } from "./schema-ts.ts";
+import type { ToolDef } from "./types.ts";
+
+/** snake/kebab/space → PascalCase, for type names. */
+export function pascal(s: string): string {
+  return s.replace(/(^|[_\-\s]+)([a-zA-Z0-9])/g, (_m, _sep, c: string) => c.toUpperCase());
+}
+
+/** Safe file/identifier base for a tool name (path- and ident-friendly). */
+export function fileBase(name: string): string {
+  return name.replace(/[^A-Za-z0-9_$]/g, "_");
+}
+
+function exportName(name: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : fileBase(name);
+}
+
+/** Render the wrapper module for a single MCP tool. */
+export function renderToolFile(provider: string, tool: ToolDef): string {
+  const iface = `${pascal(tool.name)}Input`;
+  const fn = exportName(tool.name);
+  const doc = tool.description ? `\n * ${tool.description.replace(/\s+/g, " ").trim()}` : "";
+  return [
+    `// Generated from MCP tool "${tool.name}". Do not edit — \`glorp mcp sync\` overwrites this.`,
+    `import { callTool } from "../_runtime/client.ts";`,
+    ``,
+    inputInterface(iface, tool.inputSchema),
+    ``,
+    `/**${doc}`,
+    ` * Provider: ${provider} · MCP tool: ${tool.name}`,
+    ` */`,
+    `export function ${fn}(input: ${iface}, opts?: { identity?: string }): Promise<unknown> {`,
+    `  return callTool(`,
+    `    { provider: ${JSON.stringify(provider)}, tool: ${JSON.stringify(tool.name)}, identity: opts?.identity },`,
+    `    input,`,
+    `  );`,
+    `}`,
+    ``,
+  ].join("\n");
+}
+
+/** Render the per-provider barrel that re-exports every tool. */
+export function renderBarrel(tools: ToolDef[]): string {
+  const lines = tools.map((t) => `export * from "./${fileBase(t.name)}.ts";`).sort();
+  return ["// Generated barrel. Do not edit.", ...lines, ""].join("\n");
+}
