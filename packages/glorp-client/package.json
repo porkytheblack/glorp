@@ -1,6 +1,6 @@
 {
   "name": "@porkytheblack/glorp-client",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Typed client for driving a remote Glorp Station — create workspaces, run agents, poll/stream results over an API-key-secured HTTP/WS API.",
   "type": "module",
   "license": "MIT",
