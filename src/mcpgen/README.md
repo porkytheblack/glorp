@@ -75,9 +75,31 @@ bun run src/mcpgen/cli.ts sync-all --workspace ./ws
 | `workspace.ts` | lifecycle: add / sync / sync-all / remove + boundary validation |
 | `cli.ts` | thin CLI entry |
 
-## Not yet wired (follow-ups)
+## Station API
 
-- A `POST /mcp-workspaces` route on `glorp station` (the engine is the hard part; the
-  route is a thin adapter over `addProvider` / `syncProvider` / `syncAll`).
+Provisioning is controlled over the Station REST API — MCP workspaces are ordinary
+first-class Station workspaces, so they reuse the existing `WorkspaceStore`, session
+creation, and namespace isolation.
+
+| Method & path | Action |
+|---|---|
+| `POST /workspaces` | create a workspace (mints a managed folder when no `path` is given) |
+| `POST /workspaces/:id/mcp` | install/refresh one provider — body `ProvisionMcpInput` → `McpSyncDiff` |
+| `GET /workspaces/:id/mcp` | list installed providers (no tokens) |
+| `POST /workspaces/:id/mcp/sync` | re-introspect + sync all providers (fail-soft) |
+| `POST /workspaces/:id/mcp/:provider/sync` | sync one provider |
+| `DELETE /workspaces/:id/mcp/:provider` | remove one provider |
+
+Typical flow: `POST /workspaces` → `POST /workspaces/:id/mcp` (once per provider) →
+then drive the workspace with the existing `POST /sessions { workspaceId }` and
+`POST /sessions/:id/messages`. Wire types (`ProvisionMcpInput`, `McpSyncDiff`,
+`McpProviderDto`) live in `src/station/contract.ts` and are vendored into
+`@porkytheblack/glorp-client`.
+
+Routing for these lives in `src/station/route-workspaces.ts`; the handlers in
+`src/station/routes/mcp.ts`.
+
+## Follow-ups
+
 - Embedding `emitted/client.ts` into the compiled binary (mirror `scripts/embed-prompts.ts`)
   so provisioning works from `dist/glorp`, not just from source.

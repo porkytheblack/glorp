@@ -6,6 +6,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import { newSessionId, listSessions, deleteSession } from "../agent/sessions.ts";
 import type { PermissionMode } from "../agent/runtime/permission-mode.ts";
 import { StationSession } from "./session.ts";
@@ -182,13 +183,24 @@ export class SessionManager {
     return this.workspaces.get(id);
   }
 
-  /** Register a workspace for an existing/creatable folder path. */
+  /**
+   * Register a workspace. With a `path`, adopts that folder; without one, mints
+   * a fresh managed folder under `workspaceRoot` (used by API-driven provisioning
+   * where the caller doesn't know — or shouldn't pick — a host path).
+   */
   createWorkspace(input: CreateWorkspaceInput): WorkspaceDto {
-    if (!input.path) throw new WorkspaceError("A workspace 'path' is required");
-    const resolved = path.resolve(input.path);
+    const resolved = input.path
+      ? path.resolve(input.path)
+      : path.join(this.config.workspaceRoot, this.mintSlug(input.name));
     this.assertConfined(resolved);
     this.validateWorkspace(resolved);
     return workspaceDto(this.workspaces.create({ path: resolved, name: input.name }), 0);
+  }
+
+  /** A unique, filesystem-safe folder segment for a minted workspace. */
+  private mintSlug(name?: string): string {
+    const base = (name ?? "mcp").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
+    return `${base || "mcp"}-${randomUUID().slice(0, 8)}`;
   }
 
   async sessionsForWorkspace(id: string): Promise<SessionDto[]> {

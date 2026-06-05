@@ -10,6 +10,7 @@ import type { StationConfig } from "./config.ts";
 import type { CredentialsStore } from "../agent/credentials.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
 import { workspaceRoutes } from "./routes/workspaces.ts";
+import { mcpRoutes } from "./routes/mcp.ts";
 import { stateRoutes } from "./routes/state.ts";
 import { controlRoutes } from "./routes/control.ts";
 import { modelRoutes } from "./routes/models.ts";
@@ -19,6 +20,7 @@ import { fileRoutes } from "./routes/files.ts";
 export interface RouteGroups {
   sessions: ReturnType<typeof sessionRoutes>;
   workspaces: ReturnType<typeof workspaceRoutes>;
+  mcp: ReturnType<typeof mcpRoutes>;
   state: ReturnType<typeof stateRoutes>;
   control: ReturnType<typeof controlRoutes>;
   models: ReturnType<typeof modelRoutes>;
@@ -35,6 +37,7 @@ export function buildRouteGroups(
   return {
     sessions: sessionRoutes(manager, config),
     workspaces: workspaceRoutes(manager, config),
+    mcp: mcpRoutes(manager),
     state: stateRoutes(manager),
     control: controlRoutes(manager),
     models: modelRoutes(credentials),
