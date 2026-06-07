@@ -3,6 +3,22 @@
 import type { SessionManager } from "../manager.ts";
 import { turnsFromMessages } from "../../agent/runtime/hydrate.ts";
 import { json, errorJson, noContent } from "../respond.ts";
+import type { SessionDto, SessionResultReason } from "../contract.ts";
+
+/**
+ * Classify a result so callers can distinguish a real empty turn from "no
+ * worker yet" or a failure — all of which otherwise look like an idle session
+ * with null text. Order matters: error/running/provisioning before the
+ * text-vs-empty split.
+ */
+function resultReason(dto: SessionDto, text: string | null): SessionResultReason {
+  if (dto.state === "error" || dto.error) return "error";
+  if (dto.busy) return "running";
+  if (dto.state === "provisioning") return "provisioning";
+  if (text !== null) return "ok";
+  if (dto.turn_count > 0) return "empty"; // ran a turn, wrote nothing
+  return "idle"; // never engaged a worker
+}
 
 export interface StateRoutes {
   history(id: string): Promise<Response>;
@@ -45,7 +61,14 @@ export function stateRoutes(manager: SessionManager): StateRoutes {
           break;
         }
       }
-      return json({ status: dto.state, busy: dto.busy, text, error: dto.error, turn_count: dto.turn_count });
+      return json({
+        status: dto.state,
+        busy: dto.busy,
+        text,
+        error: dto.error,
+        turn_count: dto.turn_count,
+        reason: resultReason(dto, text),
+      });
     },
 
     async plan(id): Promise<Response> {

@@ -64,9 +64,54 @@ Drop a `station.json` in the data dir for persistent config (CLI flags win over 
   "templatesDir": "/home/dev/.glorp/templates",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-sonnet-4-20250514",
-  "permissionMode": "normal"
+  "permissionMode": "normal",
+  "idleSessionTtlMs": 1800000,
+  "gcIntervalMs": 60000
 }
 ```
+
+---
+
+## Session lifecycle, idle GC & teardown
+
+A session's `GlorpHandle` (its model adapter + any sandbox child processes) is
+the real resource — call it the session's **agent host**. It is built lazily on
+the first message and torn down on `destroy()`.
+
+**Idle-session GC.** A long-running Station otherwise accumulates *loaded* but
+idle sessions, each pinning an agent host. The GC sweeps every namespace on an
+interval and **unloads** any session that has been idle past a TTL — it isn't
+busy and has no connected WebSocket client. Unloading frees the agent host but
+**keeps the on-disk snapshot**, so the session goes dormant and rehydrates
+transparently on the next request (no data loss, no manual cleanup). Tune it:
+
+| Setting | `station.json` | Env | Default |
+|---|---|---|---|
+| Idle TTL before unload (ms; `0` disables) | `idleSessionTtlMs` | `GLORP_STATION_IDLE_TTL_MS` | `1800000` (30 min) |
+| GC sweep interval (ms) | `gcIntervalMs` | `GLORP_STATION_GC_INTERVAL_MS` | `60000` (60 s) |
+
+**`destroy()` aborts a busy turn.** Destroying a session that is mid-turn first
+**aborts** the running agent, then shuts the handle down — a busy session is
+never silently left running and holding its slot. The session leaves
+`GET /sessions` immediately; reclamation of any heavier sandbox the host sits in
+(container/volume) is downstream of Station and not synchronous.
+
+**`GET /sessions/:id/result` reports a `reason`.** Alongside `status`/`busy`/
+`text`/`error`, the result carries a machine-readable `reason` so a caller can
+tell a genuine empty turn from "no worker engaged yet" or a failure — all of
+which otherwise look like `{ busy:false, text:null, error:null }`:
+
+| `reason` | Meaning |
+|---|---|
+| `running` | a turn is in flight |
+| `ok` | a completed turn produced text |
+| `empty` | a turn completed but produced **no** text (real empty answer) |
+| `idle` | no turn has run yet (created/rehydrated, never engaged) |
+| `provisioning` | still setting up (template / handle not built) |
+| `error` | the session is in the unrecoverable error state |
+
+See [`station-namespace-ops.md`](./station-namespace-ops.md) for the concurrency
+model and operational guidance under churn.
 
 ---
 

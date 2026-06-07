@@ -108,6 +108,20 @@ export interface FileListResponse {
   files: FileEntry[];
 }
 
+/**
+ * Why `GET /sessions/:id/result` returned the `text` it did. Lets a caller tell
+ * a genuine empty turn (`empty` — the agent ran and chose to write nothing) from
+ * "no worker engaged yet" (`idle`/`provisioning`) and from a failure (`error`),
+ * which all otherwise present as `{ busy:false, text:null, error:null }`.
+ *   running       — a turn is in flight (busy)
+ *   ok            — a completed turn produced text
+ *   empty         — a turn completed but produced no text (real empty answer)
+ *   idle          — no turn has run yet (created/rehydrated, never engaged)
+ *   provisioning  — still setting up (template run / handle not built)
+ *   error         — the session is in the unrecoverable error state
+ */
+export type SessionResultReason = "running" | "ok" | "empty" | "idle" | "provisioning" | "error";
+
 /** Returned by `GET /sessions/:id/result` — the latest agent answer + status. */
 export interface SessionResult {
   status: SessionLifecycle;
@@ -115,6 +129,8 @@ export interface SessionResult {
   text: string | null;
   error: string | null;
   turn_count: number;
+  /** Machine-readable explanation of `text`/status (see `SessionResultReason`). */
+  reason: SessionResultReason;
 }
 
 /** A conversational agent in a session's multi-agent roster. */

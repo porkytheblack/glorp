@@ -35,8 +35,23 @@ export interface StationConfig {
   permissionMode: PermissionMode;
   /** Name of the per-session file-exchange subfolder. Defaults to `uploads`. */
   filesDir?: string;
+  /**
+   * Idle reclamation: a *loaded* session whose handle has sat idle (not busy, no
+   * connected WS client) longer than this is UNLOADED — the agent host (model
+   * adapter + any child processes) is freed while the on-disk snapshot is kept,
+   * so the session rehydrates transparently on next access. `0` disables the GC.
+   * Default 30 min. Tune with `GLORP_STATION_IDLE_TTL_MS`.
+   */
+  idleSessionTtlMs: number;
+  /** How often the idle-session GC sweeps. Default 60s. `GLORP_STATION_GC_INTERVAL_MS`. */
+  gcIntervalMs: number;
   auth?: StationAuthConfig;
 }
+
+/** Default idle-session TTL: 30 minutes. */
+export const DEFAULT_IDLE_TTL_MS = 30 * 60_000;
+/** Default GC sweep interval: 60 seconds. */
+export const DEFAULT_GC_INTERVAL_MS = 60_000;
 
 export interface StationConfigOverrides {
   hostname?: string;
@@ -58,7 +73,17 @@ interface StationFileConfig {
   defaultModel?: string;
   permissionMode?: PermissionMode;
   filesDir?: string;
+  idleSessionTtlMs?: number;
+  gcIntervalMs?: number;
   auth?: { enabled?: boolean };
+}
+
+/** Parse a non-negative integer env var; undefined when unset/invalid. */
+function envInt(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined;
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -113,6 +138,10 @@ export function loadStationConfig(overrides: StationConfigOverrides = {}): Stati
     defaultModel: overrides.model ?? file.defaultModel,
     permissionMode: overrides.permissionMode ?? file.permissionMode ?? "normal",
     filesDir: file.filesDir,
+    idleSessionTtlMs:
+      envInt("GLORP_STATION_IDLE_TTL_MS") ?? file.idleSessionTtlMs ?? DEFAULT_IDLE_TTL_MS,
+    gcIntervalMs:
+      envInt("GLORP_STATION_GC_INTERVAL_MS") ?? file.gcIntervalMs ?? DEFAULT_GC_INTERVAL_MS,
     auth: {
       // undefined ⇒ server applies the loopback-aware default at startup.
       enabled: overrides.auth?.enabled ?? envAuthEnabled() ?? file.auth?.enabled,

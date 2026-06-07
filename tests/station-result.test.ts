@@ -41,11 +41,20 @@ describe("GET /sessions/:id/result", () => {
 
     const res = await fetch(`${base}/api/v1/sessions/${id}/result`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { status: string; busy: boolean; text: string | null; turn_count: number };
+    const body = (await res.json()) as {
+      status: string;
+      busy: boolean;
+      text: string | null;
+      turn_count: number;
+      reason: string;
+    };
     expect(body.text).toBeNull();
     expect(body.busy).toBe(false);
     expect(["idle", "provisioning"]).toContain(body.status);
     expect(body.turn_count).toBe(0);
+    // A never-run session reports "idle" (no worker engaged) — NOT "empty",
+    // which is reserved for a turn that completed and produced no text.
+    expect(["idle", "provisioning"]).toContain(body.reason);
 
     expect((await fetch(`${base}/sessions/does-not-exist/result`)).status).toBe(404);
   });

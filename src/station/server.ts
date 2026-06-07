@@ -21,6 +21,7 @@ import { KeyStore } from "./auth/key-store.ts";
 import { requireAuth, requireScope, NamespaceForbiddenError } from "./auth/middleware.ts";
 import type { ApiKey } from "./auth/types.ts";
 import { authRequired, type StationConfig } from "./config.ts";
+import { startIdleGc } from "./gc.ts";
 import { json } from "./respond.ts";
 import { withCors, rejectBrowserOrigin, preflight } from "./cors.ts";
 export { isAllowedBrowserOrigin } from "./cors.ts";
@@ -179,11 +180,14 @@ export async function startStation(config: StationConfig): Promise<StationHandle
     console.log("[glorp-station] API-key auth: off (loopback). Bind a non-loopback host or set auth to enable.");
   }
 
+  const stopGc = startIdleGc(registry, config);
+
   return {
     port,
     // Back-compat handle: the default namespace's manager.
     manager: registry.resolve(DEFAULT_NAMESPACE_ID).manager,
     async stop() {
+      stopGc();
       for (const bundle of registry.liveBundles()) await bundle.manager.shutdownAll();
       await keyStore.close().catch(() => {});
       server.stop();

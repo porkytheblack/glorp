@@ -278,6 +278,31 @@ export class SessionManager {
     return n;
   }
 
+  /**
+   * Reclaim idle live sessions to free the agent host they hold. A session is
+   * reaped only when its handle is built (`loaded`), it isn't busy, no WebSocket
+   * client is watching it, and it has been idle for at least `idleMs`. Reaping
+   * flushes + shuts the handle but KEEPS the on-disk snapshot, so the session
+   * goes dormant and rehydrates transparently on the next access — no data loss,
+   * no resurrection surprise. Returns the ids it reclaimed. `idleMs <= 0` is a
+   * no-op (GC disabled). This is the engine behind the station idle-session GC.
+   */
+  async reapIdle(idleMs: number, now: number = Date.now()): Promise<string[]> {
+    if (idleMs <= 0) return [];
+    const reaped: string[] = [];
+    for (const session of [...this.sessions.values()]) {
+      if (!session.loaded) continue; // dormant — holds no agent host
+      if (session.stats.busy || session.state === "destroyed") continue;
+      if (session.stream.size > 0) continue; // a client is actively watching
+      if (now - session.lastActivity < idleMs) continue;
+      this.sessions.delete(session.id);
+      await session.flush().catch(() => {});
+      await session.destroy(); // shuts the handle; snapshot stays on disk
+      reaped.push(session.id);
+    }
+    return reaped;
+  }
+
   private resolveWorkspacePath(input: CreateSessionInput, id: string): string {
     const resolved = this.resolveWorkspaceCandidate(input, id);
     this.assertConfined(resolved);
