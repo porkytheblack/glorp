@@ -278,6 +278,37 @@ export class SessionManager {
     return n;
   }
 
+  /**
+   * Reclaim idle live sessions to free the agent host they hold. A session is
+   * reaped only when its handle is built (`loaded`), it isn't busy, no WebSocket
+   * client is watching it, and it has been idle for at least `idleMs`. Reaping
+   * flushes + shuts the handle but KEEPS the on-disk snapshot, so the session
+   * goes dormant and rehydrates transparently on the next access — no data loss,
+   * no resurrection surprise. Returns the ids it reclaimed. `idleMs <= 0` is a
+   * no-op (GC disabled). This is the engine behind the station idle-session GC.
+   */
+  async reapIdle(idleMs: number, now: number = Date.now()): Promise<string[]> {
+    if (idleMs <= 0) return [];
+    const reaped: string[] = [];
+    for (const session of [...this.sessions.values()]) {
+      if (!session.loaded) continue; // dormant — holds no agent host
+      if (session.stats.busy || session.state === "destroyed") continue;
+      if (session.stream.size > 0) continue; // a client is actively watching
+      if (now - session.lastActivity < idleMs) continue;
+      await session.flush().catch(() => {});
+      try {
+        await session.destroy(); // shuts the handle; snapshot stays on disk
+        this.sessions.delete(session.id);
+        reaped.push(session.id);
+      } catch (err) {
+        // Keep it registered so a later sweep (or shutdown) can retry teardown,
+        // and don't let one failure abort reaping the rest of this pass.
+        console.warn(`[glorp-station] gc: failed to unload session ${session.id}:`, err);
+      }
+    }
+    return reaped;
+  }
+
   private resolveWorkspacePath(input: CreateSessionInput, id: string): string {
     const resolved = this.resolveWorkspaceCandidate(input, id);
     this.assertConfined(resolved);

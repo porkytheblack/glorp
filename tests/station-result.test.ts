@@ -48,6 +48,7 @@ describe("GET /sessions/:id/result", () => {
       busy: boolean;
       text: string | null;
       turn_count: number;
+      reason: string;
       last_error: string | null;
       last_turn_state: "ok" | "error" | null;
     };
@@ -55,6 +56,9 @@ describe("GET /sessions/:id/result", () => {
     expect(body.busy).toBe(false);
     expect(["idle", "provisioning"]).toContain(body.status);
     expect(body.turn_count).toBe(0);
+    // A never-run session reports "idle" (no worker engaged) — NOT "empty",
+    // which is reserved for a turn that completed and produced no text.
+    expect(["idle", "provisioning"]).toContain(body.reason);
     // A fresh session has run no turns: no last error, no last-turn outcome.
     expect(body.last_error).toBeNull();
     expect(body.last_turn_state).toBeNull();
@@ -86,6 +90,7 @@ describe("GET /sessions/:id/result", () => {
       error: string | null;
       last_error: string | null;
       last_turn_state: "ok" | "error" | null;
+      reason: string;
     };
     // Looks idle-with-no-output, but last_error/last_turn_state expose the failure.
     expect(body.busy).toBe(false);
@@ -93,5 +98,7 @@ describe("GET /sessions/:id/result", () => {
     expect(body.error).toBeNull(); // not a fatal session error
     expect(body.last_error).toBe("400 … 512000 in the output");
     expect(body.last_turn_state).toBe("error");
+    // ...and `reason` classifies it as a failure, not an "empty" turn.
+    expect(body.reason).toBe("error");
   });
 });

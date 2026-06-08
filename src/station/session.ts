@@ -166,9 +166,14 @@ export class StationSession {
   }
 
   async destroy(): Promise<void> {
+    const wasBusy = this.stats.busy;
     this.state = "destroyed";
     if (this.handle) {
       try {
+        // A running turn won't stop itself when the handle shuts down, so abort
+        // it first: destroy must never silently leave a busy agent alive holding
+        // the slot. Harmless no-op when the session is already idle.
+        if (wasBusy) this.handle.abort();
         await this.handle.shutdown();
       } catch (err) {
         console.error(`[station] session ${this.id} shutdown error:`, err);
