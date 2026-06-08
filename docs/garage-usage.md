@@ -1,6 +1,6 @@
 # Glorp Garage — Usage Guide
 
-> **Naming note.** "Glorp Garage" here is the **multi-session runtime** (`glorp garage`) — a long-running server that hosts many agent sessions over a REST + WebSocket API. It is *not* the same as the `garage-signal` async **fleet** runner mentioned elsewhere in the README (which runs background fan-out jobs in child processes). Two different things that happen to share the word "garage".
+> **Naming note.** "Glorp Garage" here is the **multi-session runtime** (`glorp garage`) — a long-running server that hosts many agent sessions over a REST + WebSocket API. It is *not* the same as the `station-signal` async **fleet** runner mentioned elsewhere in the README (which runs background fan-out jobs in child processes). The runtime was renamed from "Station" to "Garage" precisely to stop colliding with that fleet framework's name.
 
 Garage lets you run multiple Glorp agents at once, leave them running, and connect from any client — an IDE extension, a CLI, or a CI pipeline. See [`garage-spec.md`](./garage-spec.md) for the product spec and rationale.
 

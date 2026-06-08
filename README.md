@@ -9,10 +9,10 @@ Glorp is a coding agent in the spirit of `opencode` and `codex`. The friend-shap
 ## Architecture
 
 - **Backend agent** built with [`glove-core`](https://github.com/porkytheblack/glove) — full coding toolkit (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `ls`, `web_fetch`), built-in task list and async inbox, slash-command hooks, exposed skills, and three subagents (`@planner`, `@researcher`, `@reviewer`) that run as child `Glove` instances and report back through the inbox.
-- **Async fleet** authored with [`garage-signal`](https://github.com/porkytheblack/garage) — three signal kinds (`research`, `edit-fanout`, `shell-fanout`) the agent fires through the `dispatch_fleet` tool when it has 3+ independent jobs to fan out. Garage runs each job in an isolated child process, and Glorp can cancel active runs from the parent.
+- **Async fleet** authored with [`station-signal`](https://github.com/porkytheblack/station) — three signal kinds (`research`, `edit-fanout`, `shell-fanout`) the agent fires through the `dispatch_fleet` tool when it has 3+ independent jobs to fan out. Station runs each job in an isolated child process, and Glorp can cancel active runs from the parent.
 - **Multi-agent comms** ride on Glove's persistent inbox — every fleet job, transmission, and subagent post is a typed inbox entry the UI can render and the agent can pick up across turns.
 - **Frontend** built with [`@opentui/react`](https://github.com/anomalyco/opentui) — split-pane chat transcript, live tool-call cards with mini-diffs, tasks pane, inbox pane, running fleet jobs, homeworld-comms pane, and a small ASCII glorp avatar whose mood tracks the agent's state.
-- **Bun build target** via `bun build --compile`. The main TUI/agent compiles to `dist/glorp`; the Garage fleet uses child worker processes for background jobs.
+- **Bun build target** via `bun build --compile`. The main TUI/agent compiles to `dist/glorp`; the Station fleet uses child worker processes for background jobs.
 
 ## Install
 
@@ -53,7 +53,7 @@ export ANTHROPIC_API_KEY=sk-ant-...     # or OPENAI_API_KEY / OPENROUTER_API_KEY
 
 ### Glorp Garage (multi-session server)
 
-Run many agents at once over a REST + WebSocket API — leave sessions running, reconnect from a laptop/phone/CLI client, or drive them from CI. (Distinct from the `garage-signal` fleet runner above; same word, different thing.)
+Run many agents at once over a REST + WebSocket API — leave sessions running, reconnect from a laptop/phone/CLI client, or drive them from CI. (Distinct from the `station-signal` fleet runner above — the rename from "Station" to "Garage" exists precisely to avoid that name collision.)
 
 ```bash
 glorp garage                     # API at http://127.0.0.1:4271/
@@ -65,7 +65,21 @@ curl -s -X POST localhost:4271/sessions/<id>/messages -H 'content-type: applicat
   -d '{"text":"add tests for the auth module","wait":true}'
 ```
 
-Full guide — CLI flags, `garage.json`, the REST/WS API, setup templates, and per-session keys — in [`docs/garage-usage.md`](docs/garage-usage.md). No auth in v1: bind to localhost or sit behind a reverse proxy.
+Full guide — CLI flags, `garage.json`, the REST/WS API, setup templates, and per-session keys — in [`docs/garage-usage.md`](docs/garage-usage.md). Bind to localhost, sit behind a reverse proxy, or enable API-key auth on any non-loopback bind.
+
+All three Glorp servers (the Garage runtime, the single-session `src/server`, and the `glorp-mcp` HTTP transport) are served with [Hono](https://hono.dev).
+
+#### Garage dashboard
+
+A clean, ona-style web console for the orchestration layer lives in [`dashboard/`](dashboard/) (Next.js). It covers every core primitive — sessions (with a live event stream), agents, messages, namespaces, workspaces, provisioning, credentials, and API keys — and signs in with an admin identity you provision via env vars:
+
+```bash
+export GARAGE_ADMIN_USER=admin GARAGE_ADMIN_PASSWORD=change-me   # enables login
+glorp garage                                                     # API on :4271
+cd dashboard && npm install && npm run dev                       # dashboard on :3270
+```
+
+Login exchanges the admin credentials for a short-lived JWT; from the dashboard you can mint scoped API keys for the REST API and the MCP server. See [`dashboard/README.md`](dashboard/README.md).
 
 ### Inside the TUI
 
@@ -154,7 +168,7 @@ src/
     memory-store-shim.ts       Tiny in-memory StoreAdapter for subagent stores
     model-picker.ts            Lazy provider loader (skips Bedrock to dodge a broken transitive dep)
     subagents.ts               Re-export for built-in subagent factories
-    garage-bridge.ts          Garage SignalRunner bridge for fleet child processes
+    station-bridge.ts          Station SignalRunner bridge for fleet child processes
     agents/                    Built-in and disk-loaded subagent definitions
     fleet/                     Fleet signal definitions and child-process helpers
     prompts/                   Markdown system prompts and prompt-loading utilities

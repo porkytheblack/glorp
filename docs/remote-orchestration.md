@@ -2,7 +2,7 @@
 
 Drive Glorp Garage from another machine — create workspaces and run agents over
 an API-key-secured HTTP/WS API. This is the path for wiring Glorp into your own
-orchestration (cron jobs, CI, a `garage-signal` job, etc.).
+orchestration (cron jobs, CI, a `station-signal` job, etc.).
 
 - **HTTP/WS contract:** [`openapi.yaml`](./openapi.yaml) — works from any language.
 - **TypeScript client:** [`@porkytheblack/glorp-client`](../packages/glorp-client/README.md).

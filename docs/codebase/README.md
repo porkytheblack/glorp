@@ -24,8 +24,8 @@ Code-level internals documentation for the Glorp source tree. These docs describ
 A few places where the current code has drifted from the README or has internal
 inconsistencies — recorded here so they aren't lost, and detailed in the linked docs:
 
-- **The `garage-signal` fleet is gone.** There is no `src/agent/fleet/`,
-  `garage-bridge.ts`, `memory-store-shim.ts`, or `dispatch_fleet` tool. Async
+- **The `station-signal` fleet is gone.** There is no `src/agent/fleet/`,
+  `station-bridge.ts`, `memory-store-shim.ts`, or `dispatch_fleet` tool. Async
   fan-out is now the `src/orchestrator/` mesh driven by the `spawn_agent` tool.
   The README's "Async fleet" / `dispatch_fleet` sections are stale. See
   [agent.md](./agent.md) and [orchestrator.md](./orchestrator.md).

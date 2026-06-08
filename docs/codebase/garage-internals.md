@@ -7,7 +7,7 @@ and its CLI entrypoint `src/cli-garage.ts`. This complements the user-facing
 
 > **Naming.** "Glorp Garage" here is the long-running `glorp garage` server
 > (REST + WebSocket over many concurrent agents). It is distinct from the
-> `garage-signal` fleet runner mentioned elsewhere in the README.
+> `station-signal` fleet runner mentioned elsewhere in the README.
 
 > **Scope.** The optional Dashboard SPA (`dashboard/`) is being deprecated and is
 > *not* documented here. The only mention is the integration point in
