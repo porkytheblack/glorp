@@ -110,7 +110,17 @@ export interface SessionResult {
   status: SessionLifecycle;
   busy: boolean;
   text: string | null;
+  /** Fatal, session-level error (the session is wedged in the `error` state). */
   error: string | null;
+  /**
+   * The most recent turn's error, when one failed (e.g. a model 400), even
+   * though the session itself stayed healthy. Lets a polled consumer tell a
+   * *failed* turn from an *empty* one (`busy:false`, `text:null`) without the
+   * WebSocket stream. Null when the last turn succeeded or none has run.
+   */
+  last_error: string | null;
+  /** Outcome of the most recent turn: `"error"`, `"ok"`, or null if none has run. */
+  last_turn_state: "ok" | "error" | null;
   turn_count: number;
 }
 
