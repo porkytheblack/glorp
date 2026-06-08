@@ -5,8 +5,10 @@
     "": {
       "name": "@porkytheblack/glorp-mcp",
       "dependencies": {
+        "@hono/node-server": "^1.19.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@porkytheblack/glorp-client": "file:../glorp-client",
+        "hono": "^4.11.0",
         "zod": "^3.23.8",
       },
     },
