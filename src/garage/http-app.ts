@@ -15,6 +15,7 @@ import { makeWsData, handleWsOpen, handleWsClose, handleWsMessage, type WsData }
 import { NamespaceRegistry, NamespaceNotFoundError, type NamespaceBundle } from "./namespace-registry.ts";
 import { DEFAULT_NAMESPACE_ID } from "./namespace-store.ts";
 import { healthRoute } from "./routes/health.ts";
+import { authRoutes } from "./routes/auth.ts";
 import { requireAuth, requireScope, NamespaceForbiddenError } from "./auth/middleware.ts";
 import type { ApiKey } from "./auth/types.ts";
 import { json } from "./respond.ts";
@@ -65,6 +66,7 @@ type GarageEnv = { Variables: { wsSession: GarageSession } };
 export function buildGarageApp(deps: GarageAppDeps) {
   const { registry, router, keyStore, authOn, startedAt } = deps;
   const { upgradeWebSocket, websocket } = createBunWebSocket<ServerWebSocket>();
+  const auth = authRoutes();
   const app = new Hono<GarageEnv>();
 
   // --- CORS + browser-origin policy ---
@@ -139,16 +141,29 @@ export function buildGarageApp(deps: GarageAppDeps) {
     if (routePath === "/health" && c.req.method === "GET") {
       return healthRoute(registry, startedAt);
     }
+    // Admin login is open — it issues the credential the dashboard then uses.
+    if (routePath === "/auth/status" && c.req.method === "GET") return auth.status();
+    if (routePath === "/auth/login" && c.req.method === "POST") return auth.login(c.req.raw);
 
     let key: ApiKey | null = null;
     if (authOn) {
-      const auth = await requireAuth(c.req.raw, url, keyStore);
-      if (!auth.ok) return auth.response;
-      key = auth.key;
+      const authResult = await requireAuth(c.req.raw, url, keyStore);
+      if (!authResult.ok) return authResult.response;
+      key = authResult.key;
       if (isAdminRoute(routePath)) {
-        const denied = requireScope(auth.key, "admin");
+        const denied = requireScope(authResult.key, "admin");
         if (denied) return denied;
       }
+    }
+
+    // Identity echo — best-effort even when auth is off (loopback), so the
+    // dashboard can recognize a presented JWT.
+    if (routePath === "/auth/me" && c.req.method === "GET") {
+      if (!key) {
+        const probe = await requireAuth(c.req.raw, url, keyStore);
+        if (probe.ok) key = probe.key;
+      }
+      return auth.me(key);
     }
 
     let bundle: NamespaceBundle;

@@ -7,6 +7,8 @@
 
 import { errorJson } from "../respond.ts";
 import { DEFAULT_NAMESPACE_ID } from "../namespace-store.ts";
+import { KEY_PREFIX } from "./key-store.ts";
+import { verifyAdminToken, adminKeyFromToken } from "./admin.ts";
 import type { KeyStore } from "./key-store.ts";
 import type { ApiKey } from "./types.ts";
 
@@ -20,13 +22,22 @@ export function extractKey(req: Request, url: URL): string | null {
 
 export type AuthResult = { ok: true; key: ApiKey } | { ok: false; response: Response };
 
-/** Verify the request's API key, returning the record or a 401 response. */
+/**
+ * Verify the request's credential, returning the record or a 401. A `glsk_`
+ * token is checked against the KeyStore; anything else is tried as an admin
+ * JWT (dashboard login), which resolves to a synthetic `admin`-scoped key.
+ */
 export async function requireAuth(req: Request, url: URL, keyStore: KeyStore): Promise<AuthResult> {
   const raw = extractKey(req, url);
-  if (!raw) return { ok: false, response: errorJson("unauthorized", "Missing API key", 401) };
-  const key = await keyStore.verify(raw);
-  if (!key) return { ok: false, response: errorJson("unauthorized", "Invalid or revoked API key", 401) };
-  return { ok: true, key };
+  if (!raw) return { ok: false, response: errorJson("unauthorized", "Missing credential", 401) };
+  if (raw.startsWith(KEY_PREFIX)) {
+    const key = await keyStore.verify(raw);
+    if (key) return { ok: true, key };
+    return { ok: false, response: errorJson("unauthorized", "Invalid or revoked API key", 401) };
+  }
+  const payload = await verifyAdminToken(raw);
+  if (payload) return { ok: true, key: adminKeyFromToken(payload) };
+  return { ok: false, response: errorJson("unauthorized", "Invalid or expired credential", 401) };
 }
 
 /** Returns a 403 response if the key lacks `scope` (admin implies all), else null. */

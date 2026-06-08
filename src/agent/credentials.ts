@@ -1,6 +1,9 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import {
+  FileCredentialStorage,
+  type CredentialStorageAdapter,
+} from "./credential-storage.ts";
 
 export type KnownProvider =
   | "anthropic"
@@ -409,55 +412,26 @@ export interface CredentialsFile {
   activeProfileId?: string;
 }
 
-const EMPTY: CredentialsFile = {
-  version: 1,
-  providers: {},
-  profiles: [],
-};
-
 /**
- * File-backed credentials store. Lives at `<dataDir>/credentials.json` with
- * `0o600` permissions. Writes are atomic (tmp + rename) and the parent dir
- * is created with `0o700`.
+ * Credentials store. Owns the in-memory model and all mutation logic;
+ * persistence is delegated to a `CredentialStorageAdapter`. Pass a `dataDir`
+ * string (default → `FileCredentialStorage` at `<dataDir>/credentials.json`,
+ * `0o600`) or any adapter (memory, sqlite, secrets manager, …).
  */
 export class CredentialsStore {
+  /** Stable identity of the backing store (a file path for the file adapter). */
   filePath: string;
+  private adapter: CredentialStorageAdapter;
   private data: CredentialsFile;
 
-  constructor(dataDir: string = path.join(os.homedir(), ".glorp")) {
-    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-    this.filePath = path.join(dataDir, "credentials.json");
-    this.data = this.loadFromDisk();
-  }
-
-  private loadFromDisk(): CredentialsFile {
-    if (!fs.existsSync(this.filePath)) return structuredClone(EMPTY);
-    try {
-      const raw = fs.readFileSync(this.filePath, "utf-8");
-      const parsed = JSON.parse(raw) as CredentialsFile;
-      // Light validation; if shape is wrong, fall back to empty rather than crash.
-      if (parsed?.version !== 1 || typeof parsed.providers !== "object") {
-        return structuredClone(EMPTY);
-      }
-      return {
-        version: 1,
-        providers: parsed.providers,
-        profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
-        activeProfileId: parsed.activeProfileId,
-      };
-    } catch {
-      return structuredClone(EMPTY);
-    }
+  constructor(source: string | CredentialStorageAdapter = path.join(os.homedir(), ".glorp")) {
+    this.adapter = typeof source === "string" ? new FileCredentialStorage(source) : source;
+    this.filePath = this.adapter.id;
+    this.data = this.adapter.load();
   }
 
   private flush(): void {
-    const tmp = `${this.filePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), { encoding: "utf-8", mode: 0o600 });
-    fs.renameSync(tmp, this.filePath);
-    // Tighten existing files too.
-    try {
-      fs.chmodSync(this.filePath, 0o600);
-    } catch {}
+    this.adapter.save(this.data);
   }
 
   hasAny(): boolean {
