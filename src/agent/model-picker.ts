@@ -41,6 +41,23 @@ const DEFAULT_MAX_TOKENS = 32_768;
 /** Title generation is a single short summary — keep the budget tight. */
 const TITLE_MAX_TOKENS = 1024;
 
+/**
+ * Hard ceiling for the auto-resolved output budget. Some catalog entries
+ * advertise an output limit at (or near) the full context window — e.g.
+ * `512000` of a `524288`-token window — so reserving it verbatim leaves almost
+ * nothing for input + tool schemas and 400s the turn before any output is
+ * produced. We cap the auto-pick so input always has room; operators who
+ * genuinely need more can raise it with `GLORP_MAX_OUTPUT_TOKENS`.
+ */
+const MAX_AUTO_OUTPUT_TOKENS = 32_768;
+
+/**
+ * The most of the context window the output budget may claim, leaving the rest
+ * for input + tool schemas. Applied even to an explicit `GLORP_MAX_OUTPUT_TOKENS`
+ * so a turn degrades (shorter completion) instead of hard-400-ing on input.
+ */
+const MAX_OUTPUT_CONTEXT_FRACTION = 0.5;
+
 export interface PickModelOptions {
   /** Explicit provider id from CLI flags. Takes precedence over everything else. */
   provider?: string;
@@ -75,6 +92,11 @@ export interface PickedModel {
    *   5. {@link DEFAULT_FALLBACK_CONTEXT_LIMIT}
    */
   contextLimit: number;
+  /**
+   * Resolved output-token budget passed to the adapter (`maxTokens`). Clamped
+   * so it never crowds out the input window — see {@link resolveMaxTokens}.
+   */
+  maxOutputTokens: number;
   /** Resolved capability / pricing record. Used by the rich-column picker UI. */
   modelInfo?: ModelInfo;
   /**
@@ -106,8 +128,9 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
       providerId: opts.provider, model,
       catalog: opts.catalog, projectConfig: opts.projectConfig,
     });
+    const maxOutputTokens = resolveMaxTokens(info);
     const adapter = await buildAdapter({
-      providerId: opts.provider, model, maxTokens: resolveMaxTokens(info),
+      providerId: opts.provider, model, maxTokens: maxOutputTokens,
     });
     const titleAdapter = await buildTitleAdapter({
       providerId: opts.provider, mainAdapter: adapter,
@@ -116,7 +139,7 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
       adapter, titleAdapter,
       label: labelFor(opts.provider, model),
       providerId: opts.provider, model, modelInfo: info,
-      contextLimit: resolveContextLimit({ info }),
+      contextLimit: resolveContextLimit({ info }), maxOutputTokens,
     };
   }
 
@@ -139,9 +162,12 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
       if (activeVariant?.variant.outputLimit) {
         info = { ...info, output: activeVariant.variant.outputLimit };
       }
+      // A variant's outputLimit is a deliberate operator choice — let it bypass
+      // the catalog auto-ceiling (still clamped to the context window below).
+      const maxOutputTokens = resolveMaxTokens(info, activeVariant?.variant.outputLimit);
       const adapter = await buildAdapter({
         providerId: profile.providerId, model: profile.model,
-        reasoning, provider, maxTokens: resolveMaxTokens(info),
+        reasoning, provider, maxTokens: maxOutputTokens,
       });
       const titleAdapter = await buildTitleAdapter({
         providerId: profile.providerId, provider, profile, mainAdapter: adapter,
@@ -150,7 +176,7 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
         adapter, titleAdapter,
         label: labelFor(profile.providerId, profile.model, reasoning, activeVariant?.name),
         providerId: profile.providerId, model: profile.model, profile, modelInfo: info,
-        contextLimit: resolveContextLimit({ profile, provider, info }),
+        contextLimit: resolveContextLimit({ profile, provider, info }), maxOutputTokens,
       };
     }
   }
@@ -162,8 +188,9 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
     const info = resolveModelInfo({
       providerId: envProvider, model, catalog: opts.catalog, projectConfig: opts.projectConfig,
     });
+    const maxOutputTokens = resolveMaxTokens(info);
     const adapter = await buildAdapter({
-      providerId: envProvider, maxTokens: resolveMaxTokens(info),
+      providerId: envProvider, maxTokens: maxOutputTokens,
     });
     const titleAdapter = await buildTitleAdapter({
       providerId: envProvider, mainAdapter: adapter,
@@ -172,7 +199,7 @@ export async function pickModel(opts: PickModelOptions): Promise<PickedModel> {
       adapter, titleAdapter,
       label: labelFor(envProvider, model),
       providerId: envProvider, model, modelInfo: info,
-      contextLimit: resolveContextLimit({ info }),
+      contextLimit: resolveContextLimit({ info }), maxOutputTokens,
     };
   }
 
@@ -228,10 +255,35 @@ function resolveContextLimit(args: {
   return DEFAULT_FALLBACK_CONTEXT_LIMIT;
 }
 
-/** Use the catalog's advertised output limit when available, else the generous default. */
-function resolveMaxTokens(info?: ModelInfo): number {
-  if (info?.output && info.output > 0) return info.output;
-  return DEFAULT_MAX_TOKENS;
+/**
+ * Resolve the output-token budget for the main agent, clamped so it never
+ * crowds out the input window. The chosen budget is, in order:
+ *   1. `GLORP_MAX_OUTPUT_TOKENS` env override (operator lever), else
+ *   2. an explicit `outputLimit` from config (e.g. a "thinking" variant that
+ *      deliberately raises the cap), else
+ *   3. the catalog's advertised output limit, else {@link DEFAULT_MAX_TOKENS},
+ *      capped at {@link MAX_AUTO_OUTPUT_TOKENS}.
+ * Only the catalog default (3) gets the low auto-ceiling — explicit operator
+ * choices (1, 2) are trusted. The result is then clamped to
+ * {@link MAX_OUTPUT_CONTEXT_FRACTION} of the context window when known, so a
+ * turn always degrades (shorter completion) instead of hard-400-ing on input.
+ */
+function resolveMaxTokens(info?: ModelInfo, explicitOutput?: number): number {
+  const envCap = envMaxOutputTokens();
+  const explicit = explicitOutput && explicitOutput > 0 ? explicitOutput : undefined;
+  const advertised = info?.output && info.output > 0 ? info.output : DEFAULT_MAX_TOKENS;
+  let out = envCap ?? explicit ?? Math.min(advertised, MAX_AUTO_OUTPUT_TOKENS);
+  const context = info?.context && info.context > 0 ? info.context : undefined;
+  if (context) out = Math.min(out, Math.floor(context * MAX_OUTPUT_CONTEXT_FRACTION));
+  return Math.max(out, 1);
+}
+
+/** Parse a positive integer from `GLORP_MAX_OUTPUT_TOKENS`, or undefined when unset/invalid. */
+function envMaxOutputTokens(): number | undefined {
+  const raw = process.env.GLORP_MAX_OUTPUT_TOKENS;
+  if (!raw) return undefined;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 /**

@@ -5,6 +5,7 @@ import * as os from "node:os";
 
 import { pickModel } from "../src/agent/model-picker.ts";
 import { CredentialsStore } from "../src/agent/credentials.ts";
+import { ModelCatalog } from "../src/agent/model-catalog.ts";
 
 let dataDir: string;
 let savedKeys: Record<string, string | undefined>;
@@ -397,6 +398,96 @@ describe("pickModel + basedOn (custom providers inheriting known defaults)", () 
     // for the reasoning hint to be applied. Adapter constructed = success.
     expect(picked.adapter.name).toBe("openai-compat:gpt-5");
     expect(picked.label).toContain("high");
+  });
+});
+
+describe("pickModel + output-token clamp (issue: near-full-window output 400s)", () => {
+  /** Write a catalog entry with explicit context/output so resolveMaxTokens has data. */
+  function seedCatalog(key: string, context: number, output: number): ModelCatalog {
+    const id = key.includes("/") ? key.slice(key.lastIndexOf("/") + 1) : key;
+    const providerId = key.includes("/") ? key.slice(0, key.indexOf("/")) : "unknown";
+    fs.writeFileSync(
+      path.join(dataDir, "model-catalog.json"),
+      JSON.stringify({
+        fetched_at: Date.now(),
+        source: "test",
+        entries: { [key]: { providerId, id, context, output } },
+      }),
+    );
+    process.env.GLORP_DISABLE_CATALOG_REFRESH = "1";
+    return new ModelCatalog(dataDir);
+  }
+
+  afterEach(() => {
+    delete process.env.GLORP_MAX_OUTPUT_TOKENS;
+    delete process.env.GLORP_DISABLE_CATALOG_REFRESH;
+  });
+
+  test("a 512000-of-524288 output advert is clamped so input has room", async () => {
+    process.env.ANTHROPIC_API_KEY = "k";
+    const catalog = seedCatalog("anthropic/claude-opus-4-7", 524_288, 512_000);
+    const picked = await pickModel({ provider: "anthropic", model: "claude-opus-4-7", catalog });
+    // Capped at the 32K auto ceiling — nowhere near the 512000 advert.
+    expect(picked.maxOutputTokens).toBe(32_768);
+    expect(picked.maxOutputTokens).toBeLessThan(524_288 - 32_768);
+  });
+
+  test("a sane advertised output limit passes through unchanged", async () => {
+    process.env.ANTHROPIC_API_KEY = "k";
+    const catalog = seedCatalog("anthropic/claude-opus-4-7", 200_000, 8_192);
+    const picked = await pickModel({ provider: "anthropic", model: "claude-opus-4-7", catalog });
+    expect(picked.maxOutputTokens).toBe(8_192);
+  });
+
+  test("GLORP_MAX_OUTPUT_TOKENS overrides the catalog advert", async () => {
+    process.env.ANTHROPIC_API_KEY = "k";
+    process.env.GLORP_MAX_OUTPUT_TOKENS = "16000";
+    const catalog = seedCatalog("anthropic/claude-opus-4-7", 524_288, 512_000);
+    const picked = await pickModel({ provider: "anthropic", model: "claude-opus-4-7", catalog });
+    expect(picked.maxOutputTokens).toBe(16_000);
+  });
+
+  test("an env override is still clamped to half the context window", async () => {
+    process.env.ANTHROPIC_API_KEY = "k";
+    process.env.GLORP_MAX_OUTPUT_TOKENS = "1000000"; // absurd — must not crowd out input
+    const catalog = seedCatalog("anthropic/claude-opus-4-7", 524_288, 512_000);
+    const picked = await pickModel({ provider: "anthropic", model: "claude-opus-4-7", catalog });
+    expect(picked.maxOutputTokens).toBe(262_144); // floor(524288 / 2)
+  });
+
+  test("falls back to the generous default when the catalog has no output limit", async () => {
+    process.env.ANTHROPIC_API_KEY = "k";
+    const picked = await pickModel({ provider: "anthropic", model: "claude-opus-4-7" });
+    expect(picked.maxOutputTokens).toBe(32_768);
+  });
+
+  test("an explicit variant outputLimit bypasses the auto ceiling", async () => {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({ type: "known", id: "anthropic", apiKey: "k" });
+    credentials.upsertProfile({
+      id: "anth__opus",
+      label: "anthropic · opus",
+      providerId: "anthropic",
+      model: "claude-opus-4-7",
+      variantName: "thinking",
+    });
+    credentials.setActive("anth__opus");
+    const catalog = seedCatalog("anthropic/claude-opus-4-7", 524_288, 512_000);
+    // A "thinking" variant deliberately raises the cap to 64K — above the 32K
+    // auto ceiling, but still under half the window, so it passes through.
+    const projectConfig = {
+      provider: {
+        anthropic: {
+          models: {
+            "claude-opus-4-7": {
+              variants: { thinking: { outputLimit: 64_000 } },
+            },
+          },
+        },
+      },
+    };
+    const picked = await pickModel({ credentials, catalog, projectConfig: projectConfig as never });
+    expect(picked.maxOutputTokens).toBe(64_000);
   });
 });
 

@@ -742,5 +742,16 @@ components:
         status: { type: string, enum: [provisioning, idle, busy, error, destroyed] }
         busy: { type: boolean }
         text: { type: [string, "null"], description: The latest agent answer. }
-        error: { type: [string, "null"] }
+        error: { type: [string, "null"], description: Fatal, session-level error (the session is wedged in the error state). }
+        last_error:
+          type: [string, "null"]
+          description: >-
+            The most recent turn's error, when one failed (e.g. a model 400) even
+            though the session stayed healthy. Lets a polled consumer tell a failed
+            turn from an empty one without the WebSocket stream. Null when the last
+            turn succeeded or none has run.
+        last_turn_state:
+          type: [string, "null"]
+          enum: [ok, error, null]
+          description: Outcome of the most recent turn — "error", "ok", or null if none has run.
         turn_count: { type: integer }

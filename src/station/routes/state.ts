@@ -45,7 +45,17 @@ export function stateRoutes(manager: SessionManager): StateRoutes {
           break;
         }
       }
-      return json({ status: dto.state, busy: dto.busy, text, error: dto.error, turn_count: dto.turn_count });
+      const lastError = session.stats.lastError;
+      const lastTurnState = lastError ? "error" : dto.turn_count > 0 ? "ok" : null;
+      return json({
+        status: dto.state,
+        busy: dto.busy,
+        text,
+        error: dto.error,
+        last_error: lastError,
+        last_turn_state: lastTurnState,
+        turn_count: dto.turn_count,
+      });
     },
 
     async plan(id): Promise<Response> {
