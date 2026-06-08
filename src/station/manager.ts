@@ -295,10 +295,16 @@ export class SessionManager {
       if (session.stats.busy || session.state === "destroyed") continue;
       if (session.stream.size > 0) continue; // a client is actively watching
       if (now - session.lastActivity < idleMs) continue;
-      this.sessions.delete(session.id);
       await session.flush().catch(() => {});
-      await session.destroy(); // shuts the handle; snapshot stays on disk
-      reaped.push(session.id);
+      try {
+        await session.destroy(); // shuts the handle; snapshot stays on disk
+        this.sessions.delete(session.id);
+        reaped.push(session.id);
+      } catch (err) {
+        // Keep it registered so a later sweep (or shutdown) can retry teardown,
+        // and don't let one failure abort reaping the rest of this pass.
+        console.warn(`[glorp-station] gc: failed to unload session ${session.id}:`, err);
+      }
     }
     return reaped;
   }

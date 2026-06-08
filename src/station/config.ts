@@ -78,12 +78,21 @@ interface StationFileConfig {
   auth?: { enabled?: boolean };
 }
 
-/** Parse a non-negative integer env var; undefined when unset/invalid. */
-function envInt(name: string): number | undefined {
+/**
+ * Parse a bounded INTEGER env var; undefined when unset/invalid. Rejects
+ * non-integers (e.g. `"0.5"`) outright rather than flooring them — silently
+ * turning `0.5` into `0` would disable the GC TTL the operator meant to set.
+ */
+function envInt(name: string, min: number): number | undefined {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === "") return undefined;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined;
+  return Number.isInteger(n) && n >= min ? n : undefined;
+}
+
+/** Validate a `station.json` integer field against a floor; undefined if bad. */
+function fileInt(value: unknown, min: number): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= min ? value : undefined;
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -138,10 +147,16 @@ export function loadStationConfig(overrides: StationConfigOverrides = {}): Stati
     defaultModel: overrides.model ?? file.defaultModel,
     permissionMode: overrides.permissionMode ?? file.permissionMode ?? "normal",
     filesDir: file.filesDir,
+    // TTL floor 0 (0 disables the GC); interval floor 1ms so a bad value can
+    // never drive setInterval into a hot loop.
     idleSessionTtlMs:
-      envInt("GLORP_STATION_IDLE_TTL_MS") ?? file.idleSessionTtlMs ?? DEFAULT_IDLE_TTL_MS,
+      envInt("GLORP_STATION_IDLE_TTL_MS", 0) ??
+      fileInt(file.idleSessionTtlMs, 0) ??
+      DEFAULT_IDLE_TTL_MS,
     gcIntervalMs:
-      envInt("GLORP_STATION_GC_INTERVAL_MS") ?? file.gcIntervalMs ?? DEFAULT_GC_INTERVAL_MS,
+      envInt("GLORP_STATION_GC_INTERVAL_MS", 1) ??
+      fileInt(file.gcIntervalMs, 1) ??
+      DEFAULT_GC_INTERVAL_MS,
     auth: {
       // undefined ⇒ server applies the loopback-aware default at startup.
       enabled: overrides.auth?.enabled ?? envAuthEnabled() ?? file.auth?.enabled,

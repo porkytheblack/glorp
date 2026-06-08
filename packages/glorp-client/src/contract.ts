@@ -118,7 +118,8 @@ export interface FileListResponse {
  *   empty         — a turn completed but produced no text (real empty answer)
  *   idle          — no turn has run yet (created/rehydrated, never engaged)
  *   provisioning  — still setting up (template run / handle not built)
- *   error         — the session is in the unrecoverable error state
+ *   error         — a fatal session failure, OR the last turn errored (e.g. a
+ *                   model 400) while the session itself stayed healthy
  */
 export type SessionResultReason = "running" | "ok" | "empty" | "idle" | "provisioning" | "error";
 
@@ -127,7 +128,17 @@ export interface SessionResult {
   status: SessionLifecycle;
   busy: boolean;
   text: string | null;
+  /** Fatal, session-level error (the session is wedged in the `error` state). */
   error: string | null;
+  /**
+   * The most recent turn's error, when one failed (e.g. a model 400), even
+   * though the session itself stayed healthy. Lets a polled consumer tell a
+   * *failed* turn from an *empty* one (`busy:false`, `text:null`) without the
+   * WebSocket stream. Null when the last turn succeeded or none has run.
+   */
+  last_error: string | null;
+  /** Outcome of the most recent turn: `"error"`, `"ok"`, or null if none has run. */
+  last_turn_state: "ok" | "error" | null;
   turn_count: number;
   /** Machine-readable explanation of `text`/status (see `SessionResultReason`). */
   reason: SessionResultReason;

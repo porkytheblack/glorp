@@ -106,7 +106,7 @@ The wedge is keyed to a namespace's **on-disk subtree**, not to in-memory state 
 which is why a container restart doesn't clear it but `namespaces.delete(id, true)`
 (which wipes the subtree) does. The per-namespace state on the volume is:
 
-```
+```text
 <dataDir>/namespaces/<id>/
   sessions/            session + sub-agent snapshots (per-session)
   workspaces.json      first-class workspace registry

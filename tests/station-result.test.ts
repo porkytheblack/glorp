@@ -10,6 +10,8 @@ import * as path from "node:path";
 
 import { startStation, type StationHandle } from "../src/station/server.ts";
 import { loadStationConfig } from "../src/station/config.ts";
+import { SessionManager } from "../src/station/manager.ts";
+import { stateRoutes } from "../src/station/routes/state.ts";
 
 const tmpDirs: string[] = [];
 const stations: StationHandle[] = [];
@@ -47,6 +49,8 @@ describe("GET /sessions/:id/result", () => {
       text: string | null;
       turn_count: number;
       reason: string;
+      last_error: string | null;
+      last_turn_state: "ok" | "error" | null;
     };
     expect(body.text).toBeNull();
     expect(body.busy).toBe(false);
@@ -55,7 +59,46 @@ describe("GET /sessions/:id/result", () => {
     // A never-run session reports "idle" (no worker engaged) — NOT "empty",
     // which is reserved for a turn that completed and produced no text.
     expect(["idle", "provisioning"]).toContain(body.reason);
+    // A fresh session has run no turns: no last error, no last-turn outcome.
+    expect(body.last_error).toBeNull();
+    expect(body.last_turn_state).toBeNull();
 
     expect((await fetch(`${base}/sessions/does-not-exist/result`)).status).toBe(404);
+  });
+
+  it("surfaces a failed turn's error as last_error (distinct from an empty turn)", async () => {
+    const dataDir = tmp();
+    const manager = new SessionManager({
+      dataDir,
+      workspaceRoot: path.join(dataDir, "workspaces"),
+      permissionMode: "normal",
+    });
+    const session = await manager.create({ workspace: tmp() });
+    const routes = stateRoutes(manager);
+
+    // Simulate a turn that runs then 400s mid-stream (a bridge `error` event,
+    // not a fatal session failure): busy → error → idle. This is exactly the
+    // shape the model-400 produces — the session stays healthy and idle.
+    session.bridge.emit({ type: "busy", busy: true });
+    session.bridge.emit({ type: "error", message: "400 … 512000 in the output" });
+    session.bridge.emit({ type: "busy", busy: false });
+
+    const res = await routes.result(session.id);
+    const body = (await res.json()) as {
+      busy: boolean;
+      text: string | null;
+      error: string | null;
+      last_error: string | null;
+      last_turn_state: "ok" | "error" | null;
+      reason: string;
+    };
+    // Looks idle-with-no-output, but last_error/last_turn_state expose the failure.
+    expect(body.busy).toBe(false);
+    expect(body.text).toBeNull();
+    expect(body.error).toBeNull(); // not a fatal session error
+    expect(body.last_error).toBe("400 … 512000 in the output");
+    expect(body.last_turn_state).toBe("error");
+    // ...and `reason` classifies it as a failure, not an "empty" turn.
+    expect(body.reason).toBe("error");
   });
 });

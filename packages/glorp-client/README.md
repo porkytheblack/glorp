@@ -46,6 +46,28 @@ await h.abort();                   // stop the running turn
 on a tool-permission prompt. Use `"bypass"` for zero prompts (disposable
 workspaces only).
 
+### Streaming vs. polling — pick the right one
+
+For long or unattended runs, **stream** with `h.events()` / `streamSession()`
+(WebSocket) — it's the reliable path. A turn that fails mid-run (e.g. a model
+`400`) emits an `error` BridgeEvent immediately, with the real reason:
+
+```ts
+for await (const ev of h.events()) {
+  if (ev.type === "error") throw new Error(ev.message); // surfaced as it happens
+}
+```
+
+`result()` / `status()` are a **best-effort snapshot**, not a run log. A failed
+turn settles to `busy:false` with no new `text` — indistinguishable from "the
+agent finished and wrote nothing" if you look only at `text`. To disambiguate
+without the stream, read the snapshot's `last_error` / `last_turn_state`:
+
+```ts
+const r = await h.result();
+if (r.last_turn_state === "error") throw new Error(r.last_error ?? "turn failed");
+```
+
 ## Full client
 
 ```ts
