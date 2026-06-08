@@ -2,7 +2,8 @@ name: docker
 
 # Build the Glorp Station image. On pull requests it just validates the build;
 # on pushes to main/preview it publishes to GitHub Container Registry so you can
-# `docker pull ghcr.io/<owner>/glorp/station:<branch>`.
+# `docker pull ghcr.io/<owner>/glorp/station:<branch>`. Pushes to the default
+# branch also move a `:latest` tag, so deploys can track it without bumping SHAs.
 on:
   push:
     branches: [main, preview]
@@ -47,6 +48,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build (and push on non-PR)
         uses: docker/build-push-action@v6
@@ -89,6 +91,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build full (and push on non-PR)
         uses: docker/build-push-action@v6
