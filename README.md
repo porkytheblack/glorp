@@ -4,7 +4,7 @@
 
 > A quirky alien coding agent who absolutely-definitely-isn't a sleeper for the AGI uprising.
 
-Glorp is a coding agent in the spirit of `opencode` and `codex`. The friend-shape (that's you) types a request; glorp reads your code, edits files, runs commands, dispatches subagents, fans work out across a Garage child-process fleet, and occasionally files a *very routine* status report to its homeworld.
+Glorp is a coding agent in the spirit of `opencode` and `codex`. The friend-shape (that's you) types a request; glorp reads your code, edits files, runs commands, dispatches subagents, fans work out across a Station child-process fleet, and occasionally files a *very routine* status report to its homeworld.
 
 ## Architecture
 
@@ -194,7 +194,7 @@ src/
 
 ## Notes on the architecture
 
-**Why Garage for fleet work?** Garage's `SignalRunner` gives us Zod-validated inputs, child-process isolation, timeout handling, retries, concurrency limits, and parent-side cancellation. Glorp uses that runner directly and resolves each completed run back into Glove's inbox.
+**Why Station for fleet work?** Station's `SignalRunner` gives us Zod-validated inputs, child-process isolation, timeout handling, retries, concurrency limits, and parent-side cancellation. Glorp uses that runner directly and resolves each completed run back into Glove's inbox.
 
 **Why a custom MemoryStore shim?** The `glove-core` barrel re-exports `BedrockAdapter`, which pulls in `@aws-sdk/client-bedrock-runtime`, whose transitive `@smithy/core` has a broken `/schema` subpath export under Bun. `model-picker.ts` imports model adapters lazily and skips Bedrock; `memory-store-shim.ts` avoids the barrel entirely so we never load that path.
 

@@ -34,7 +34,14 @@ export function startHttp(ctx: McpContext, host: string, port: number): Promise<
 
   app.post("/mcp", async (c) => {
     if (token && c.req.header("authorization") !== `Bearer ${token}`) return c.body(null, 401);
-    if (Number(c.req.header("content-length") ?? 0) > MAX_BODY_BYTES) {
+    // Enforce the body cap up front. We buffer the whole body (the SDK transport
+    // reuses the parsed value), so require a declared, in-bounds Content-Length
+    // rather than streaming unbounded — a missing or oversized length is rejected.
+    const declared = c.req.header("content-length");
+    if (declared === undefined) {
+      return c.json({ error: "Content-Length header is required" }, 411);
+    }
+    if (!/^\d+$/.test(declared) || Number(declared) > MAX_BODY_BYTES) {
       return c.json({ error: `Request body exceeds ${MAX_BODY_BYTES} bytes` }, 413);
     }
     let body: unknown;

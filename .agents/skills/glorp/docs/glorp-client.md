@@ -1,7 +1,7 @@
 # @porkytheblack/glorp-client
 
 A small, typed client for driving a remote [Glorp](https://github.com/porkytheblack/glorp)
-Station: create workspaces, run coding agents, and poll or stream their results
+Garage: create workspaces, run coding agents, and poll or stream their results
 over an API-key-secured HTTP/WS API. Zero runtime dependencies; runs in Node 18+,
 Bun, and the browser.
 
@@ -71,7 +71,7 @@ API groups: `workspaces`, `sessions`, `models`, `keys`, `namespaces`, plus
 
 ## Multi-tenancy (namespaces)
 
-A Station can host isolated **namespaces** (one per user). An admin key provisions
+A Garage can host isolated **namespaces** (one per user). An admin key provisions
 them and mints namespace-bound keys; a tenant key transparently scopes every call.
 
 ```ts
@@ -94,7 +94,7 @@ await admin.namespaces.delete(ns.id, true);
 ```
 
 `admin.namespaces` also exposes `list()`, `get(id)`, and `listKeys(id)`. Namespaces
-require the Station to run with auth on.
+require the Garage to run with auth on.
 
 ## Errors
 

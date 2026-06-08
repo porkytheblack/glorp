@@ -47,7 +47,7 @@ export default function ProvisioningPage() {
               <strong>{t.name}</strong>
               <p className="muted" style={{ minHeight: 38, marginTop: 6 }}>{t.description ?? "No description."}</p>
               <div className="row spread">
-                <span className="faint" style={{ fontSize: 12 }}>{(t.steps?.length ?? 0)} step(s)</span>
+                <span className="faint" style={{ fontSize: 12 }}>{(t.step_count ?? 0)} step(s)</span>
                 <button className="btn sm primary" onClick={() => { setLaunch(t); setParams(""); }}>Provision →</button>
               </div>
             </div>

@@ -25,7 +25,9 @@ export default function HomePage() {
   const profiles = useQuery<{ profiles: ProfileDto[] }>("/models/profiles");
 
   const [prompt, setPrompt] = useState("");
-  const [workspace, setWorkspace] = useState("");
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [workspacePath, setWorkspacePath] = useState("");
+  const [profileId, setProfileId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,7 +37,9 @@ export default function HomePage() {
     setError(null);
     try {
       const body: Record<string, unknown> = {};
-      if (workspace.trim()) body.workspace = workspace.trim();
+      if (workspaceId) body.workspaceId = workspaceId;
+      else if (workspacePath.trim()) body.workspace = workspacePath.trim();
+      if (profileId) body.profileId = profileId;
       const session = await api<SessionDto>("/sessions", { method: "POST", body });
       await api(`/sessions/${session.id}/messages`, { method: "POST", body: { text: prompt.trim() } });
       router.push(`/sessions/${session.id}`);
@@ -45,6 +49,8 @@ export default function HomePage() {
     }
   };
 
+  const wsList = workspaces.data?.workspaces ?? [];
+  const profileList = profiles.data?.profiles ?? [];
   const recent = (sessions.data?.sessions ?? []).slice(0, 5);
 
   return (
@@ -62,17 +68,37 @@ export default function HomePage() {
           onChange={(e) => setPrompt(e.target.value)}
           style={{ border: "none", background: "transparent", minHeight: 70, padding: 6 }}
         />
-        <div className="row spread mt-1" style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-          <input
-            className="input"
-            style={{ maxWidth: 360 }}
-            placeholder="workspace path (optional)"
-            value={workspace}
-            onChange={(e) => setWorkspace(e.target.value)}
-          />
-          <button className="btn primary" onClick={launch} disabled={busy || !prompt.trim()}>
-            {busy ? <span className="spinner" /> : "Launch ▸"}
-          </button>
+        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+          <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
+            <span className="faint" style={{ fontSize: 12, marginRight: 2 }}>workspace</span>
+            <button
+              className={`btn sm${workspaceId === "" && !workspacePath ? " primary" : " ghost"}`}
+              onClick={() => { setWorkspaceId(""); setWorkspacePath(""); }}
+            >default</button>
+            {wsList.map((w) => (
+              <button
+                key={w.id}
+                className={`btn sm${workspaceId === w.id ? " primary" : " ghost"}`}
+                onClick={() => { setWorkspaceId(w.id); setWorkspacePath(""); }}
+              >{w.name}</button>
+            ))}
+            <input
+              className="input"
+              style={{ maxWidth: 220, height: 30, padding: "4px 10px" }}
+              placeholder="…or a custom path"
+              value={workspacePath}
+              onChange={(e) => { setWorkspacePath(e.target.value); setWorkspaceId(""); }}
+            />
+          </div>
+          <div className="row spread">
+            <select className="select" style={{ maxWidth: 320 }} value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+              <option value="">Default model</option>
+              {profileList.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+            <button className="btn primary" onClick={launch} disabled={busy || !prompt.trim()}>
+              {busy ? <span className="spinner" /> : "Launch ▸"}
+            </button>
+          </div>
         </div>
         {error && <div className="badge red dot mt-2">{error}</div>}
       </div>

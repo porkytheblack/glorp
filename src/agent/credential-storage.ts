@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { CredentialsFile } from "./credentials.ts";
+import { SqliteCredentialStorage } from "./sqlite-credential-storage.ts";
 
 /** An empty, well-formed credentials document. */
 export function emptyCredentials(): CredentialsFile {
@@ -93,9 +94,15 @@ export class MemoryCredentialStorage implements CredentialStorageAdapter {
   }
 }
 
-/** Build the adapter named by `GARAGE_CREDENTIAL_STORAGE` (file | memory). */
+/** Build the adapter named by `GARAGE_CREDENTIAL_STORAGE` (file | memory | sqlite). */
 export function credentialStorageFromEnv(dataDir?: string): CredentialStorageAdapter {
   const kind = process.env.GARAGE_CREDENTIAL_STORAGE?.toLowerCase();
   if (kind === "memory") return new MemoryCredentialStorage();
+  if (kind === "sqlite") {
+    // SqliteCredentialStorage only loads better-sqlite3 inside its constructor,
+    // so importing the class costs nothing until this branch runs.
+    const dir = dataDir ?? path.join(os.homedir(), ".glorp");
+    return new SqliteCredentialStorage({ dbPath: path.join(dir, "credentials.db") });
+  }
   return new FileCredentialStorage(dataDir);
 }

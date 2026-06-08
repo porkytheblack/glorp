@@ -1,4 +1,4 @@
-# Glorp Station — Product Specification
+# Glorp Garage — Product Specification
 
 ## Problem Statement
 
@@ -6,41 +6,41 @@ Today, running Glorp on a remote server means SSH-ing in, launching a single TUI
 
 ## Target Users
 
-**Primary: Solo developer with a remote dev server.** Has a VPS or workstation they SSH into. Wants to fire up Glorp sessions for different projects, leave them running, and connect from their laptop, phone, or a CLI client. Comfortable with the command line.
+**Primary: Solo developer with a remote dev server.** Has a VPS or workgarage they SSH into. Wants to fire up Glorp sessions for different projects, leave them running, and connect from their laptop, phone, or a CLI client. Comfortable with the command line.
 
 **Secondary: Team lead or platform engineer.** Wants to offer Glorp-as-a-service to a small team (2-10 developers). Each developer gets their own sessions, the team shares a pool of API keys. No billing, no usage tracking — just a shared server running agents.
 
-**Explicitly not (in v1): Enterprise multi-tenancy.** RBAC, per-user billing, audit logging, SSO — none of this ships in v1. Station is a power tool for people who trust their server, not a SaaS platform.
+**Explicitly not (in v1): Enterprise multi-tenancy.** RBAC, per-user billing, audit logging, SSO — none of this ships in v1. Garage is a power tool for people who trust their server, not a SaaS platform.
 
 ## Value Proposition
 
 - **User value:** Run Glorp sessions that persist across connections. Start a task from your desk, check progress from your phone, pick it back up tomorrow. Run five agents in parallel against five repos without five terminal windows.
 - **Business value:** Unlocks "remote Glorp" — a prerequisite for any future client, VS Code extension, or collaborative feature. Also makes Glorp viable for CI/automation workflows (create session, send prompt, poll for completion, tear down).
 
-## What Glorp Station Is
+## What Glorp Garage Is
 
-Glorp Station is a long-running Bun process that:
+Glorp Garage is a long-running Bun process that:
 
 1. **Hosts a REST + WebSocket API** for managing Glorp sessions.
 2. **Manages the lifecycle** of multiple concurrent `GlorpHandle` instances, each scoped to its own workspace directory and event bus.
 3. **Provisions workspaces** from declarative setup templates (clone a repo, run init scripts).
-4. **Manages model credentials** with a layered model: Station provides defaults, sessions can override with custom API keys passed at creation time or changed at runtime.
+4. **Manages model credentials** with a layered model: Garage provides defaults, sessions can override with custom API keys passed at creation time or changed at runtime.
 5. **Streams session events** over WebSocket so any client (TUI, CLI, IDE extension) renders the same experience the terminal TUI does today.
 
-Station is **not** a scheduler, a queue, or a CI system. It does not decide when to run agents. It does not watch git for changes. It is a runtime that holds sessions in memory and exposes them over a network API.
+Garage is **not** a scheduler, a queue, or a CI system. It does not decide when to run agents. It does not watch git for changes. It is a runtime that holds sessions in memory and exposes them over a network API.
 
 ## User Stories
 
 ### P0 — Must ship
 
-1. As a developer, I want to **create a new session** by pointing Station at a directory on the host, so I can start an agent without SSH-ing into a TUI.
+1. As a developer, I want to **create a new session** by pointing Garage at a directory on the host, so I can start an agent without SSH-ing into a TUI.
 2. As a developer, I want to **send a message to a running session** and **receive the full event stream** (text deltas, tool calls, plan updates, task progress) over WebSocket, so my client renders the same experience as the terminal TUI.
 3. As a developer, I want to **list all sessions** and see their status (idle/busy, workspace, last activity, token counts).
 4. As a developer, I want to **resume a session** created in a previous connection, so I can disconnect and reconnect without losing state.
 5. As a developer, I want to **respond to permission prompts** through the API, so when the agent asks "Can I run `rm -rf`?", I can approve or deny remotely.
 6. As a developer, I want to **abort a running request**, so I can stop a runaway agent.
-7. As an admin, I want to **configure default API keys** on the Station that all sessions inherit.
-8. As a developer, I want to **provide my own API key** when creating a session, so I can use my personal quota or a different provider without touching Station config.
+7. As an admin, I want to **configure default API keys** on the Garage that all sessions inherit.
+8. As a developer, I want to **provide my own API key** when creating a session, so I can use my personal quota or a different provider without touching Garage config.
 
 ### P1 — Should ship in v1, can be descoped
 
@@ -59,28 +59,28 @@ Station is **not** a scheduler, a queue, or a CI system. It does not decide when
 
 ### Flow 1: Create session and start working
 
-1. Client sends `POST /sessions` with `{ workspace: "/home/dev/my-app" }` (uses Station's default API key) or `{ workspace: "/home/dev/my-app", credentials: { provider: "anthropic", apiKey: "sk-..." } }` (uses custom key).
-2. Station creates a `GlorpHandle` with the resolved credentials, returns a session object with id and status.
+1. Client sends `POST /sessions` with `{ workspace: "/home/dev/my-app" }` (uses Garage's default API key) or `{ workspace: "/home/dev/my-app", credentials: { provider: "anthropic", apiKey: "sk-..." } }` (uses custom key).
+2. Garage creates a `GlorpHandle` with the resolved credentials, returns a session object with id and status.
 3. Client opens a WebSocket to `/sessions/{id}/events`.
 4. Client sends `POST /sessions/{id}/messages` with `{ text: "Add rate limiting to the API routes" }`.
-5. Station calls `glorpHandle.send(text)`.
+5. Garage calls `glorpHandle.send(text)`.
 6. Client receives a stream of `BridgeEvent`s over WebSocket: text_delta, tool_started/finished, display_slot_pushed (permission prompts).
 7. If a permission prompt arrives, client sends `POST /sessions/{id}/slots/{slotId}` with `{ action: "approve" }`.
-8. Station calls `glorpHandle.resolvePermission(slotId, true)`. Agent continues.
+8. Garage calls `glorpHandle.resolvePermission(slotId, true)`. Agent continues.
 9. Eventually a `busy: false` event arrives. Agent is idle.
 
 ### Flow 2: Reconnect to existing session
 
 1. Client sends `GET /sessions` to list all sessions with metadata.
 2. Client opens WebSocket to `/sessions/{id}/events`.
-3. Station sends `session_hydrate` event with full state (conversation history, plan, tasks, inbox, stats).
+3. Garage sends `session_hydrate` event with full state (conversation history, plan, tasks, inbox, stats).
 4. Client renders current state. Can send new messages normally.
 
 ### Flow 3: Create session from template
 
 1. Client sends `POST /sessions` with `{ template: "next-app", params: { repo: "github.com/me/my-repo" } }`.
-2. Station runs template steps sequentially: mkdir workspace, git clone, bun install, copy config files.
-3. Station creates `GlorpHandle` for the new workspace.
+2. Garage runs template steps sequentially: mkdir workspace, git clone, bun install, copy config files.
+3. Garage creates `GlorpHandle` for the new workspace.
 4. Returns session object with workspace path.
 
 ## Scope Boundaries
@@ -90,20 +90,20 @@ Station is **not** a scheduler, a queue, or a CI system. It does not decide when
 - Multi-session lifecycle management (create, list, destroy, query state)
 - REST API for session management and message sending
 - WebSocket API for real-time event streaming (1:1 mapping to existing `BridgeEvent` types)
-- Layered credentials: Station defaults + per-session custom API keys
+- Layered credentials: Garage defaults + per-session custom API keys
 - Setup templates (declarative workspace provisioning)
-- Session persistence — sessions survive Station restarts by re-hydrating from GlorpStore snapshots
+- Session persistence — sessions survive Garage restarts by re-hydrating from GlorpStore snapshots
 - Basic health/status endpoint
 
 ### Out of scope — explicitly excluded from v1
 
-- **Authentication and authorization.** *(Shipped after v1.)* Station now supports API-key auth, required automatically on any non-loopback bind. See [`station-usage.md`](./station-usage.md#authentication--remote-access).
-- **User accounts and multi-tenancy.** *(Partially shipped after v1.)* Isolated **namespaces** (per-tenant data partitions + namespace-bound keys) now exist; full RBAC / SSO / per-user billing remain out of scope. See [`station-usage.md`](./station-usage.md#multi-tenant-namespaces).
+- **Authentication and authorization.** *(Shipped after v1.)* Garage now supports API-key auth, required automatically on any non-loopback bind. See [`garage-usage.md`](./garage-usage.md#authentication--remote-access).
+- **User accounts and multi-tenancy.** *(Partially shipped after v1.)* Isolated **namespaces** (per-tenant data partitions + namespace-bound keys) now exist; full RBAC / SSO / per-user billing remain out of scope. See [`garage-usage.md`](./garage-usage.md#multi-tenant-namespaces).
 - **Rate limiting or usage quotas.** Model providers handle this.
-- **Container/VM isolation.** Sessions run as the Station process user. Workspaces are directories. The permission system is the safety layer.
-- **Automatic session scheduling.** No cron, no git-hook triggers. Station is a runtime, not a scheduler.
-- **Remote workspace sync.** Workspaces must exist on Station's filesystem.
-- **Session migration between Station instances.**
+- **Container/VM isolation.** Sessions run as the Garage process user. Workspaces are directories. The permission system is the safety layer.
+- **Automatic session scheduling.** No cron, no git-hook triggers. Garage is a runtime, not a scheduler.
+- **Remote workspace sync.** Workspaces must exist on Garage's filesystem.
+- **Session migration between Garage instances.**
 
 ### Future considerations (post-v1)
 
@@ -117,43 +117,43 @@ Station is **not** a scheduler, a queue, or a CI system. It does not decide when
 ## Success Metrics
 
 1. **Can create a session, send a message, and receive the event stream over the network** without touching a terminal on the host. This is the "does it work" bar.
-2. **Session state survives Station restarts.** Kill the process, start it again, sessions rehydrate from disk, clients reconnect and see full history.
+2. **Session state survives Garage restarts.** Kill the process, start it again, sessions rehydrate from disk, clients reconnect and see full history.
 3. **Five concurrent sessions without cross-contamination.** Events from session A never leak to session B. Workspaces, credentials, and permissions are isolated.
 4. **Latency under 50ms** between agent event emission and WebSocket delivery on a local network. Streaming should feel like the TUI.
-5. **Template-created session startup time dominated by template steps** (git clone, npm install), not Station overhead. Station's own setup should complete in under 1 second.
+5. **Template-created session startup time dominated by template steps** (git clone, npm install), not Garage overhead. Garage's own setup should complete in under 1 second.
 
 ## Technical Considerations
 
 ### Critical refactor: Bridge isolation
 
-Today `getBridge()` at `src/shared/bridge.ts` returns a process-global singleton. Station must give each session its own Bridge instance. The fix: pass a Bridge into `buildGlorp()` via `BuildGlorpOptions` instead of importing the global. This already has precedent — `credentials` is optional on `BuildGlorpOptions`. This is the single most important change before anything else works.
+Today `getBridge()` at `src/shared/bridge.ts` returns a process-global singleton. Garage must give each session its own Bridge instance. The fix: pass a Bridge into `buildGlorp()` via `BuildGlorpOptions` instead of importing the global. This already has precedent — `credentials` is optional on `BuildGlorpOptions`. This is the single most important change before anything else works.
 
 ### Session lifecycle states
 
-A session needs clear states: `provisioning` (template running), `idle` (agent not processing), `busy` (agent processing a request), `error` (unrecoverable failure), `destroyed`. The existing `busy` BridgeEvent covers idle/busy transitions. Station adds the outer lifecycle envelope.
+A session needs clear states: `provisioning` (template running), `idle` (agent not processing), `busy` (agent processing a request), `error` (unrecoverable failure), `destroyed`. The existing `busy` BridgeEvent covers idle/busy transitions. Garage adds the outer lifecycle envelope.
 
 ### Process model
 
-All sessions run in the same Bun process. Glorp is IO-bound (waiting on LLM API calls), not CPU-bound, so this is fine for 5-20 concurrent sessions. If a session's agent throws an unhandled rejection, Station must catch it and move the session to `error` state without crashing the entire process. The existing 30-minute watchdog in `glorp.ts` `send()` is a starting point but needs hardening.
+All sessions run in the same Bun process. Glorp is IO-bound (waiting on LLM API calls), not CPU-bound, so this is fine for 5-20 concurrent sessions. If a session's agent throws an unhandled rejection, Garage must catch it and move the session to `error` state without crashing the entire process. The existing 30-minute watchdog in `glorp.ts` `send()` is a starting point but needs hardening.
 
 ### Workspace provisioning
 
-Templates are JSON files stored in `<stationDataDir>/templates/`. Each template is an ordered list of steps: `{ type: "git-clone", repo: "..." }`, `{ type: "shell", command: "bun install" }`, `{ type: "copy", from: "...", to: "..." }`. Steps run sequentially. If any step fails, session creation fails and the workspace is cleaned up. Template parameters use `{param:NAME}` interpolation.
+Templates are JSON files stored in `<garageDataDir>/templates/`. Each template is an ordered list of steps: `{ type: "git-clone", repo: "..." }`, `{ type: "shell", command: "bun install" }`, `{ type: "copy", from: "...", to: "..." }`. Steps run sequentially. If any step fails, session creation fails and the workspace is cleaned up. Template parameters use `{param:NAME}` interpolation.
 
 ### Credentials: layered model with custom API keys
 
 Credentials resolve in priority order:
 
 1. **Session-level override** — custom API key passed in `POST /sessions` or `POST /sessions/:id/credentials`. Held in memory only for the life of the session and never persisted to disk (per Open Question 7, recommendation b). Never logged, never returned in API responses (only `provider` + last-4 of key shown). Sessions that need persistence re-supply the key on reconnect.
-2. **Station default** — the CredentialsStore configured on the Station. Sessions that don't provide a custom key inherit this.
+2. **Garage default** — the CredentialsStore configured on the Garage. Sessions that don't provide a custom key inherit this.
 3. **Workspace glorp.json** — existing `loadProjectConfig` can reference a provider/model, but keys always come from layer 1 or 2.
 
-The session-level credential is a thin wrapper: Station constructs a `CredentialsStore` per session that merges the custom key (if any) on top of the Station-wide store. This store is passed to `BuildGlorpOptions.credentials`. When a session's key is revoked or changed, Station rebuilds the model adapter via `glorpHandle.swapProfile()`.
+The session-level credential is a thin wrapper: Garage constructs a `CredentialsStore` per session that merges the custom key (if any) on top of the Garage-wide store. This store is passed to `BuildGlorpOptions.credentials`. When a session's key is revoked or changed, Garage rebuilds the model adapter via `glorpHandle.swapProfile()`.
 
 API surface:
 ```
 POST   /sessions/:id/credentials          Set custom API key for a session
-DELETE /sessions/:id/credentials          Revert to Station defaults
+DELETE /sessions/:id/credentials          Revert to Garage defaults
 ```
 
 The `POST /sessions` body accepts an optional `credentials` object:
@@ -184,7 +184,7 @@ POST   /sessions/:id/slots/:sid           Resolve display slot / permission
 GET    /sessions/:id/permissions          List granted permissions
 DELETE /sessions/:id/permissions/:key     Revoke a permission
 POST   /sessions/:id/credentials          Set custom API key for session
-DELETE /sessions/:id/credentials          Revert session to Station defaults
+DELETE /sessions/:id/credentials          Revert session to Garage defaults
 
 GET    /templates                         List templates
 GET    /templates/:name                   Template detail
@@ -193,7 +193,7 @@ GET    /models/providers                  Configured providers
 GET    /models/profiles                   Configured model profiles
 POST   /models/profiles/:id/activate     Set default profile
 
-GET    /health                            Station health check
+GET    /health                            Garage health check
 ```
 
 ### WebSocket protocol
@@ -202,23 +202,23 @@ Endpoint: `GET /sessions/:id/events` (upgrade to WS). On connect, sends `session
 
 ### Entry point
 
-Station is a separate entry point (`src/station/`) that reuses the agent layer (`src/agent/`) but has its own HTTP/WS server. Do not retrofit the existing `src/server/` — compose from agent primitives cleanly.
+Garage is a separate entry point (`src/garage/`) that reuses the agent layer (`src/agent/`) but has its own HTTP/WS server. Do not retrofit the existing `src/server/` — compose from agent primitives cleanly.
 
 ## Open Questions
 
-1. **Default workspace location.** Proposal: `<stationDataDir>/workspaces/<session-id>/`. User-specified paths accepted as-is. Station validates the path is writable at creation time. Fail fast.
+1. **Default workspace location.** Proposal: `<garageDataDir>/workspaces/<session-id>/`. User-specified paths accepted as-is. Garage validates the path is writable at creation time. Fail fast.
 
-2. **Auto-pause on inactivity.** If a session has been idle for 2+ hours, should Station release its in-memory GlorpHandle and re-hydrate on next request? Skip for v1; add if memory pressure is observed.
+2. **Auto-pause on inactivity.** If a session has been idle for 2+ hours, should Garage release its in-memory GlorpHandle and re-hydrate on next request? Skip for v1; add if memory pressure is observed.
 
-3. **Template secrets.** Template params should support `{env:VAR}` interpolation. Station injects env vars into step execution but never logs or persists interpolated values.
+3. **Template secrets.** Template params should support `{env:VAR}` interpolation. Garage injects env vars into step execution but never logs or persists interpolated values.
 
 4. **WebSocket envelope vs raw events.** Wrap in `{ sessionId, seq, event }`. The seq enables clients to detect gaps and request re-hydrate. The sessionId future-proofs for multiplexed connections.
 
 5. **Default model profile for new sessions.** Use CredentialsStore's active profile as default, accept `profileId` in create-session request as override, and honor `glorp.json` in workspace via existing `loadProjectConfig`.
 
-6. **Station configuration file.** `station.json` in the data dir, with CLI flag overrides for address and port.
+6. **Garage configuration file.** `garage.json` in the data dir, with CLI flag overrides for address and port.
 
-7. **Custom API key storage.** Session-level API keys must not be stored in plaintext. Options: (a) encrypt at rest with a Station master key derived from a passphrase, (b) hold only in memory and require re-submission on Station restart, (c) use OS keychain. Recommendation: (b) for v1 — simplest, no crypto dependency, keys are transient. Sessions that need persistence can re-supply keys on reconnect.
+7. **Custom API key storage.** Session-level API keys must not be stored in plaintext. Options: (a) encrypt at rest with a Garage master key derived from a passphrase, (b) hold only in memory and require re-submission on Garage restart, (c) use OS keychain. Recommendation: (b) for v1 — simplest, no crypto dependency, keys are transient. Sessions that need persistence can re-supply keys on reconnect.
 
 ## Implementation Phases
 
@@ -236,7 +236,7 @@ Station is a separate entry point (`src/station/`) that reuses the agent layer (
 - Abort support
 - Session state query endpoints (history, plan, tasks)
 - Multi-client WebSocket (multiple subscribers per session)
-- Session rehydration on Station restart
+- Session rehydration on Garage restart
 - Centralized model management endpoints
 
 ### Phase 3 — Templates and custom credentials (1 week)
@@ -245,5 +245,5 @@ Station is a separate entry point (`src/station/`) that reuses the agent layer (
 - Template CRUD endpoints
 - Per-session custom API key endpoints
 - Error recovery (session error state, process-level exception handling)
-- Station configuration file
+- Garage configuration file
 - Graceful shutdown (flush all sessions on SIGTERM)

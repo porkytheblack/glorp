@@ -1,12 +1,12 @@
 ---
 name: glorp
-description: Guide for downstream coding agents driving Glorp — especially Glorp Station (the remote multi-session control plane) and its sandboxes (Station-provisioned workspaces). Use when programmatically creating sessions, running coding agents over the REST/WebSocket API, the @porkytheblack/glorp-client SDK, or the @porkytheblack/glorp-mcp MCP server, provisioning tenant namespaces, sandboxes from templates, exchanging files, or wiring Glorp into CI/orchestration.
+description: Guide for downstream coding agents driving Glorp — especially Glorp Garage (the remote multi-session control plane) and its sandboxes (Garage-provisioned workspaces). Use when programmatically creating sessions, running coding agents over the REST/WebSocket API, the @porkytheblack/glorp-client SDK, or the @porkytheblack/glorp-mcp MCP server, provisioning tenant namespaces, sandboxes from templates, exchanging files, or wiring Glorp into CI/orchestration.
 ---
 
-# Driving Glorp & Glorp Station
+# Driving Glorp & Glorp Garage
 
 You are an agent working *with* Glorp programmatically — not the Glorp TUI user. This
-skill tells you how to start a Station, create sessions, run coding agents inside
+skill tells you how to start a Garage, create sessions, run coding agents inside
 **sandboxes**, and collect their results, safely and without deadlocking.
 
 **Glorp** is a coding agent (read/write/edit/bash/glob/grep/ls/web_fetch, subagents,
@@ -16,10 +16,11 @@ a mesh for fan-out). You can run it three ways:
 |---|---|---|
 | **TUI** | `glorp` | A human is driving interactively. Not your path. |
 | **Headless one-shot** | `glorp -p "…"` | One prompt, one workspace, exits when done. |
-| **Station** | `glorp station` | You need *many* concurrent, long-lived, remotely-driven sessions. **This is your path for orchestration.** |
+| **Garage** | `glorp garage` | You need *many* concurrent, long-lived, remotely-driven sessions. **This is your path for orchestration.** |
 
-> **Two unrelated "stations".** "Glorp **Station**" (this skill) is the multi-session
-> HTTP/WS control plane. It is *not* the `station-signal` fleet runner. Don't conflate them.
+> **Don't conflate two subsystems.** "Glorp **Garage**" (this skill) is the multi-session
+> HTTP/WS control plane. It is *not* the `station-signal` fleet runner (a separate async
+> fan-out framework). Garage was formerly named "Station", so older notes may use that name.
 
 ---
 
@@ -29,41 +30,43 @@ a mesh for fan-out). You can run it three ways:
   permission state. State: `provisioning → idle ⇄ busy → (error) → destroyed`.
 - A **workspace** is the directory the agent reads and edits. Two kinds:
   - **Caller-supplied workspace** — an existing host directory you point at
-    (`"workspace": "/abs/path"`). Station **never deletes** these.
-  - **Sandbox** — a workspace Station *provisions itself* under `workspaceRoot`
+    (`"workspace": "/abs/path"`). Garage **never deletes** these.
+  - **Sandbox** — a workspace Garage *provisions itself* under `workspaceRoot`
     (default `<data-dir>/workspaces`). Created when you omit `workspace`, or when you
-    provision from a `template`. Station may clean these up. **Sandboxes are the safe
+    provision from a `template`. Garage may clean these up. **Sandboxes are the safe
     target for `bypass`/`auto` unattended runs and disposable work.**
 
 The distinction matters for cleanup: `DELETE /sessions/:id?workspace=true` removes the
-folder **only if it is a Station-provisioned sandbox under `workspaceRoot` that no other
+folder **only if it is a Garage-provisioned sandbox under `workspaceRoot` that no other
 session references.** Caller-supplied and shared workspaces are always kept. So you can
 safely cascade-delete a sandbox without risking a user's real repo.
 
 ---
 
-## Start a Station
+## Start a Garage
 
 ```bash
-glorp station                       # REST + WS on http://127.0.0.1:4271 (loopback, auth OFF)
-glorp station --host 0.0.0.0        # remote-reachable → auth REQUIRED automatically
-glorp station --workspace-root /srv/sandboxes   # where sandboxes get provisioned
+glorp garage                       # REST + WS on http://127.0.0.1:4271 (loopback, auth OFF)
+glorp garage --host 0.0.0.0        # remote-reachable → auth REQUIRED automatically
+glorp garage --workspace-root /srv/sandboxes   # where sandboxes get provisioned
 ```
 
 - Loopback (`127.0.0.1`) binds are **open**; any non-loopback bind **requires an API key**.
-  Force either way with `GLORP_STATION_AUTH=required|off`.
+  Force either way with `GLORP_GARAGE_AUTH=required|off`.
 - Credentials for the agents themselves come from `~/.glorp` config or env vars
   (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …).
-- Persistent config: a `station.json` in the data dir (CLI flags override it).
+- Persistent config: a `garage.json` in the data dir (CLI flags override it).
 - Every endpoint is served at both `/api/v1/…` (stable) and the bare root. Prefer
   `/api/v1` for anything durable.
+- **Back-compat:** `glorp station` still works as a hidden alias for `glorp garage`, and
+  the legacy `GLORP_STATION_*` env vars and a `station.json` config file are still honored.
 
 ### Auth (non-loopback)
 
 ```bash
-glorp station keys add ci-bot --scopes admin   # prints the raw glsk_… key ONCE — capture it
-glorp station keys list
-glorp station keys revoke <id>
+glorp garage keys add ci-bot --scopes admin   # prints the raw glsk_… key ONCE — capture it
+glorp garage keys list
+glorp garage keys revoke <id>
 ```
 
 Send it as `Authorization: Bearer glsk_…` on REST, or `?api_key=glsk_…` on the WebSocket
@@ -115,7 +118,7 @@ Session lifecycle, the loop you'll write most often:
 ```bash
 BASE=http://127.0.0.1:4271/api/v1
 H='content-type: application/json'
-# (add  -H "authorization: Bearer glsk_…"  on any non-loopback Station)
+# (add  -H "authorization: Bearer glsk_…"  on any non-loopback Garage)
 
 # 1. Create a session. Omit "workspace" to get a fresh SANDBOX under workspaceRoot.
 ID=$(curl -s -X POST $BASE/sessions -H "$H" \
@@ -140,7 +143,7 @@ curl -s -X POST $BASE/sessions/$ID/abort
 curl -s -X DELETE "$BASE/sessions/$ID?workspace=true"
 ```
 
-Key endpoints (full table in [`docs/station-usage.md`](./docs/station-usage.md),
+Key endpoints (full table in [`docs/garage-usage.md`](./docs/garage-usage.md),
 contract in [`docs/openapi.yaml`](./docs/openapi.yaml)):
 
 | Method | Path | Purpose |
@@ -190,10 +193,10 @@ drop in config. Put JSON files in `<data-dir>/templates/`; the filename is the t
 ```
 
 - Step types: `git-clone` (`repo`, optional `dest`/`ref`), `shell` (`command`), `copy` (`from`,`to`).
-- Interpolation: `{param:NAME}` from the request `params`, `{env:VAR}` from Station's env.
+- Interpolation: `{param:NAME}` from the request `params`, `{env:VAR}` from Garage's env.
   Interpolated values are scrubbed from error messages (secret-safe).
 - Steps run sequentially. **On any failure the sandbox is torn down and creation fails** —
-  you never get a half-provisioned workspace. (Only a Station-created dir is removed; a
+  you never get a half-provisioned workspace. (Only a Garage-created dir is removed; a
   pre-existing caller dir is left intact.)
 
 ```bash
@@ -249,7 +252,7 @@ reconnect to re-hydrate. Commands you can push back: `send_message`, `abort`,
 
 `POST /sessions/:id/credentials` swaps a session onto its own provider key; `DELETE` reverts.
 The key is **in memory only** — never persisted, logged, or returned (responses show provider
-+ last-4). Re-supply after a Station restart.
++ last-4). Re-supply after a Garage restart.
 
 ---
 
@@ -279,14 +282,14 @@ curl -sX DELETE "$EP/api/v1/namespaces/ns_acme?data=true" -H "authorization: Bea
 
 Requests with no namespace resolve to the built-in `default` namespace (the legacy
 single-tenant layout) — existing setups keep working unchanged. Each namespace can
-hold its own model credentials, falling back to the station's defaults when unset.
+hold its own model credentials, falling back to the garage's defaults when unset.
 
 ---
 
 ## MCP server (for MCP-capable agents)
 
 If you're an MCP client (Claude Desktop/Code, Cursor, a custom orchestrator), you
-can drive a Station as **tools** instead of raw REST: run
+can drive a Garage as **tools** instead of raw REST: run
 [`@porkytheblack/glorp-mcp`](./docs/glorp-mcp.md), which wraps the kit and speaks
 MCP over stdio (default) or streamable HTTP (`--http`, `POST /mcp`).
 
@@ -321,11 +324,11 @@ cleanly if the configured key isn't admin. Full guide: [`docs/mcp.md`](./docs/mc
 
 Reference docs are bundled with this skill under [`./docs/`](./docs/):
 
-- [`docs/station-usage.md`](./docs/station-usage.md) — full usage guide (CLI, REST, WS, templates)
+- [`docs/garage-usage.md`](./docs/garage-usage.md) — full usage guide (CLI, REST, WS, templates)
 - [`docs/openapi.yaml`](./docs/openapi.yaml) — the machine-readable contract
-- [`docs/remote-orchestration.md`](./docs/remote-orchestration.md) — driving Station remotely
+- [`docs/remote-orchestration.md`](./docs/remote-orchestration.md) — driving Garage remotely
 - [`docs/mcp.md`](./docs/mcp.md) — the MCP server (drive Glorp from any MCP agent)
 - [`docs/glorp-client.md`](./docs/glorp-client.md) — the typed SDK (`@porkytheblack/glorp-client`)
 - [`docs/glorp-mcp.md`](./docs/glorp-mcp.md) — the MCP server package (`@porkytheblack/glorp-mcp`)
-- [`docs/codebase/station-internals.md`](./docs/codebase/station-internals.md) — how Station works under the hood
+- [`docs/codebase/garage-internals.md`](./docs/codebase/garage-internals.md) — how Garage works under the hood
 - [`docs/codebase/networking.md`](./docs/codebase/networking.md) — server/client/protocol/SDK internals

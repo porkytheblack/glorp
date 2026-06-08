@@ -1,7 +1,7 @@
 /**
  * The Garage HTTP/WS surface, expressed as a Hono app. CORS + browser-origin
  * policy run as middleware; a single catch-all delegates REST to the existing
- * `StationRouter` (auth, admin gating, namespace resolution preserved exactly);
+ * `GarageRouter` (auth, admin gating, namespace resolution preserved exactly);
  * WebSocket upgrades use Hono's Bun adapter. `server.ts` owns the lifecycle.
  */
 
@@ -114,11 +114,15 @@ export function buildGarageApp(deps: GarageAppDeps) {
       },
       upgradeWebSocket((c) => {
         const data = makeWsData(c.get("wsSession") as GarageSession);
-        const wrap = (ws: { send: (d: string) => void; readyState: number }): WsLike => ({
+        // Read the LIVE socket state via `ws.raw`: hono's WSContext.readyState is
+        // a per-event snapshot, so the broadcasters' "skip dead client" guard
+        // needs the underlying ServerWebSocket to stay accurate.
+        type RawWs = { send: (d: string) => void; readyState: number; raw?: { readyState: number } };
+        const wrap = (ws: RawWs): WsLike => ({
           data,
           send: (d) => ws.send(d),
           get readyState() {
-            return ws.readyState;
+            return ws.raw?.readyState ?? ws.readyState;
           },
         });
         return {

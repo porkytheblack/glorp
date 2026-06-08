@@ -12,11 +12,13 @@ import * as path from "node:path";
 import type { SessionManager } from "./manager.ts";
 import { createGarageRouter } from "./router.ts";
 import { CredentialsStore } from "../agent/credentials.ts";
+import { credentialStorageFromEnv } from "../agent/credential-storage.ts";
 import { TemplateStore } from "./templates/store.ts";
 import { NamespaceStore, DEFAULT_NAMESPACE_ID } from "./namespace-store.ts";
 import { NamespaceRegistry } from "./namespace-registry.ts";
 import { namespaceControlRoutes } from "./routes/namespaces.ts";
 import { KeyStore } from "./auth/key-store.ts";
+import { adminAuthConfigured } from "./auth/admin.ts";
 import { authRequired, type GarageConfig } from "./config.ts";
 import { startIdleGc } from "./gc.ts";
 import { buildGarageApp } from "./http-app.ts";
@@ -29,7 +31,7 @@ export interface GarageHandle {
 }
 
 export async function startGarage(config: GarageConfig): Promise<GarageHandle> {
-  const garageCredentials = new CredentialsStore(config.dataDir);
+  const garageCredentials = new CredentialsStore(credentialStorageFromEnv(config.dataDir));
   const templates = new TemplateStore(config.templatesDir);
   const namespaceStore = new NamespaceStore(config.dataDir, config.workspaceRoot);
   const registry = new NamespaceRegistry(namespaceStore, config, templates, garageCredentials);
@@ -61,6 +63,16 @@ export async function startGarage(config: GarageConfig): Promise<GarageHandle> {
     }
   } else {
     console.log("[glorp-garage] API-key auth: off (loopback). Bind a non-loopback host or set auth to enable.");
+  }
+
+  if (adminAuthConfigured()) {
+    console.log("[glorp-garage] admin dashboard login: enabled (GARAGE_ADMIN_USER)");
+    if (!process.env.GARAGE_JWT_SECRET) {
+      console.warn(
+        "[glorp-garage]   GARAGE_JWT_SECRET is unset — signing JWTs with a secret derived from the admin password. " +
+          "Set GARAGE_JWT_SECRET to a strong random value in production.",
+      );
+    }
   }
 
   const stopGc = startIdleGc(registry, config);

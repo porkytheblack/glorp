@@ -33,7 +33,8 @@ export default function NamespacesPage() {
 
   const destroy = async (id: string) => {
     try {
-      await api(`/namespaces/${id}`, { method: "DELETE", body: { removeData: false } });
+      // Data removal is gated by `?data=true`; default keeps the namespace's data.
+      await api(`/namespaces/${id}`, { method: "DELETE" });
       push("Namespace deleted", "success");
       reload();
     } catch (e) {

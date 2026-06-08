@@ -5,9 +5,9 @@ local agent server, the wire protocol it speaks, the in-repo client, and the
 standalone published `@porkytheblack/glorp-client` SDK.
 
 > Scope note: this covers `src/server/`, `src/client/`, `src/protocol/`,
-> `packages/glorp-client/`, and `src/cli-serve.ts`. The Station control plane
-> (`src/station/`) is documented separately; it is referenced here only where it
-> overlaps (the standalone SDK actually targets the Station API, see
+> `packages/glorp-client/`, and `src/cli-serve.ts`. The Garage control plane
+> (`src/garage/`) is documented separately; it is referenced here only where it
+> overlaps (the standalone SDK actually targets the Garage API, see
 > [Two servers, two protocols](#two-servers-two-protocols)).
 
 ## Overview
@@ -28,7 +28,7 @@ that speaks both HTTP (REST) and WebSocket. The split of responsibilities is:
   and adapts server events back into the local `BridgeEvent` shape the UI store
   already understands.
 - **`packages/glorp-client/`** — a separately published, zero-dependency SDK.
-  Note that it targets the **Station** HTTP/WS API (workspaces, API keys), not
+  Note that it targets the **Garage** HTTP/WS API (workspaces, API keys), not
   the local server in `src/server/`.
 
 Data flow for a live session:
@@ -336,10 +336,10 @@ can consume remote events unchanged. It only passes through types in the
 
 A separately published, zero-runtime-dependency package
 (`@porkytheblack/glorp-client`, `package.json`) that runs in Node 18+, Bun, and
-the browser. **Important:** despite the shared name, it targets the **Station**
+the browser. **Important:** despite the shared name, it targets the **Garage**
 control-plane API (workspaces + API keys, default port 4271, served under
 `/api/v1`), not the local `src/server/` API. Its types come from a vendored copy
-of the Station contract, and its WS framing differs (see below).
+of the Garage contract, and its WS framing differs (see below).
 
 ### Usage
 
@@ -380,7 +380,7 @@ busy-then-idle with turns.
 ### Full client (`packages/glorp-client/src/client.ts`)
 
 `createClient(opts)` (`client.ts:31`) returns a namespaced client over the
-Station REST/WS API: `workspaces`, `sessions` (the largest namespace — create,
+Garage REST/WS API: `workspaces`, `sessions` (the largest namespace — create,
 list, get, destroy, `sendMessage`/`sendMessageAndWait`, abort, permission mode,
 profile, history, result, plan, tasks, multi-agent roster, permission grants, and
 `uploads/` file exchange via `requestForm`/`requestBinary`), `models`, and
@@ -408,7 +408,7 @@ async-iterator interface, so consumers can `for await (const ev of stream)`. A
 
 ### Wire contract & sync (`packages/glorp-client/src/contract.ts`, `scripts/sync-contract.ts`)
 
-`contract.ts` is a **generated, self-contained, zero-import** copy of the Station
+`contract.ts` is a **generated, self-contained, zero-import** copy of the Garage
 wire types (`SessionDto`, `SessionResult`, `WorkspaceDto`, `CreateSessionInput`,
 `BridgeEvent`, `EventEnvelope`, etc.) so the published package vendors the
 contract verbatim with no imports back into the app. The `BridgeEvent` type here
@@ -417,17 +417,17 @@ variants are typed and a trailing `{ type: string; … }` member keeps it
 forward-compatible.
 
 `scripts/sync-contract.ts` (`sync-contract.ts:1`) copies
-`src/station/contract.ts` (the single source of truth) into
+`src/garage/contract.ts` (the single source of truth) into
 `packages/glorp-client/src/contract.ts` with a generated header. Run plain to
 write, or with `--check` to fail CI on drift. A test
-(`tests/station-contract.test.ts`, referenced in the contract header) enforces
+(`tests/garage-contract.test.ts`, referenced in the contract header) enforces
 that these DTOs stay structurally identical to the canonical server types.
 
 ### Error model (`packages/glorp-client/src/errors.ts`)
 
 Non-2xx responses throw `GlorpRemoteError` (`errors.ts:2`), carrying `.status`
 (HTTP code) and `.code` (server `error` string); the message falls back to the
-code. It mirrors Station's `StationRemoteError`.
+code. It mirrors Garage's `GarageRemoteError`.
 
 ## Starting the server (`src/cli-serve.ts`)
 
@@ -446,7 +446,7 @@ code. It mirrors Station's `StationRemoteError`.
 
 It's easy to conflate the two HTTP/WS surfaces in this repo. They are distinct:
 
-| | Local server (`src/server/`) | Station (targeted by `packages/glorp-client/`) |
+| | Local server (`src/server/`) | Garage (targeted by `packages/glorp-client/`) |
 |---|---|---|
 | Default port | 3271 (`DEFAULT_PORT`) | 4271 (per `docs/openapi.yaml`) |
 | Bind | `127.0.0.1` only | configurable; auth required off loopback |
@@ -457,7 +457,7 @@ It's easy to conflate the two HTTP/WS surfaces in this repo. They are distinct:
 | Send message | sync `…/message` or WS `send_message` | `…/messages` (async 202, or `wait:true`) |
 | In-repo client | `src/client/GlorpClient` | `@porkytheblack/glorp-client` |
 
-`docs/openapi.yaml` documents the Station API and is the reference for the
+`docs/openapi.yaml` documents the Garage API and is the reference for the
 standalone SDK's HTTP/WS contract.
 
 ## Key files
@@ -487,10 +487,10 @@ standalone SDK's HTTP/WS contract.
 | `packages/glorp-client/src/index.ts` | SDK public API: `configure`, `run`, `streamSession` |
 | `packages/glorp-client/src/config.ts` | SDK config resolution (opts → default → env) |
 | `packages/glorp-client/src/run.ts` | `runWith` orchestration + `RunHandle` |
-| `packages/glorp-client/src/client.ts` | `createClient` namespaced Station client |
+| `packages/glorp-client/src/client.ts` | `createClient` namespaced Garage client |
 | `packages/glorp-client/src/rest.ts` | SDK REST transport (`request`/form/binary/ping) |
 | `packages/glorp-client/src/ws.ts` | SDK WS event stream (`/events`, async iterator) |
-| `packages/glorp-client/src/contract.ts` | Generated, vendored Station wire contract |
+| `packages/glorp-client/src/contract.ts` | Generated, vendored Garage wire contract |
 | `packages/glorp-client/src/errors.ts` | `GlorpRemoteError` |
-| `packages/glorp-client/scripts/sync-contract.ts` | Vendor/check the contract from `src/station/` |
-| `docs/openapi.yaml` | OpenAPI spec for the Station API (SDK's contract) |
+| `packages/glorp-client/scripts/sync-contract.ts` | Vendor/check the contract from `src/garage/` |
+| `docs/openapi.yaml` | OpenAPI spec for the Garage API (SDK's contract) |

@@ -96,12 +96,15 @@ export function buildServerApp(deps: ServerAppDeps) {
     },
     upgradeWebSocket((c) => {
       const data = makeWsData(c.get("wsCtx") as WsContext);
-      const wrap = (ws: { send: (d: string) => void; close: (c?: number, r?: string) => void; readyState: number }): WsLike => ({
+      // Read the LIVE socket state via `ws.raw` (hono's WSContext.readyState is
+      // a per-event snapshot) so the broadcaster's dead-client guard stays accurate.
+      type RawWs = { send: (d: string) => void; close: (c?: number, r?: string) => void; readyState: number; raw?: { readyState: number } };
+      const wrap = (ws: RawWs): WsLike => ({
         data,
         send: (d) => ws.send(d),
         close: (code, reason) => ws.close(code, reason),
         get readyState() {
-          return ws.readyState;
+          return ws.raw?.readyState ?? ws.readyState;
         },
       });
       return {

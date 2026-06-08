@@ -13,6 +13,7 @@
 
 import { CredentialsStore, findKnownProvider } from "../agent/credentials.ts";
 import type { ProviderConfig, ModelProfile } from "../agent/credentials.ts";
+import { credentialStorageFromEnv } from "../agent/credential-storage.ts";
 import type { SessionCredential } from "./types.ts";
 
 /**
@@ -26,7 +27,10 @@ export class NamespaceCredentialsStore extends CredentialsStore {
   protected readonly base: CredentialsStore | null;
 
   constructor(nsDataDir: string, base?: CredentialsStore | null) {
-    super(nsDataDir);
+    // Honor GARAGE_CREDENTIAL_STORAGE per namespace (file db/json under the ns
+    // dir, or memory). With the env unset this is the default file adapter at
+    // `<nsDataDir>/credentials.json` — byte-for-byte the prior behavior.
+    super(credentialStorageFromEnv(nsDataDir));
     this.base = base && base.filePath !== this.filePath ? base : null;
   }
 

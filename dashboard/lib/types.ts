@@ -81,7 +81,7 @@ export interface ProfileDto {
 export interface TemplateDto {
   name: string;
   description?: string;
-  steps?: unknown[];
+  step_count?: number;
 }
 
 export interface Identity {

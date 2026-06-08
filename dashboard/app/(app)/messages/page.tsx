@@ -10,7 +10,7 @@ interface Result { status: string; busy: boolean; text: string | null; last_erro
 
 function Conversation({ sessionId }: { sessionId: string }) {
   const result = useQuery<Result>(`/sessions/${sessionId}/result`, [sessionId]);
-  const tasks = useQuery<{ tasks: { title?: string; status?: string }[] }>(`/sessions/${sessionId}/tasks`, [sessionId]);
+  const tasks = useQuery<{ tasks: { content?: string; title?: string; status?: string }[] }>(`/sessions/${sessionId}/tasks`, [sessionId]);
 
   if (result.loading) return <Loading />;
   const r = result.data;

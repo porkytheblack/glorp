@@ -1,18 +1,18 @@
-# Glorp Station — Usage Guide
+# Glorp Garage — Usage Guide
 
-> **Naming note.** "Glorp Station" here is the **multi-session runtime** (`glorp station`) — a long-running server that hosts many agent sessions over a REST + WebSocket API. It is *not* the same as the `station-signal` async **fleet** runner mentioned elsewhere in the README (which runs background fan-out jobs in child processes). Two different things that happen to share the word "station".
+> **Naming note.** "Glorp Garage" here is the **multi-session runtime** (`glorp garage`) — a long-running server that hosts many agent sessions over a REST + WebSocket API. It is *not* the same as the `station-signal` async **fleet** runner mentioned elsewhere in the README (which runs background fan-out jobs in child processes). Two unrelated subsystems — Garage is the server; Station is the async fleet framework. (Garage was formerly called "Station", which is why older notes warn against conflating the two.)
 
-Station lets you run multiple Glorp agents at once, leave them running, and connect from any client — an IDE extension, a CLI, or a CI pipeline. See [`station-spec.md`](./station-spec.md) for the product spec and rationale.
+Garage lets you run multiple Glorp agents at once, leave them running, and connect from any client — an IDE extension, a CLI, or a CI pipeline. See [`garage-spec.md`](./garage-spec.md) for the product spec and rationale.
 
 ---
 
 ## Quick start
 
 ```bash
-# Credentials: Station inherits your global ~/.glorp config (run `glorp` once to onboard),
+# Credentials: Garage inherits your global ~/.glorp config (run `glorp` once to onboard),
 # or set an env var: export ANTHROPIC_API_KEY=... (or OPENAI_API_KEY, OPENROUTER_API_KEY, ...)
 
-glorp station                 # REST + WS API on http://127.0.0.1:4271
+glorp garage                 # REST + WS API on http://127.0.0.1:4271
 ```
 
 Then create a session and send it a prompt:
@@ -37,7 +37,7 @@ For streaming (the normal interactive flow), open the WebSocket at `ws_url` and 
 ## CLI
 
 ```
-glorp station [options]
+glorp garage [options]
 
   --host <addr>           Bind address (default: 127.0.0.1)
   --port <port>           Port (default: 4271)
@@ -50,11 +50,11 @@ glorp station [options]
   --bypass                Default permission mode: bypass (no prompts)
 ```
 
-> Station binds to `127.0.0.1` by default. A **non-loopback bind requires an API key automatically** (see [Authentication & remote access](#authentication--remote-access) below) — never expose Station on a public interface without it. On loopback, same-origin/loopback browser requests are allowed and non-browser clients on the host can still reach the API, so only run it on a trusted machine or behind a reverse proxy / SSH tunnel.
+> Garage binds to `127.0.0.1` by default. A **non-loopback bind requires an API key automatically** (see [Authentication & remote access](#authentication--remote-access) below) — never expose Garage on a public interface without it. On loopback, same-origin/loopback browser requests are allowed and non-browser clients on the host can still reach the API, so only run it on a trusted machine or behind a reverse proxy / SSH tunnel.
 
-### `station.json`
+### `garage.json`
 
-Drop a `station.json` in the data dir for persistent config (CLI flags win over it):
+Drop a `garage.json` in the data dir for persistent config (CLI flags win over it):
 
 ```json
 {
@@ -72,14 +72,14 @@ Drop a `station.json` in the data dir for persistent config (CLI flags win over 
 
 ## Authentication & remote access
 
-Station is **open on loopback** (localhost dev) and **requires an API key on any
-non-loopback bind** — so `glorp station --host 0.0.0.0` is auth-protected by
-default. Force it either way with `GLORP_STATION_AUTH=required|off`.
+Garage is **open on loopback** (localhost dev) and **requires an API key on any
+non-loopback bind** — so `glorp garage --host 0.0.0.0` is auth-protected by
+default. Force it either way with `GLORP_GARAGE_AUTH=required|off`.
 
 ```bash
-glorp station keys add ci-bot --scopes admin   # prints the key once (glsk_…)
-glorp station keys list
-glorp station keys revoke <id>
+glorp garage keys add ci-bot --scopes admin   # prints the key once (glsk_…)
+glorp garage keys list
+glorp garage keys revoke <id>
 ```
 
 Send the key as `Authorization: Bearer glsk_…` (REST) or `?api_key=glsk_…` (the
@@ -87,7 +87,7 @@ WebSocket, which can't set headers from a browser). `/health` stays open.
 
 ### Multi-tenant namespaces
 
-Run one Station for many users by giving each an isolated **namespace** (its own
+Run one Garage for many users by giving each an isolated **namespace** (its own
 sessions, workspaces, sandboxes, and model credentials). An admin key provisions
 namespaces and mints namespace-bound keys; a tenant key transparently scopes every
 call to its own namespace. Requests with no namespace use the built-in `default`
@@ -100,14 +100,14 @@ curl -sX POST $EP/api/v1/namespaces -H "authorization: Bearer $ADMIN" \
 curl -sX POST $EP/api/v1/namespaces/ns_acme/keys -H "authorization: Bearer $ADMIN" \
   -H 'content-type: application/json' -d '{"name":"acme-bot"}'             # -> glsk_…
 
-glorp station keys add acme-bot --namespace ns_acme   # ...or mint one offline via CLI
+glorp garage keys add acme-bot --namespace ns_acme   # ...or mint one offline via CLI
 ```
 
 Admin keys can act inside any namespace with the `X-Glorp-Namespace: <id>` header
 (`?ns=<id>` on the WebSocket). Deprovision with `DELETE /namespaces/:id?data=true`.
 Full walkthrough in [`remote-orchestration.md`](./remote-orchestration.md).
 
-For driving Station from another machine or your own orchestration, see
+For driving Garage from another machine or your own orchestration, see
 [`remote-orchestration.md`](./remote-orchestration.md), the OpenAPI contract in
 [`openapi.yaml`](./openapi.yaml), and the typed client
 [`@porkytheblack/glorp-client`](./glorp-client.md).
@@ -134,7 +134,7 @@ Every path is served at the stable `/api/v1` prefix **and** at the bare root
 | `POST` | `/sessions/:id/permission-mode` | `{ "mode": "normal" \| "auto" \| "bypass" }` |
 | `POST` | `/sessions/:id/profile` | Swap the live session to `{ "profile_id": "..." }` |
 | `POST` | `/sessions/:id/credentials` | Set a custom API key (in-memory only) |
-| `DELETE` | `/sessions/:id/credentials` | Revert to Station defaults |
+| `DELETE` | `/sessions/:id/credentials` | Revert to Garage defaults |
 | `GET` | `/sessions/:id/files` | List files in the session's `uploads/` folder |
 | `POST` | `/sessions/:id/files` | Upload file(s) into `uploads/` (`multipart/form-data`) |
 | `GET` | `/sessions/:id/files/:path` | Download a file from `uploads/` (binary) |
@@ -151,7 +151,7 @@ Every path is served at the stable `/api/v1` prefix **and** at the bare root
 | `DELETE` | `/workspaces/:id/mcp/:provider` | Remove one provider |
 | `GET` | `/templates`, `/templates/:name` | Setup templates |
 | `GET` | `/models/providers`, `/models/profiles` | Configured models (keys redacted) |
-| `POST` | `/models/profiles/:id/activate` | Set the Station-wide default profile |
+| `POST` | `/models/profiles/:id/activate` | Set the Garage-wide default profile |
 | `POST` | `/namespaces` | Provision a tenant namespace (admin) |
 | `GET` | `/namespaces` | List namespaces (admin; always includes `default`) |
 | `GET` | `/namespaces/:id` | Namespace detail + session count (admin) |
@@ -203,7 +203,7 @@ Fire-and-forget returns `202 { accepted: true }`; `wait:true` returns the collec
 ### Exchanging files
 
 Each session has a dedicated **`uploads/` folder inside its workspace** (the name
-is configurable via `filesDir` in `station.json`). It's the shared hand-off point
+is configurable via `filesDir` in `garage.json`). It's the shared hand-off point
 between you and the agent: drop input files in for the agent to read, and the
 agent writes any file deliverable you ask for (`.pptx`, `.docx`, `.zip`, exports)
 back into it for you to download. Paths are confined to that folder — a `..`
@@ -277,7 +277,7 @@ Templates provision a fresh workspace before the agent starts. Put JSON files in
 ```
 
 - Step types: `git-clone` (`repo`, optional `dest`, `ref`), `shell` (`command`), `copy` (`from`, `to`).
-- Interpolation: `{param:NAME}` from the create request's `params`, `{env:VAR}` from Station's environment. Interpolated values (potential secrets) are scrubbed from error messages.
+- Interpolation: `{param:NAME}` from the create request's `params`, `{env:VAR}` from Garage's environment. Interpolated values (potential secrets) are scrubbed from error messages.
 - Steps run sequentially; on any failure the workspace is cleaned up and creation fails.
 
 Create from a template:
@@ -334,17 +334,17 @@ curl -s -X POST "localhost:4271/workspaces/$WS/sessions" \
 
 ## Per-session custom API keys
 
-A session can use its own key instead of the Station default:
+A session can use its own key instead of the Garage default:
 
 ```bash
 curl -s -X POST localhost:4271/sessions/<id>/credentials \
   -H 'content-type: application/json' \
   -d '{"provider":"anthropic","apiKey":"sk-ant-...","model":"claude-sonnet-4-20250514"}'
 
-curl -s -X DELETE localhost:4271/sessions/<id>/credentials   # revert to Station default
+curl -s -X DELETE localhost:4271/sessions/<id>/credentials   # revert to Garage default
 ```
 
-The key is held **in memory only** — never written to disk, never logged, never returned by the API (responses show only `provider` + last-4). Re-supply it after a Station restart if needed.
+The key is held **in memory only** — never written to disk, never logged, never returned by the API (responses show only `provider` + last-4). Re-supply it after a Garage restart if needed.
 
 ---
 

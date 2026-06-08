@@ -1,29 +1,29 @@
-# Glorp Station — Runtime Internals
+# Glorp Garage — Runtime Internals
 
-A code-level reference for the **multi-session server runtime** under `src/station/`
-and its CLI entrypoint `src/cli-station.ts`. This complements the user-facing
-[`station-usage.md`](../station-usage.md) and [`station-spec.md`](../station-spec.md)
+A code-level reference for the **multi-session server runtime** under `src/garage/`
+and its CLI entrypoint `src/cli-garage.ts`. This complements the user-facing
+[`garage-usage.md`](../garage-usage.md) and [`garage-spec.md`](../garage-spec.md)
 — it documents how the code is structured, not how an operator invokes it.
 
-> **Naming.** "Glorp Station" here is the long-running `glorp station` server
+> **Naming.** "Glorp Garage" here is the long-running `glorp garage` server
 > (REST + WebSocket over many concurrent agents). It is distinct from the
 > `station-signal` fleet runner mentioned elsewhere in the README.
 
 > **Scope.** The optional Dashboard SPA (`dashboard/`) is being deprecated and is
 > *not* documented here. The only mention is the integration point in
-> `src/station/dashboard.ts` / `server.ts` where Station can serve its pre-built
+> `src/garage/dashboard.ts` / `server.ts` where Garage can serve its pre-built
 > static assets.
 
 ---
 
 ## 1. Overview
 
-Station is one `Bun.serve()` instance (`src/station/server.ts:108`) that fronts a
+Garage is one `Bun.serve()` instance (`src/garage/server.ts:108`) that fronts a
 REST API plus a per-session WebSocket endpoint. It hosts many independent
-[`StationSession`](../../src/station/session.ts) objects, each wrapping its own
+[`GarageSession`](../../src/garage/session.ts) objects, each wrapping its own
 isolated `Bridge` and a lazily-built `GlorpHandle` from the agent layer
 (`buildGlorp`). It is intentionally separate from the single-session
-`src/server/` runtime (`src/station/server.ts:1-8`).
+`src/server/` runtime (`src/garage/server.ts:1-8`).
 
 Request flow:
 
@@ -50,14 +50,14 @@ Key cross-cutting behaviors set up in `server.ts`:
   request; anything else gets a 403 `forbidden_origin`. `withCors`
   (`server.ts:44`) reflects allowed origins and always sets the base
   methods/headers.
-- **Crash isolation.** `cli-station.ts:27-32` installs `unhandledRejection` /
+- **Crash isolation.** `cli-garage.ts:27-32` installs `unhandledRejection` /
   `uncaughtException` handlers that log but keep the process alive — a rogue
   agent must not take down the whole runtime.
-- **Graceful shutdown.** `SIGINT`/`SIGTERM` call `station.stop()`
-  (`cli-station.ts:35-43`), which flushes and destroys every live session
+- **Graceful shutdown.** `SIGINT`/`SIGTERM` call `garage.stop()`
+  (`cli-garage.ts:35-43`), which flushes and destroys every live session
   (`manager.shutdownAll`) and closes the key store before `server.stop()`.
 
-`startStation` returns a `StationHandle` (`server.ts:81`) — `{ port, manager, stop }`.
+`startGarage` returns a `GarageHandle` (`server.ts:81`) — `{ port, manager, stop }`.
 When the caller passes `port: 0` (tests), the actually-bound port is reflected back
 into `config.port` (`server.ts:177-180`) so generated `ws_url`s are correct.
 
@@ -65,39 +65,39 @@ into `config.port` (`server.ts:177-180`) so generated `ws_url`s are correct.
 
 ## 2. CLI entrypoint and configuration
 
-### `src/cli-station.ts`
+### `src/cli-garage.ts`
 
-`runStation(args)` is the `glorp station` entrypoint (dispatched from
+`runGarage(args)` is the `glorp garage` entrypoint (dispatched from
 `src/cli.ts:47`). It:
 
-1. Builds a `StationConfig` via `loadStationConfig` (`cli-station.ts:11`), mapping
+1. Builds a `GarageConfig` via `loadGarageConfig` (`cli-garage.ts:11`), mapping
    CLI flags (`--port`, `--host`, `--data-dir`, `--workspace-root`, `--provider`,
    `--model`, `--permission-mode`, `--dashboard`) into config overrides.
-2. Calls `startStation(config)` (`cli-station.ts:22`).
+2. Calls `startGarage(config)` (`cli-garage.ts:22`).
 3. Installs the keep-alive error handlers and signal handlers, then blocks on a
-   never-resolving promise to keep the event loop alive (`cli-station.ts:46`).
+   never-resolving promise to keep the event loop alive (`cli-garage.ts:46`).
 
-The `glorp station keys <add|list|revoke>` subcommands branch *before* the server
+The `glorp garage keys <add|list|revoke>` subcommands branch *before* the server
 boots (`src/cli.ts:48`) into `runKeys` (`src/cli-keys.ts`), which talks to the
 on-disk `KeyStore` directly — that is how the first key is minted without a running
 server. `add` prints the raw key to STDOUT exactly once; all other output goes to
 STDERR so the key can be piped.
 
-### `src/station/config.ts`
+### `src/garage/config.ts`
 
-`loadStationConfig(overrides)` (`config.ts:100`) layers, in increasing priority:
+`loadGarageConfig(overrides)` (`config.ts:100`) layers, in increasing priority:
 
-1. **Defaults** — hostname `127.0.0.1`, port `STATION_DEFAULT_PORT = 4271`
+1. **Defaults** — hostname `127.0.0.1`, port `GARAGE_DEFAULT_PORT = 4271`
    (`config.ts:14`), `dataDir = ~/.glorp` (or `$GLORP_DATA_DIR`),
    `workspaceRoot = <dataDir>/workspaces`, `templatesDir = <dataDir>/templates`,
    `permissionMode = "normal"`, `dashboard = false`.
-2. **`<dataDir>/station.json`** — read by `readFileConfig` (`config.ts:90`);
+2. **`<dataDir>/garage.json`** — read by `readFileConfig` (`config.ts:90`);
    missing/corrupt file silently yields `{}`. Supplies hostname, port,
    workspaceRoot, templatesDir, defaultProvider/Model, permissionMode, dashboard,
    filesDir, auth.enabled.
-3. **Environment** — `GLORP_DATA_DIR`, `GLORP_STATION_PORT`, and
-   `GLORP_STATION_AUTH` (`envAuthEnabled`, `config.ts:83`).
-4. **CLI overrides** — the `StationConfigOverrides` passed in.
+3. **Environment** — `GLORP_DATA_DIR`, `GLORP_GARAGE_PORT`, and
+   `GLORP_GARAGE_AUTH` (`envAuthEnabled`, `config.ts:83`).
+4. **CLI overrides** — the `GarageConfigOverrides` passed in.
 
 **Auth resolution.** `auth.enabled` is left `undefined` ("auto") unless something
 sets it. At startup `authRequired(config)` (`config.ts:79`) resolves the effective
@@ -106,15 +106,15 @@ non-loopback bind** and **off on loopback** (`isLoopbackHost`, `config.ts:71`).
 This preserves zero-config localhost dev while forcing auth the moment the server
 is reachable from other hosts.
 
-`src/station/define-config.ts` exposes `defineConfig()`, a thin wrapper over
-`loadStationConfig` for embedding Station in code — notably to inject a custom
+`src/garage/define-config.ts` exposes `defineConfig()`, a thin wrapper over
+`loadGarageConfig` for embedding Garage in code — notably to inject a custom
 `auth.keyStorage` adapter (e.g. SQLite) that cannot be expressed in JSON.
 
 ---
 
-## 3. Routing (`src/station/router.ts`)
+## 3. Routing (`src/garage/router.ts`)
 
-`createStationRouter` (`router.ts:38`) instantiates each route group once and
+`createGarageRouter` (`router.ts:38`) instantiates each route group once and
 returns a single `route(req, pathname)` dispatcher. Matching is hand-rolled
 regex + method checks against the pre-stripped path:
 
@@ -136,13 +136,13 @@ Unmatched paths → 404 `not_found`; matched path with wrong method →
 `methodNotAllowed()` 405. Any thrown error inside a handler is caught in
 `server.ts:158` and returned as 500 `internal`.
 
-Response helpers live in `src/station/respond.ts`: `json`, `errorJson`
+Response helpers live in `src/garage/respond.ts`: `json`, `errorJson`
 (`{ error, message }` envelope), `noContent` (204), and `readJson` (empty body →
 `{}`).
 
 ---
 
-## 4. Route handlers (`src/station/routes/`)
+## 4. Route handlers (`src/garage/routes/`)
 
 ### sessions.ts — lifecycle + messaging
 - `POST /sessions` → `create` (`sessions.ts:55`) parses a `CreateSessionInput` and
@@ -209,7 +209,7 @@ confine access to the folder and block traversal. The agent reads/writes the sam
 folder, so uploads become inputs and deliverables become downloadable.
 
 ### models.ts — provider/profile management
-Wraps the Station-wide `CredentialsStore`: `providers`, `profiles` (with
+Wraps the Garage-wide `CredentialsStore`: `providers`, `profiles` (with
 `active_profile_id`), `activate`, `catalog` (known providers + selectable models,
 `models.ts:63`), `addProvider`/`deleteProvider`, `addProfile`/`deleteProfile`. API
 keys are accepted on write but never returned — reads expose only `has_api_key`.
@@ -230,9 +230,9 @@ from auth.
 
 ---
 
-## 5. Session lifecycle (`src/station/session.ts`)
+## 5. Session lifecycle (`src/garage/session.ts`)
 
-A `StationSession` owns: a `Bridge` (isolated event bus), an `EventStream`
+A `GarageSession` owns: a `Bridge` (isolated event bus), an `EventStream`
 (WS fan-out), `SessionStats`, a `SessionLifecycle` state, and a lazily-built
 `GlorpHandle`.
 
@@ -240,7 +240,7 @@ A `StationSession` owns: a `Bridge` (isolated event bus), an `EventStream`
 (`error` | `destroyed`). `provisioning` covers template setup; `idle`/`busy` come
 from the agent's `busy` BridgeEvent folded in `onEvent` (`session.ts:189`);
 `error` is set by `fail()` on an unrecoverable agent failure (without killing
-Station); `destroyed` is terminal.
+Garage); `destroyed` is terminal.
 
 **Lazy build.** The `GlorpHandle` is built on demand by `ensureBuilt`
 (`session.ts:54`), which dedupes concurrent callers via a cached `buildPromise`
@@ -270,14 +270,14 @@ store.
 
 ## 6. Manager, workspaces, persistence, templates
 
-### SessionManager (`src/station/manager.ts`)
-The in-memory registry (`Map<id, StationSession>`) bridged to on-disk snapshots.
+### SessionManager (`src/garage/manager.ts`)
+The in-memory registry (`Map<id, GarageSession>`) bridged to on-disk snapshots.
 
 - `create` (`manager.ts:45`) — rejects duplicate ids (in-memory *or* on-disk
   snapshot), resolves the workspace path, validates/creates it, optionally runs a
   template, associates a first-class workspace, and registers the session.
 - `provisionTemplate` (`manager.ts:62`) — runs the template; on failure tears down
-  **only** a workspace dir Station itself created (never a pre-existing
+  **only** a workspace dir Garage itself created (never a pre-existing
   caller-supplied dir).
 - `getOrRehydrate` (`manager.ts:118`) — returns the live session, else rebuilds a
   dormant one from its on-disk snapshot metadata (the handle stays unbuilt until
@@ -287,12 +287,12 @@ The in-memory registry (`Map<id, StationSession>`) bridged to on-disk snapshots.
 - `destroy` (`manager.ts:188`) — unloads the session, deletes its snapshot (so it
   can't resurrect), and optionally removes the workspace dir.
 - `maybeRemoveWorkspaceDir` (`manager.ts:210`) — workspace deletion is only allowed
-  when the dir lives **under `workspaceRoot`** (a Station-provisioned sandbox) AND
+  when the dir lives **under `workspaceRoot`** (a Garage-provisioned sandbox) AND
   **no other session references it**; otherwise the folder is kept and a warning is
   logged. This guards against wiping shared or user-owned folders.
 - `shutdownAll` flushes + destroys every session on graceful stop.
 
-### WorkspaceStore (`src/station/workspace-store.ts`)
+### WorkspaceStore (`src/garage/workspace-store.ts`)
 Persists first-class workspaces at `<dataDir>/workspaces.json` (atomic tmp+rename,
 mode `0o600`). A workspace id is **deterministic from its resolved absolute path**
 (`workspaceIdForPath`, `workspace-store.ts:17`: `ws_` + first 12 hex of sha256), so
@@ -300,13 +300,13 @@ the same folder always maps to the same id even if the registry file is lost.
 `ensureForPath` (`workspace-store.ts:85`) is the get-or-create migration primitive
 that lazily folds bare session paths into real workspace entities.
 
-### Persistence (`src/station/persistence.ts`)
+### Persistence (`src/garage/persistence.ts`)
 Reuses the agent's `GlorpStore` snapshot files (`resolveSessionPaths`).
 `snapshotExists` and `readSnapshotMeta` (`persistence.ts:29`) read just the
-metadata Station needs to rehydrate (workspace path, title, token/turn counts, and
+metadata Garage needs to rehydrate (workspace path, title, token/turn counts, and
 mtime as `lastActivity`).
 
-### Templates (`src/station/templates/`)
+### Templates (`src/garage/templates/`)
 - **types.ts** — a `Template` is an ordered list of `TemplateStep`s
   (`git-clone` | `shell` | `copy`). Values support `{param:NAME}` (from the
   create-session request) and `{env:VAR}` (process env) interpolation.
@@ -328,24 +328,24 @@ decoupling it from the concrete `TemplateStore`.
 
 There are two distinct credential surfaces:
 
-1. **Station-wide** — the shared `CredentialsStore` (`agent/credentials.ts`)
+1. **Garage-wide** — the shared `CredentialsStore` (`agent/credentials.ts`)
    constructed in `server.ts:88` and exposed read/write through the
    `models.ts` routes. This is the on-disk provider/profile config.
 
 2. **Per-session overlay** — `SessionCredentialsStore`
-   (`src/station/credentials.ts`) subclasses `CredentialsStore` and adds an
+   (`src/garage/credentials.ts`) subclasses `CredentialsStore` and adds an
    **in-memory overlay** for a session's custom API key. The overlay is **never
    flushed to disk**. `setCustom` (`credentials.ts:32`) builds an overlay provider
    + a synthetic profile id (`session__<provider>__<model>`); overridden
    `getProvider`/`getProfile`/`getActiveProfile`/`listProfiles`/`listProviders`
    prefer the overlay. `setActive` is overridden to be **in-memory only**
    (`credentials.ts:80`) so one session can never rewrite the shared config.
-   `stationDefaultProfileId` reads the underlying store's active profile, used when
-   clearing the overlay reverts to Station defaults.
+   `garageDefaultProfileId` reads the underlying store's active profile, used when
+   clearing the overlay reverts to Garage defaults.
 
 When a session's credential is set/cleared at runtime (`session.setCredential` /
 `clearCredential`, `session.ts:104-120`), the live handle is hot-swapped via
-`handle.swapProfile`. Clearing without a Station default profile is rejected.
+`handle.swapProfile`. Clearing without a Garage default profile is rejected.
 
 The `SessionCredential` type (`types.ts:33`) is `{ provider, apiKey, model? }`.
 It is never logged or returned; the DTO surfaces only provider + last-4
@@ -353,7 +353,7 @@ It is never logged or returned; the DTO surfaces only provider + last-4
 
 ---
 
-## 8. Auth layer (`src/station/auth/`)
+## 8. Auth layer (`src/garage/auth/`)
 
 **Enforcement point.** `server.ts` decides per-request whether to require auth via
 `authRequired` (loopback-aware, §2). When on, every REST route except `/health`
@@ -384,7 +384,7 @@ Default scopes are `["admin"]`.
   `createRequire` so it's never a hard dependency. Wired in only by passing
   `auth.keyStorage` through `defineConfig`.
 
-The public surface is re-exported from `src/station/auth/index.ts`.
+The public surface is re-exported from `src/garage/auth/index.ts`.
 
 ---
 
@@ -415,7 +415,7 @@ which also updates `lastActivity`, folds stats, and flips lifecycle state on
 ## 10. Dashboard integration point (not documented further)
 
 When `config.dashboard` is true, any non-API `GET` is served by `serveDashboard`
-(`server.ts:139`, `src/station/dashboard.ts`) as static files with SPA fallback.
+(`server.ts:139`, `src/garage/dashboard.ts`) as static files with SPA fallback.
 `dashboardSearchPaths` probes several on-disk locations (env override, `<dataDir>/
 dashboard`, `dist/dashboard`, next to the executable) to work across source, npm,
 and compiled-binary installs. With the dashboard **off**, `GET /` returns a small
@@ -427,42 +427,42 @@ JSON status object (`server.ts:142`). The dashboard's own code is out of scope.
 
 | Path | Responsibility |
 |------|----------------|
-| `src/cli-station.ts` | `glorp station` entrypoint: builds config, boots `startStation`, keep-alive + signal handling. |
-| `src/cli-keys.ts` | `glorp station keys add\|list\|revoke` — offline key minting against the on-disk `KeyStore`. |
-| `src/station/server.ts` | `Bun.serve()` host: CORS/origin, `/api/v1` stripping, auth gate, WS upgrade, dashboard, `startStation`/`StationHandle`. |
-| `src/station/router.ts` | REST dispatch — regex/method matching delegating to `routes/*`. |
-| `src/station/config.ts` | Config resolution (defaults + `station.json` + env + overrides) and loopback-aware `authRequired`. |
-| `src/station/define-config.ts` | `defineConfig()` for embedding Station and injecting a custom key-storage adapter. |
-| `src/station/manager.ts` | `SessionManager`: live registry, create/destroy, rehydration, workspace association + safe cleanup. |
-| `src/station/session.ts` | `StationSession`: lifecycle, lazy `GlorpHandle` build, credential swaps, event bridging. |
-| `src/station/session-init.ts` | `StationSessionInit` shape passed into a session. |
-| `src/station/session-dto.ts` | Secret-free `SessionDto` builder. |
-| `src/station/session-stats.ts` | Synchronous stats snapshot folded from Bridge events. |
-| `src/station/credentials.ts` | `SessionCredentialsStore`: in-memory per-session key overlay (never persisted). |
-| `src/station/persistence.ts` | On-disk snapshot existence/metadata for rehydration. |
-| `src/station/workspace-store.ts` | Persisted first-class workspace registry; deterministic path→id. |
-| `src/station/ws.ts` | WebSocket lifecycle + client command dispatch. |
-| `src/station/event-stream.ts` | Per-session fan-out with per-client `seq` and `{sessionId,seq,event}` envelope. |
-| `src/station/respond.ts` | `json` / `errorJson` / `noContent` / `readJson` helpers. |
-| `src/station/types.ts` | Core types: lifecycle, DTOs, inputs, `SessionCredential`, `Workspace`, envelope. |
-| `src/station/dashboard.ts` | Static-asset serving for the (deprecated) dashboard SPA — integration point only. |
-| `src/station/routes/sessions.ts` | Session create/list/get/destroy + `messages` (sync `wait` and async). |
-| `src/station/routes/workspaces.ts` | First-class workspace CRUD + member-session create/list. |
-| `src/station/routes/state.ts` | Read-only queries: history, result, plan, tasks, permissions, agents. |
-| `src/station/routes/control.ts` | Live-session control: abort, slots, permission-mode, profile, roster. |
-| `src/station/routes/credentials.ts` | Per-session custom-key set/clear. |
-| `src/station/routes/files.ts` | Session workspace file exchange (list/upload/download/remove). |
-| `src/station/routes/models.ts` | Station-wide provider/profile management + catalog. |
-| `src/station/routes/templates.ts` | Read-only template browse. |
-| `src/station/routes/keys.ts` | API-key CRUD (admin scope). |
-| `src/station/routes/health.ts` | `GET /health`. |
-| `src/station/templates/types.ts` | Template/step shapes and `TemplateError`. |
-| `src/station/templates/store.ts` | Loads templates from `<templatesDir>/*.json`. |
-| `src/station/templates/engine.ts` | Sequential step execution with secret redaction and workspace confinement. |
-| `src/station/auth/middleware.ts` | Key extraction, `requireAuth`, `requireScope`. |
-| `src/station/auth/key-store.ts` | `KeyStore`: key generation, hashing, verification. |
-| `src/station/auth/types.ts` | `ApiKey`, `ApiKeyPublic`, `ApiKeyStorageAdapter`, `toPublic`. |
-| `src/station/auth/file-key-storage.ts` | Default durable JSON-file key adapter. |
-| `src/station/auth/memory-key-storage.ts` | In-memory key adapter (tests). |
-| `src/station/auth/sqlite-key-storage.ts` | Optional `better-sqlite3` key adapter (lazy-loaded). |
-| `src/station/auth/index.ts` | Public re-exports of the auth layer. |
+| `src/cli-garage.ts` | `glorp garage` entrypoint: builds config, boots `startGarage`, keep-alive + signal handling. |
+| `src/cli-keys.ts` | `glorp garage keys add\|list\|revoke` — offline key minting against the on-disk `KeyStore`. |
+| `src/garage/server.ts` | `Bun.serve()` host: CORS/origin, `/api/v1` stripping, auth gate, WS upgrade, dashboard, `startGarage`/`GarageHandle`. |
+| `src/garage/router.ts` | REST dispatch — regex/method matching delegating to `routes/*`. |
+| `src/garage/config.ts` | Config resolution (defaults + `garage.json` + env + overrides) and loopback-aware `authRequired`. |
+| `src/garage/define-config.ts` | `defineConfig()` for embedding Garage and injecting a custom key-storage adapter. |
+| `src/garage/manager.ts` | `SessionManager`: live registry, create/destroy, rehydration, workspace association + safe cleanup. |
+| `src/garage/session.ts` | `GarageSession`: lifecycle, lazy `GlorpHandle` build, credential swaps, event bridging. |
+| `src/garage/session-init.ts` | `GarageSessionInit` shape passed into a session. |
+| `src/garage/session-dto.ts` | Secret-free `SessionDto` builder. |
+| `src/garage/session-stats.ts` | Synchronous stats snapshot folded from Bridge events. |
+| `src/garage/credentials.ts` | `SessionCredentialsStore`: in-memory per-session key overlay (never persisted). |
+| `src/garage/persistence.ts` | On-disk snapshot existence/metadata for rehydration. |
+| `src/garage/workspace-store.ts` | Persisted first-class workspace registry; deterministic path→id. |
+| `src/garage/ws.ts` | WebSocket lifecycle + client command dispatch. |
+| `src/garage/event-stream.ts` | Per-session fan-out with per-client `seq` and `{sessionId,seq,event}` envelope. |
+| `src/garage/respond.ts` | `json` / `errorJson` / `noContent` / `readJson` helpers. |
+| `src/garage/types.ts` | Core types: lifecycle, DTOs, inputs, `SessionCredential`, `Workspace`, envelope. |
+| `src/garage/dashboard.ts` | Static-asset serving for the (deprecated) dashboard SPA — integration point only. |
+| `src/garage/routes/sessions.ts` | Session create/list/get/destroy + `messages` (sync `wait` and async). |
+| `src/garage/routes/workspaces.ts` | First-class workspace CRUD + member-session create/list. |
+| `src/garage/routes/state.ts` | Read-only queries: history, result, plan, tasks, permissions, agents. |
+| `src/garage/routes/control.ts` | Live-session control: abort, slots, permission-mode, profile, roster. |
+| `src/garage/routes/credentials.ts` | Per-session custom-key set/clear. |
+| `src/garage/routes/files.ts` | Session workspace file exchange (list/upload/download/remove). |
+| `src/garage/routes/models.ts` | Garage-wide provider/profile management + catalog. |
+| `src/garage/routes/templates.ts` | Read-only template browse. |
+| `src/garage/routes/keys.ts` | API-key CRUD (admin scope). |
+| `src/garage/routes/health.ts` | `GET /health`. |
+| `src/garage/templates/types.ts` | Template/step shapes and `TemplateError`. |
+| `src/garage/templates/store.ts` | Loads templates from `<templatesDir>/*.json`. |
+| `src/garage/templates/engine.ts` | Sequential step execution with secret redaction and workspace confinement. |
+| `src/garage/auth/middleware.ts` | Key extraction, `requireAuth`, `requireScope`. |
+| `src/garage/auth/key-store.ts` | `KeyStore`: key generation, hashing, verification. |
+| `src/garage/auth/types.ts` | `ApiKey`, `ApiKeyPublic`, `ApiKeyStorageAdapter`, `toPublic`. |
+| `src/garage/auth/file-key-storage.ts` | Default durable JSON-file key adapter. |
+| `src/garage/auth/memory-key-storage.ts` | In-memory key adapter (tests). |
+| `src/garage/auth/sqlite-key-storage.ts` | Optional `better-sqlite3` key adapter (lazy-loaded). |
+| `src/garage/auth/index.ts` | Public re-exports of the auth layer. |
