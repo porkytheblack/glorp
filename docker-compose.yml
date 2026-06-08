@@ -1,4 +1,4 @@
-# Glorp Station — a containerized, sandboxed agent runtime.
+# Glorp Garage — a containerized, sandboxed agent runtime.
 #   docker compose up -d --build
 #   docker compose logs | grep glsk_        # grab the auto-minted API key
 # Agents run their tools inside the container; their files land in the
@@ -7,7 +7,7 @@
 services:
   glorp:
     build: .
-    image: glorp-station
+    image: glorp-garage
     ports:
       - "4271:4271"
     environment:
@@ -16,7 +16,7 @@ services:
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
-      GLORP_STATION_AUTH: "required"   # set to "off" only on a trusted private network
+      GLORP_GARAGE_AUTH: "required"   # set to "off" only on a trusted private network
       GLORP_AUTO_KEY: "1"
     volumes:
       - glorp-data:/data                 # API keys + session snapshots (persisted)

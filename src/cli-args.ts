@@ -7,7 +7,7 @@ import { GLORP_VERSION } from "./shared/version.ts";
 import type { PermissionMode } from "./agent/runtime/permission-mode.ts";
 
 export interface CliArgs {
-  command: "tui" | "serve" | "station" | "headless" | "help" | "version" | "migrate" | "doctor" | "mesh";
+  command: "tui" | "serve" | "garage" | "headless" | "help" | "version" | "migrate" | "doctor" | "mesh";
   workspace: string;
   sessionId: string;
   provider?: string;
@@ -20,14 +20,14 @@ export interface CliArgs {
   doctorKill?: boolean;
   /** `glorp mesh <sub>`: subcommand (agents | log | summary). */
   meshSub?: string;
-  /** Station: bind hostname. */
+  /** Garage: bind hostname. */
   host?: string;
-  /** Station: override data dir. */
+  /** Garage: override data dir. */
   dataDir?: string;
-  /** Station: base directory for auto-provisioned workspaces. */
+  /** Garage: base directory for auto-provisioned workspaces. */
   workspaceRoot?: string;
-  /** `glorp station keys <sub>`: manage API keys (add | list | revoke). */
-  stationKeysSub?: "add" | "list" | "revoke";
+  /** `glorp garage keys <sub>`: manage API keys (add | list | revoke). */
+  garageKeysSub?: "add" | "list" | "revoke";
   /** `keys add <name>`. */
   keyName?: string;
   /** `keys revoke <id>`. */
@@ -47,17 +47,18 @@ export function parseCliArgs(argv: string[]): CliArgs {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "serve") { args.command = "serve"; continue; }
-    if (a === "station") {
-      args.command = "station";
+    if (a === "garage" || a === "station") {
+      // `station` is the former name, kept as a hidden back-compat alias.
+      args.command = "garage";
       if (argv[i + 1] === "keys") {
         i++;
         const sub = argv[i + 1];
-        args.stationKeysSub = sub === "add" || sub === "revoke" ? sub : "list";
+        args.garageKeysSub = sub === "add" || sub === "revoke" ? sub : "list";
         if (sub === "add" || sub === "list" || sub === "revoke") i++;
         const pos = argv[i + 1];
         if (pos && !pos.startsWith("-")) {
-          if (args.stationKeysSub === "add") args.keyName = pos;
-          else if (args.stationKeysSub === "revoke") args.keyId = pos;
+          if (args.garageKeysSub === "add") args.keyName = pos;
+          else if (args.garageKeysSub === "revoke") args.keyId = pos;
           i++;
         }
       }
@@ -104,9 +105,9 @@ export const HELP_TEXT = `glorp — alien coding agent (v${GLORP_VERSION})
 USAGE
   glorp [options] [prompt...]       Interactive TUI (starts server if needed)
   glorp serve [options]             Start the agent server only
-  glorp station [options]           Start the multi-session Station runtime
-  glorp station keys add <name>     Create an API key (printed once)
-  glorp station keys list|revoke    Manage API keys
+  glorp garage [options]           Start the multi-session Garage runtime
+  glorp garage keys add <name>     Create an API key (printed once)
+  glorp garage keys list|revoke    Manage API keys
   glorp migrate                     Upgrade stored sessions to the latest schema
   glorp doctor [--kill]             Diagnose / clean up stale glorp processes & state
   glorp mesh [agents|log]           Inspect the inter-agent mesh history
@@ -117,7 +118,7 @@ OPTIONS
   -s, --session <id>       Resume a session by ID
       --provider <name>    LLM provider (anthropic|openai|openrouter|gemini|…)
   -m, --model <name>       Model name override
-      --port <port>        Server port (serve: 3271, station: 4271)
+      --port <port>        Server port (serve: 3271, garage: 4271)
       --token <token>      Bearer token for server auth
   -p, --print <prompt>     Run one prompt, print result, exit
       --auto-mode          Auto-approve safe ops; escalate destructive only
@@ -125,7 +126,7 @@ OPTIONS
   -v, --version            Print version
   -h, --help               This help
 
-STATION OPTIONS
+GARAGE OPTIONS
       --host <addr>        Bind address (default: 127.0.0.1; non-loopback ⇒ auth required)
       --data-dir <dir>     State directory (default: ~/.glorp)
       --workspace-root <d> Base dir for auto-provisioned workspaces
@@ -137,7 +138,7 @@ ENV
   GLORP_PORT               Override server port
   GLORP_TOKEN              Override server token
   GLORP_DATA_DIR           Override storage (default ~/.glorp)
-  GLORP_STATION_AUTH       Station API-key auth: required | off (default: auto)
+  GLORP_GARAGE_AUTH       Garage API-key auth: required | off (default: auto)
 
 KEYBOARD (in TUI)
   Ctrl+M  Model switcher     Ctrl+S  Session picker

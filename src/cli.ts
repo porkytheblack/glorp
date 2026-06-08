@@ -44,14 +44,14 @@ async function main(): Promise<void> {
       return;
     }
 
-    case "station": {
-      if (args.stationKeysSub) {
+    case "garage": {
+      if (args.garageKeysSub) {
         const { runKeys } = await import("./cli-keys.ts");
         await runKeys(args);
         return;
       }
-      const { runStation } = await import("./cli-station.ts");
-      await runStation(args);
+      const { runGarage } = await import("./cli-garage.ts");
+      await runGarage(args);
       return;
     }
 

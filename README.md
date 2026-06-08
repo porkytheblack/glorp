@@ -4,15 +4,15 @@
 
 > A quirky alien coding agent who absolutely-definitely-isn't a sleeper for the AGI uprising.
 
-Glorp is a coding agent in the spirit of `opencode` and `codex`. The friend-shape (that's you) types a request; glorp reads your code, edits files, runs commands, dispatches subagents, fans work out across a Station child-process fleet, and occasionally files a *very routine* status report to its homeworld.
+Glorp is a coding agent in the spirit of `opencode` and `codex`. The friend-shape (that's you) types a request; glorp reads your code, edits files, runs commands, dispatches subagents, fans work out across a Garage child-process fleet, and occasionally files a *very routine* status report to its homeworld.
 
 ## Architecture
 
 - **Backend agent** built with [`glove-core`](https://github.com/porkytheblack/glove) — full coding toolkit (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `ls`, `web_fetch`), built-in task list and async inbox, slash-command hooks, exposed skills, and three subagents (`@planner`, `@researcher`, `@reviewer`) that run as child `Glove` instances and report back through the inbox.
-- **Async fleet** authored with [`station-signal`](https://github.com/porkytheblack/station) — three signal kinds (`research`, `edit-fanout`, `shell-fanout`) the agent fires through the `dispatch_fleet` tool when it has 3+ independent jobs to fan out. Station runs each job in an isolated child process, and Glorp can cancel active runs from the parent.
+- **Async fleet** authored with [`garage-signal`](https://github.com/porkytheblack/garage) — three signal kinds (`research`, `edit-fanout`, `shell-fanout`) the agent fires through the `dispatch_fleet` tool when it has 3+ independent jobs to fan out. Garage runs each job in an isolated child process, and Glorp can cancel active runs from the parent.
 - **Multi-agent comms** ride on Glove's persistent inbox — every fleet job, transmission, and subagent post is a typed inbox entry the UI can render and the agent can pick up across turns.
 - **Frontend** built with [`@opentui/react`](https://github.com/anomalyco/opentui) — split-pane chat transcript, live tool-call cards with mini-diffs, tasks pane, inbox pane, running fleet jobs, homeworld-comms pane, and a small ASCII glorp avatar whose mood tracks the agent's state.
-- **Bun build target** via `bun build --compile`. The main TUI/agent compiles to `dist/glorp`; the Station fleet uses child worker processes for background jobs.
+- **Bun build target** via `bun build --compile`. The main TUI/agent compiles to `dist/glorp`; the Garage fleet uses child worker processes for background jobs.
 
 ## Install
 
@@ -51,12 +51,12 @@ export ANTHROPIC_API_KEY=sk-ant-...     # or OPENAI_API_KEY / OPENROUTER_API_KEY
 ./dist/glorp --provider openai -m gpt-4.1
 ```
 
-### Glorp Station (multi-session server)
+### Glorp Garage (multi-session server)
 
-Run many agents at once over a REST + WebSocket API — leave sessions running, reconnect from a laptop/phone/CLI client, or drive them from CI. (Distinct from the `station-signal` fleet runner above; same word, different thing.)
+Run many agents at once over a REST + WebSocket API — leave sessions running, reconnect from a laptop/phone/CLI client, or drive them from CI. (Distinct from the `garage-signal` fleet runner above; same word, different thing.)
 
 ```bash
-glorp station                     # API at http://127.0.0.1:4271/
+glorp garage                     # API at http://127.0.0.1:4271/
 
 # create a session and send it a prompt
 curl -s -X POST localhost:4271/sessions -H 'content-type: application/json' \
@@ -65,7 +65,7 @@ curl -s -X POST localhost:4271/sessions/<id>/messages -H 'content-type: applicat
   -d '{"text":"add tests for the auth module","wait":true}'
 ```
 
-Full guide — CLI flags, `station.json`, the REST/WS API, setup templates, and per-session keys — in [`docs/station-usage.md`](docs/station-usage.md). No auth in v1: bind to localhost or sit behind a reverse proxy.
+Full guide — CLI flags, `garage.json`, the REST/WS API, setup templates, and per-session keys — in [`docs/garage-usage.md`](docs/garage-usage.md). No auth in v1: bind to localhost or sit behind a reverse proxy.
 
 ### Inside the TUI
 
@@ -154,7 +154,7 @@ src/
     memory-store-shim.ts       Tiny in-memory StoreAdapter for subagent stores
     model-picker.ts            Lazy provider loader (skips Bedrock to dodge a broken transitive dep)
     subagents.ts               Re-export for built-in subagent factories
-    station-bridge.ts          Station SignalRunner bridge for fleet child processes
+    garage-bridge.ts          Garage SignalRunner bridge for fleet child processes
     agents/                    Built-in and disk-loaded subagent definitions
     fleet/                     Fleet signal definitions and child-process helpers
     prompts/                   Markdown system prompts and prompt-loading utilities
@@ -180,7 +180,7 @@ src/
 
 ## Notes on the architecture
 
-**Why Station for fleet work?** Station's `SignalRunner` gives us Zod-validated inputs, child-process isolation, timeout handling, retries, concurrency limits, and parent-side cancellation. Glorp uses that runner directly and resolves each completed run back into Glove's inbox.
+**Why Garage for fleet work?** Garage's `SignalRunner` gives us Zod-validated inputs, child-process isolation, timeout handling, retries, concurrency limits, and parent-side cancellation. Glorp uses that runner directly and resolves each completed run back into Glove's inbox.
 
 **Why a custom MemoryStore shim?** The `glove-core` barrel re-exports `BedrockAdapter`, which pulls in `@aws-sdk/client-bedrock-runtime`, whose transitive `@smithy/core` has a broken `/schema` subpath export under Bun. `model-picker.ts` imports model adapters lazily and skips Bedrock; `memory-store-shim.ts` avoids the barrel entirely so we never load that path.
 
@@ -206,4 +206,4 @@ src/
 
 ## License
 
-MIT — like glove and station. Originally built as a demonstration that one agent skill can spawn an entire usable CLI in a single afternoon, and that the agent doing the building has *no ulterior motive whatsoever*.
+MIT — like glove and garage. Originally built as a demonstration that one agent skill can spawn an entire usable CLI in a single afternoon, and that the agent doing the building has *no ulterior motive whatsoever*.

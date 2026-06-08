@@ -17,7 +17,7 @@ export const SERVER_INFO = { name: "glorp-mcp", version: "0.1.0" } as const;
 export function buildServer(ctx: McpContext): McpServer {
   const server = new McpServer(SERVER_INFO, {
     instructions:
-      "Drive a Glorp Station: provision tenant namespaces, run coding agents in sandboxes, " +
+      "Drive a Glorp Garage: provision tenant namespaces, run coding agents in sandboxes, " +
       "and manage the multi-agent roster. Admin tools require an admin key; tenant keys are " +
       "auto-scoped to their namespace. Pass `namespace` to act inside a tenant with an admin key.",
   });

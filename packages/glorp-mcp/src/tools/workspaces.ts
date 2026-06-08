@@ -22,9 +22,9 @@ export function registerWorkspaceTools(server: McpServer, ctx: McpContext): void
     "glorp_create_workspace",
     {
       title: "Create workspace",
-      description: "Register a workspace folder on the Station host (tenants are confined to their namespace root).",
+      description: "Register a workspace folder on the Garage host (tenants are confined to their namespace root).",
       inputSchema: {
-        path: z.string().describe("Absolute path on the Station host"),
+        path: z.string().describe("Absolute path on the Garage host"),
         name: z.string().optional(),
         namespace: ns,
       },

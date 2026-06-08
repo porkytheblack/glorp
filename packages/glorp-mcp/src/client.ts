@@ -1,6 +1,6 @@
 /**
  * Resolve the Glorp client the MCP tools drive, from the environment:
- *   GLORP_ENDPOINT   (required)  — Station base URL, e.g. https://glorp.example.com
+ *   GLORP_ENDPOINT   (required)  — Garage base URL, e.g. https://glorp.example.com
  *   GLORP_API_KEY    (optional)  — admin key for orchestration, or a tenant key
  *   GLORP_NAMESPACE  (optional)  — pin every call to this namespace (admin proxy)
  *
@@ -18,7 +18,7 @@ export interface McpContext {
 export function buildContext(): McpContext {
   const endpoint = process.env.GLORP_ENDPOINT;
   if (!endpoint) {
-    throw new Error("GLORP_ENDPOINT is required (the Station base URL, e.g. https://glorp.example.com).");
+    throw new Error("GLORP_ENDPOINT is required (the Garage base URL, e.g. https://glorp.example.com).");
   }
   const base = createClient({
     endpoint,

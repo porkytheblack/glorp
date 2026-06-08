@@ -1,6 +1,6 @@
 /**
  * @porkytheblack/glorp-client — a typed client for driving a remote Glorp
- * Station: create workspaces, run agents, and poll/stream results over an
+ * Garage: create workspaces, run agents, and poll/stream results over an
  * API-key-secured HTTP/WS API.
  *
  *   import { configure, run } from "@porkytheblack/glorp-client";

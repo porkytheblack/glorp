@@ -1,30 +1,30 @@
 # Remote orchestration
 
-Drive Glorp Station from another machine — create workspaces and run agents over
+Drive Glorp Garage from another machine — create workspaces and run agents over
 an API-key-secured HTTP/WS API. This is the path for wiring Glorp into your own
-orchestration (cron jobs, CI, a `station-signal` job, etc.).
+orchestration (cron jobs, CI, a `garage-signal` job, etc.).
 
 - **HTTP/WS contract:** [`openapi.yaml`](./openapi.yaml) — works from any language.
 - **TypeScript client:** [`@porkytheblack/glorp-client`](../packages/glorp-client/README.md).
 
-## 1. Run Station with auth, reachable on the network
+## 1. Run Garage with auth, reachable on the network
 
-Bind a non-loopback host and Station **requires an API key automatically**:
+Bind a non-loopback host and Garage **requires an API key automatically**:
 
 ```bash
-glorp station --host 0.0.0.0 --port 4271
+glorp garage --host 0.0.0.0 --port 4271
 ```
 
 > Binding `0.0.0.0` (or any non-loopback address) flips auth on. On `127.0.0.1`
-> auth stays off for local dev. Force it either way with `GLORP_STATION_AUTH=required|off`.
+> auth stays off for local dev. Force it either way with `GLORP_GARAGE_AUTH=required|off`.
 
 Mint a key (printed once — store it now):
 
 ```bash
-glorp station keys add ci-bot --scopes admin
+glorp garage keys add ci-bot --scopes admin
 #  -> glsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-glorp station keys list
-glorp station keys revoke <id>
+glorp garage keys list
+glorp garage keys revoke <id>
 ```
 
 Scopes: `admin` (everything, incl. key management), `run` (create/run sessions),
@@ -33,7 +33,7 @@ Scopes: `admin` (everything, incl. key management), `run` (create/run sessions),
 ### TLS
 
 `Bun.serve` here speaks plain HTTP. For anything crossing a network, terminate
-TLS at a reverse proxy (Caddy/nginx) in front of Station and talk `https://` /
+TLS at a reverse proxy (Caddy/nginx) in front of Garage and talk `https://` /
 `wss://`. Example (Caddy):
 
 ```caddyfile
@@ -42,14 +42,14 @@ glorp.example.com {
 }
 ```
 
-Then run Station on `--host 127.0.0.1` and let the proxy face the internet.
+Then run Garage on `--host 127.0.0.1` and let the proxy face the internet.
 
 ## 2. Call it (any language)
 
 ```bash
 EP=https://glorp.example.com KEY=glsk_xxx
 
-# create a workspace from a folder on the Station host
+# create a workspace from a folder on the Garage host
 curl -s -X POST $EP/api/v1/workspaces \
   -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d '{"path":"/srv/projects/acme"}'
@@ -104,7 +104,7 @@ environment, so you can skip it entirely in a configured deployment.
 
 ## Multi-tenant namespaces
 
-Hosting more than one user on a Station? Give each their own **namespace** — an
+Hosting more than one user on a Garage? Give each their own **namespace** — an
 isolated data partition with its own sessions, workspaces, sandboxes, and model
 credentials. A namespace's data lives under `<dataDir>/namespaces/<id>/` and its
 sandboxes under `<workspaceRoot>/<id>/`; one tenant's sessions are physically
@@ -114,7 +114,7 @@ Your orchestrator holds an **admin** key and provisions namespaces, minting a
 namespace-bound key per user. That tenant key transparently scopes every call —
 the user just talks to `/sessions`, `/workspaces`, etc. as usual and only ever
 sees their own data. (Namespaces require auth on — bind a non-loopback host or
-`GLORP_STATION_AUTH=required`.)
+`GLORP_GARAGE_AUTH=required`.)
 
 ```bash
 EP=https://glorp.example.com ADMIN=glsk_admin_xxx
@@ -150,7 +150,7 @@ curl -s $EP/api/v1/sessions \
 
 Each namespace optionally carries its own model-provider credentials (POST
 `/models/providers` + `/models/profiles` with a tenant key), falling back to the
-station's defaults when unset — so each user can bring their own billing.
+garage's defaults when unset — so each user can bring their own billing.
 
 Deprovision when a user leaves. This revokes the namespace's keys, stops its live
 sessions, and (with `?data=true`) deletes its data subtree and sandboxes. The
@@ -163,7 +163,7 @@ curl -s -X DELETE "$EP/api/v1/namespaces/ns_acme?data=true" -H "authorization: B
 Mint a bound key offline (no running server) with the CLI:
 
 ```bash
-glorp station keys add acme-bot --namespace ns_acme   # scopes default to run,read
+glorp garage keys add acme-bot --namespace ns_acme   # scopes default to run,read
 ```
 
 The TypeScript kit exposes this too — `client.namespaces.{create,list,get,delete,createKey,listKeys}`,
@@ -173,7 +173,7 @@ See the [client README](../packages/glorp-client/README.md#multi-tenancy-namespa
 ## 4. Or expose it over MCP
 
 To let an MCP-capable agent (Claude Desktop/Code, Cursor, a custom orchestrator)
-drive a Station as tools, run [`@porkytheblack/glorp-mcp`](../packages/glorp-mcp/README.md)
+drive a Garage as tools, run [`@porkytheblack/glorp-mcp`](../packages/glorp-mcp/README.md)
 — an MCP server wrapping the kit, with stdio and streamable-HTTP transports:
 
 ```bash
@@ -200,4 +200,4 @@ Keys are stored hashed (sha256) at `<dataDir>/glorp-keys.json` (`0600`). To
 rotate: `keys add` a new one, update your clients, then `keys revoke <old-id>`.
 For multiple processes or a database-backed store, supply a custom
 `ApiKeyStorageAdapter` via `defineConfig({ auth: { keyStorage } })` (a
-`SqliteKeyStorage` ships in `src/station/auth`).
+`SqliteKeyStorage` ships in `src/garage/auth`).

@@ -74,7 +74,7 @@ export interface BuildGlorpOptions {
   credentials?: CredentialsStore;
   /**
    * Per-session event bus. When omitted, falls back to the process-global
-   * `getBridge()` singleton (the single-session server's behavior). Station
+   * `getBridge()` singleton (the single-session server's behavior). Garage
    * passes a fresh Bridge per session so concurrent sessions never cross-talk.
    */
   bridge?: Bridge;

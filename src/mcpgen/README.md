@@ -75,10 +75,10 @@ bun run src/mcpgen/cli.ts sync-all --workspace ./ws
 | `workspace.ts` | lifecycle: add / sync / sync-all / remove + boundary validation |
 | `cli.ts` | thin CLI entry |
 
-## Station API
+## Garage API
 
-Provisioning is controlled over the Station REST API — MCP workspaces are ordinary
-first-class Station workspaces, so they reuse the existing `WorkspaceStore`, session
+Provisioning is controlled over the Garage REST API — MCP workspaces are ordinary
+first-class Garage workspaces, so they reuse the existing `WorkspaceStore`, session
 creation, and namespace isolation.
 
 | Method & path | Action |
@@ -93,11 +93,11 @@ creation, and namespace isolation.
 Typical flow: `POST /workspaces` → `POST /workspaces/:id/mcp` (once per provider) →
 then drive the workspace with the existing `POST /sessions { workspaceId }` and
 `POST /sessions/:id/messages`. Wire types (`ProvisionMcpInput`, `McpSyncDiff`,
-`McpProviderDto`) live in `src/station/contract.ts` and are vendored into
+`McpProviderDto`) live in `src/garage/contract.ts` and are vendored into
 `@porkytheblack/glorp-client`.
 
-Routing for these lives in `src/station/route-workspaces.ts`; the handlers in
-`src/station/routes/mcp.ts`.
+Routing for these lives in `src/garage/route-workspaces.ts`; the handlers in
+`src/garage/routes/mcp.ts`.
 
 ## Follow-ups
 

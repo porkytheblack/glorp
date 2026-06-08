@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Minimal CLI for the MCP-workspace engine — a stand-in for the eventual
- * Station provisioning endpoint. Drives add / sync / sync-all against a
+ * Garage provisioning endpoint. Drives add / sync / sync-all against a
  * real MCP URL and prints the resulting diff as JSON.
  *
  *   bun run src/mcpgen/cli.ts add --workspace ./ws --provider linear \

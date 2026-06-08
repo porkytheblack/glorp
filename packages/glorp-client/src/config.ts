@@ -2,11 +2,11 @@
  * Client configuration. `configure({ endpoint, apiKey })` sets the default used
  * by the top-level `run` / `streamSession`; `createClient(opts)` can also take an
  * explicit config. Auto-configures from `GLORP_ENDPOINT` / `GLORP_API_KEY` env
- * vars on first use. Mirrors the Station ecosystem's `configure`.
+ * vars on first use. Mirrors the Garage ecosystem's `configure`.
  */
 
 export interface GlorpConfig {
-  /** Base URL of the Station server, e.g. "https://glorp.example.com". */
+  /** Base URL of the Garage server, e.g. "https://glorp.example.com". */
   endpoint: string;
   /** API key (Bearer). Required unless the server runs auth-off on loopback. */
   apiKey?: string;

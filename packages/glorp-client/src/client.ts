@@ -1,5 +1,5 @@
 /**
- * `createClient({ endpoint, apiKey })` — a typed client over the Station REST/WS
+ * `createClient({ endpoint, apiKey })` — a typed client over the Garage REST/WS
  * API, grouped into `workspaces`, `sessions`, `models`, `keys`, plus the
  * headline `run()` and `streamSession()`. Pass no opts to use the config from
  * `configure()` / env.
@@ -138,7 +138,7 @@ export type GlorpClient = ReturnType<typeof buildClient> & {
 };
 
 /**
- * Create a typed client over the Station REST/WS API. Pass no opts to use the
+ * Create a typed client over the Garage REST/WS API. Pass no opts to use the
  * config from `configure()` / env. `forNamespace(ns)` returns a client bound to
  * a namespace (admin keys use it to act inside a tenant).
  */

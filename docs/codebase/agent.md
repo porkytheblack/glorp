@@ -6,10 +6,10 @@ construction (`glorp.ts` + `runtime/`), the coding tool suite, subagents, prompt
 persona, agent coordination (spawn / mesh), and the store/persistence model.
 
 > **Scope note.** Some older terminology from the repo README has been superseded in the
-> code. There is no `src/agent/fleet/` directory, no `station-bridge.ts`, no
+> code. There is no `src/agent/fleet/` directory, no `garage-bridge.ts`, no
 > `memory-store-shim.ts`, and no `dispatch_fleet` tool. The async fan-out mechanism is now
 > the **orchestrator + agent mesh** (`src/orchestrator/`), driven by the `spawn_agent`
-> tool. Where the README says "fleet / Station signal", read "orchestrator mesh /
+> tool. Where the README says "fleet / Garage signal", read "orchestrator mesh /
 > `spawn_agent`". The `dashboard/` directory is out of scope and not documented here.
 
 [`glove-core`]: https://github.com/porkytheblack/glove
