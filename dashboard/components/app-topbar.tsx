@@ -31,13 +31,11 @@ export function AppTopbar({ title }: { title: string }) {
     <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-background/80 px-6 backdrop-blur-md">
       <h1 className="text-sm font-medium text-foreground">{title}</h1>
       <div className="flex items-center gap-2">
-        <span className="hidden text-[11px] uppercase tracking-wider text-muted-foreground/70 sm:inline">Namespace</span>
+        <span className="hidden whitespace-nowrap text-[11px] uppercase tracking-wider text-muted-foreground/70 md:inline">Namespace</span>
         <Select value={ns} onValueChange={onChange}>
-          <SelectTrigger className="h-8 w-[190px] text-[13px]">
-            <span className="flex min-w-0 items-center gap-2">
-              <Boxes className="size-3.5 shrink-0 text-muted-foreground" />
-              <SelectValue />
-            </span>
+          <SelectTrigger className="h-8 w-[170px] whitespace-nowrap text-[13px]">
+            <Boxes className="size-3.5 shrink-0 text-muted-foreground" />
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={DEFAULT}>default</SelectItem>

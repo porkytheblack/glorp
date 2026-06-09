@@ -11,11 +11,13 @@ export function Composer({
   disabled,
   onSend,
   onStop,
+  controls,
 }: {
   busy: boolean;
   disabled?: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
+  controls?: React.ReactNode;
 }) {
   const [text, setText] = React.useState("");
   const ref = React.useRef<HTMLTextAreaElement>(null);
@@ -63,11 +65,18 @@ export function Composer({
           </Button>
         )}
       </div>
-      <p className="mt-1.5 flex w-full max-w-3xl items-center gap-1 px-1 text-[11px] text-muted-foreground/70">
-        <CornerDownLeft className="size-3" /> send
-        <span className="mx-1">·</span> ⇧⏎ newline
-        {busy && <span className="ml-auto text-warning">Glorp is working…</span>}
-      </p>
+      <div className="mt-1.5 flex w-full max-w-3xl items-center justify-between gap-2 px-1">
+        <div className="flex min-w-0 items-center gap-1">{controls}</div>
+        <p className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground/70">
+          {busy ? (
+            <span className="text-warning">Glorp is working…</span>
+          ) : (
+            <>
+              <CornerDownLeft className="size-3" /> send <span className="mx-0.5">·</span> ⇧⏎ newline
+            </>
+          )}
+        </p>
+      </div>
     </div>
   );
 }

@@ -139,11 +139,12 @@ export function useSession(id: string) {
   const abort = useCallback(() => raw({ type: "abort" }), [raw]);
   const resolvePermission = useCallback((slotId: string, allow: boolean) => raw({ type: "resolve_permission", slot_id: slotId, allow }), [raw]);
   const setMode = useCallback((mode: string) => raw({ type: "set_permission_mode", mode }), [raw]);
+  const swapProfile = useCallback((profileId: string) => raw({ type: "swap_profile", profile_id: profileId }), [raw]);
   const switchAgent = useCallback((agentId: string) => raw({ type: "switch_agent", agent_id: agentId }), [raw]);
   const addAgent = useCallback((role: string, label?: string) => raw({ type: "add_agent", role, label }), [raw]);
   const removeAgent = useCallback((agentId: string) => raw({ type: "remove_agent", agent_id: agentId }), [raw]);
 
-  return { ...state, connected, send, abort, resolvePermission, setMode, switchAgent, addAgent, removeAgent };
+  return { ...state, connected, send, abort, resolvePermission, setMode, swapProfile, switchAgent, addAgent, removeAgent };
 }
 
 export type SessionLive = ReturnType<typeof useSession>;
