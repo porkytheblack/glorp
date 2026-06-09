@@ -10,18 +10,16 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/shared";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import type { Catalog, ProviderWire, ReasoningOption } from "@/lib/types";
+import type { Catalog, ProviderWire } from "@/lib/types";
 
-const isOff = (v: unknown) => typeof v === "object" && v !== null && (v as { kind?: string }).kind === "off";
-
+/** Add a (provider, model) profile. Reasoning effort is configured afterwards on
+ * the profile row — so a model stays a single entry, the way the TUI works. */
 export function AddProfileModal({ providers, catalog, onSaved }: { providers: ProviderWire[]; catalog: Catalog | null; onSaved: () => void }) {
   const [open, setOpen] = React.useState(false);
   const [providerId, setProviderId] = React.useState("");
   const [model, setModel] = React.useState("");
   const [label, setLabel] = React.useState("");
   const [contextLimit, setContextLimit] = React.useState("");
-  const [opts, setOpts] = React.useState<ReasoningOption[]>([]);
-  const [reasoningIdx, setReasoningIdx] = React.useState("0");
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -34,28 +32,11 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
     return catalog?.providers.find((c) => c.id === key)?.default_models ?? [];
   }, [providers, catalog, providerId]);
 
-  React.useEffect(() => {
-    setReasoningIdx("0");
-    if (!providerId || !model.trim()) {
-      setOpts([]);
-      return;
-    }
-    let cancelled = false;
-    const q = `?provider=${encodeURIComponent(providerId)}&model=${encodeURIComponent(model.trim())}`;
-    api<{ options: ReasoningOption[] }>(`/models/reasoning-options${q}`)
-      .then((r) => !cancelled && setOpts(r.options))
-      .catch(() => !cancelled && setOpts([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [providerId, model]);
-
   const save = async () => {
     if (!providerId || !model.trim()) {
       toast.error("Provider and model are required.");
       return;
     }
-    const reasoning = opts[Number(reasoningIdx)]?.value;
     setBusy(true);
     try {
       await api("/models/profiles", {
@@ -65,7 +46,6 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
           model: model.trim(),
           label: label.trim() || undefined,
           activate: true,
-          ...(reasoning && !isOff(reasoning) ? { reasoning } : {}),
           ...(contextLimit.trim() ? { contextLimit: Number(contextLimit) } : {}),
         },
       });
@@ -85,13 +65,13 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="secondary" size="sm" disabled={providers.length === 0}>
-          <Plus /> Add profile
+          <Plus /> Add model
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add model profile</DialogTitle>
-          <DialogDescription>Pair a provider with a model. Reasoning options adapt to what the model supports.</DialogDescription>
+          <DialogTitle>Add model</DialogTitle>
+          <DialogDescription>Pair a provider with a model. Set reasoning effort afterwards from the model’s row.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -121,26 +101,6 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
               </datalist>
             </div>
           </div>
-
-          {opts.length > 0 && (
-            <div className="space-y-1.5">
-              <Label>Reasoning / thinking</Label>
-              <Select value={reasoningIdx} onValueChange={setReasoningIdx}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {opts.map((o, i) => (
-                    <SelectItem key={i} value={String(i)}>
-                      {o.label}
-                      {o.description ? ` — ${o.description}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Label (optional)</Label>
@@ -158,7 +118,7 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
             Cancel
           </Button>
           <Button onClick={save} disabled={busy}>
-            {busy ? <Spinner /> : null} Add profile
+            {busy ? <Spinner /> : null} Add model
           </Button>
         </DialogFooter>
       </DialogContent>

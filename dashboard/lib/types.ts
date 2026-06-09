@@ -95,6 +95,9 @@ export interface ProfileWire {
   label: string;
   provider_id: string;
   model: string;
+  reasoning?: unknown;
+  reasoning_label?: string;
+  context_limit?: number | null;
   last_used_at: string | null;
 }
 
@@ -126,6 +129,19 @@ export interface ReasoningOption {
   label: string;
   description?: string;
   value: unknown;
+}
+
+/** A single provisioning step (src/garage/templates/types.ts). */
+export type TemplateStep =
+  | { type: "git-clone"; repo: string; dest?: string; ref?: string }
+  | { type: "shell"; command: string }
+  | { type: "copy"; from: string; to: string };
+
+/** Full template incl. its ordered steps (GET /templates/:name). */
+export interface TemplateFull {
+  name: string;
+  description?: string;
+  steps: TemplateStep[];
 }
 
 export interface TemplateDto {

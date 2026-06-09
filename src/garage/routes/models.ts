@@ -12,6 +12,8 @@ import {
   findKnownProvider,
   effectiveProviderId,
   reasoningOptionsFor,
+  normaliseReasoning,
+  reasoningLabel,
 } from "../../agent/credentials.ts";
 import type {
   ProviderConfig,
@@ -31,6 +33,7 @@ export interface ModelRoutes {
   addProvider(req: Request): Promise<Response>;
   deleteProvider(id: string): Response;
   addProfile(req: Request): Promise<Response>;
+  setReasoning(id: string, req: Request): Promise<Response>;
   deleteProfile(id: string): Response;
 }
 
@@ -47,7 +50,17 @@ function providerDto(p: ProviderConfig) {
 }
 
 function profileDto(p: ModelProfile) {
-  return { id: p.id, label: p.label, provider_id: p.providerId, model: p.model, last_used_at: p.lastUsedAt ?? null };
+  const reasoning = normaliseReasoning(p.reasoning);
+  return {
+    id: p.id,
+    label: p.label,
+    provider_id: p.providerId,
+    model: p.model,
+    reasoning,
+    reasoning_label: reasoningLabel(reasoning),
+    context_limit: p.contextLimit ?? null,
+    last_used_at: p.lastUsedAt ?? null,
+  };
 }
 
 export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
@@ -118,8 +131,12 @@ export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
         return errorJson("bad_request", "Invalid JSON body", 400);
       }
       if (!body.id) return errorJson("bad_request", "provider 'id' is required", 400);
-      const type = body.type ?? (findKnownProvider(body.id) ? "known" : "custom");
+      // Merge over any existing provider so a partial update (e.g. rotating just
+      // the API key) preserves the fields the caller didn't send.
+      const existing = credentials.getProvider(body.id);
+      const type = body.type ?? existing?.type ?? (findKnownProvider(body.id) ? "known" : "custom");
       const provider: ProviderConfig = {
+        ...(existing ?? {}),
         type,
         id: body.id,
         ...(body.basedOn ? { basedOn: body.basedOn as KnownProvider } : {}),
@@ -167,6 +184,33 @@ export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
       credentials.upsertProfile(profile);
       if (body.activate) credentials.setActive(id);
       return json(profileDto(profile), 201);
+    },
+
+    /** Change a profile's reasoning effort in place — the web equivalent of the
+     * TUI's `r` cycle. Because reasoning is part of the profile id, this swaps
+     * the record (remove old, add new) while preserving its active state, so the
+     * model stays a single list entry instead of accumulating duplicates. */
+    async setReasoning(id, req): Promise<Response> {
+      const profile = credentials.getProfile(id);
+      if (!profile) return errorJson("not_found", `Profile ${id} not found`, 404);
+      let body: { reasoning?: ReasoningConfig | null };
+      try {
+        body = await readJson(req);
+      } catch {
+        return errorJson("bad_request", "Invalid JSON body", 400);
+      }
+      const reasoning = normaliseReasoning(body.reasoning ?? { kind: "off" });
+      const newId = CredentialsStore.makeProfileId(profile.providerId, profile.model, reasoning);
+      const wasActive = credentials.getActiveProfile()?.id === id;
+      const updated: ModelProfile = {
+        ...profile,
+        id: newId,
+        reasoning: reasoning.kind === "off" ? undefined : reasoning,
+      };
+      if (newId !== id) credentials.removeProfile(id);
+      credentials.upsertProfile(updated);
+      if (wasActive) credentials.setActive(newId);
+      return json(profileDto(updated));
     },
 
     deleteProfile(id): Response {

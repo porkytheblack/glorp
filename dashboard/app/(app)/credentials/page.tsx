@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AddProviderModal } from "./add-provider-modal";
 import { AddProfileModal } from "./add-profile-modal";
+import { EditProviderModal } from "./edit-provider-modal";
+import { EditReasoningModal } from "./edit-reasoning-modal";
 import type { Catalog, ProviderWire, ProfileWire } from "@/lib/types";
 
 function SectionHead({ title, action }: { title: string; action: React.ReactNode }) {
@@ -74,7 +76,8 @@ export default function CredentialsPage() {
                     <TableCell className="hidden font-mono text-[12.5px] text-muted-foreground md:table-cell">{p.base_url ?? "—"}</TableCell>
                     <TableCell>{p.has_api_key ? <Badge variant="success">set</Badge> : <Badge variant="outline">none</Badge>}</TableCell>
                     <TableCell>
-                      <div className="flex justify-end">
+                      <div className="flex items-center justify-end gap-1">
+                        <EditProviderModal provider={p} onSaved={providers.reload} />
                         <ConfirmButton label="" icon={Trash2} onConfirm={() => run(() => api(`/models/providers/${p.id}`, { method: "DELETE" }), "Provider removed", providers.reload)} />
                       </div>
                     </TableCell>
@@ -100,7 +103,7 @@ export default function CredentialsPage() {
                   <TableHead>Label</TableHead>
                   <TableHead className="hidden sm:table-cell">Provider</TableHead>
                   <TableHead>Model</TableHead>
-                  <TableHead className="w-44" />
+                  <TableHead className="w-[280px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -115,14 +118,22 @@ export default function CredentialsPage() {
                       )}
                     </TableCell>
                     <TableCell className="hidden text-[13px] text-muted-foreground sm:table-cell">{p.provider_id}</TableCell>
-                    <TableCell className="font-mono text-[12.5px] text-muted-foreground">{p.model}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <span className="font-mono text-[12.5px]">{p.model}</span>
+                      {p.reasoning_label && p.reasoning_label !== "off" && (
+                        <Badge variant="outline" className="ml-2">
+                          {p.reasoning_label}
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell>
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-0.5">
                         {p.id !== activeId && (
                           <Button variant="ghost" size="sm" onClick={() => run(() => api(`/models/profiles/${p.id}/activate`, { method: "POST" }), "Profile activated", profiles.reload)}>
                             Activate
                           </Button>
                         )}
+                        <EditReasoningModal profile={p} onSaved={profiles.reload} />
                         <ConfirmButton label="" icon={Trash2} onConfirm={() => run(() => api(`/models/profiles/${p.id}`, { method: "DELETE" }), "Profile removed", profiles.reload)} />
                       </div>
                     </TableCell>

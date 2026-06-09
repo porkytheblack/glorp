@@ -58,7 +58,7 @@ export function Conversation({
   return (
     <div className={cn("relative min-h-0", className)}>
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto px-4 md:px-6">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6">
+        <div className="flex w-full max-w-3xl flex-col gap-5 py-6">
           {empty ? (
             <div className="pt-10">
               <EmptyState icon={MessageSquare} title="Start the conversation" description="Send a message to put the agent to work in this session." />

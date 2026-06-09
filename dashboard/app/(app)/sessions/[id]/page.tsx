@@ -104,7 +104,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             <Conversation items={live.items} streaming={live.streaming} busy={live.busy} userInitial={userInitial} className="flex-1" />
             {permSlots.length > 0 && (
               <div className="px-4 md:px-6">
-                <div className="mx-auto w-full max-w-3xl space-y-2 pb-1">
+                <div className="w-full max-w-3xl space-y-2 pb-1">
                   {permSlots.map((s) => (
                     <PermissionPrompt key={s.slotId} slot={s} onResolve={live.resolvePermission} />
                   ))}
@@ -115,13 +115,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </TabsContent>
 
           <TabsContent value="tasks" className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-            <div className="mx-auto max-w-2xl">
+            <div className="max-w-2xl">
               <TaskList tasks={live.tasks} />
             </div>
           </TabsContent>
 
           <TabsContent value="agents" className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-            <div className="mx-auto max-w-2xl">
+            <div className="max-w-2xl">
               <AgentRoster agents={live.agents} activeId={live.activeAgentId} onSwitch={live.switchAgent} onAdd={live.addAgent} onRemove={live.removeAgent} />
             </div>
           </TabsContent>

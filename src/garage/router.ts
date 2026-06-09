@@ -22,6 +22,7 @@ const SUBPATH = /^\/sessions\/([^/]+)\/([^/]+)(?:\/(.+))?$/;
 const ACTIVATE = /^\/models\/profiles\/([^/]+)\/activate$/;
 const MODEL_PROVIDER = /^\/models\/providers\/([^/]+)$/;
 const MODEL_PROFILE = /^\/models\/profiles\/([^/]+)$/;
+const MODEL_PROFILE_REASONING = /^\/models\/profiles\/([^/]+)\/reasoning$/;
 const TEMPLATE = /^\/templates\/([^/]+)$/;
 const NAMESPACE = /^\/namespaces\/([^/]+)$/;
 const NAMESPACE_KEYS = /^\/namespaces\/([^/]+)\/keys$/;
@@ -77,6 +78,8 @@ export function createGarageRouter(
       if (pathname === "/models/profiles" && m === "POST") return g.models.addProfile(req);
       const act = pathname.match(ACTIVATE);
       if (act && m === "POST") return g.models.activate(act[1]!);
+      const profReason = pathname.match(MODEL_PROFILE_REASONING);
+      if (profReason && m === "POST") return g.models.setReasoning(profReason[1]!, req);
       const provDel = pathname.match(MODEL_PROVIDER);
       if (provDel && m === "DELETE") return g.models.deleteProvider(provDel[1]!);
       const profDel = pathname.match(MODEL_PROFILE);

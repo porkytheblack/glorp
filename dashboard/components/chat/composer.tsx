@@ -37,7 +37,7 @@ export function Composer({
 
   return (
     <div className="border-t border-border bg-background px-4 py-3 md:px-6">
-      <div className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-xl border border-input bg-card px-3 py-2 shadow-sm transition-colors focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/30">
+      <div className="flex w-full max-w-3xl items-end gap-2 rounded-xl border border-input bg-card px-3 py-2 shadow-sm transition-colors focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/30">
         <textarea
           ref={ref}
           rows={1}
@@ -63,7 +63,7 @@ export function Composer({
           </Button>
         )}
       </div>
-      <p className="mx-auto mt-1.5 flex w-full max-w-3xl items-center gap-1 px-1 text-[11px] text-muted-foreground/70">
+      <p className="mt-1.5 flex w-full max-w-3xl items-center gap-1 px-1 text-[11px] text-muted-foreground/70">
         <CornerDownLeft className="size-3" /> send
         <span className="mx-1">·</span> ⇧⏎ newline
         {busy && <span className="ml-auto text-warning">Glorp is working…</span>}
