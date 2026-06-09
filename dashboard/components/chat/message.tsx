@@ -57,9 +57,9 @@ export function Message({ turn, userInitial = "U" }: { turn: ChatTurn; userIniti
         {turn.reasoning && <Reasoning text={turn.reasoning} />}
         {turn.text &&
           (isUser ? (
-            <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-foreground/90">{turn.text}</p>
+            <p className="max-w-[78ch] whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-foreground/90">{turn.text}</p>
           ) : (
-            <Md>{turn.text}</Md>
+            <Md className="max-w-[78ch]">{turn.text}</Md>
           ))}
         {imageCount > 0 && <p className="mt-1 text-[12px] text-muted-foreground">+ {imageCount} image{imageCount === 1 ? "" : "s"}</p>}
       </div>
@@ -78,7 +78,7 @@ export function StreamingMessage({ text }: { text: string }) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="mb-1 text-[12px] font-medium text-muted-foreground">Glorp</div>
-        <Md>{text}</Md>
+        <Md className="max-w-[78ch]">{text}</Md>
         <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-caret-blink bg-brand align-middle" />
       </div>
     </div>
