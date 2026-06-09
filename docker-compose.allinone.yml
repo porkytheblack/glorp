@@ -1,0 +1,52 @@
+# All-in-one Glorp: Garage API + MCP server + dashboard in a single container.
+#   docker compose -f docker-compose.allinone.yml up -d --build
+#   docker compose -f docker-compose.allinone.yml logs | grep -A2 "Admin API key"
+# Then open the dashboard at http://localhost:3270 and sign in with
+# GARAGE_ADMIN_USER / GARAGE_ADMIN_PASSWORD below. MCP lives at
+# http://localhost:8787/mcp; the REST/WS API at http://localhost:4271.
+
+services:
+  glorp:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.allinone
+      args:
+        # Browser-facing Garage URL baked into the dashboard. Keep it in sync
+        # with the published 4271 port. For remote access, point it at your
+        # public Garage URL (and front both with a same-origin proxy — see
+        # docs/docker.md), then rebuild.
+        GARAGE_URL: "${GARAGE_URL:-http://localhost:4271}"
+    image: glorp-allinone
+    ports:
+      - "4271:4271"   # Garage REST/WS API
+      - "3270:3270"   # dashboard (web console)
+      - "8787:8787"   # MCP streamable-HTTP (POST /mcp)
+    environment:
+      # Model providers (standard keys). Mount credentials.json for custom ones.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      GLORP_GARAGE_AUTH: "required"      # set "off" only on a trusted private net
+      GLORP_AUTO_KEY: "1"
+      # Dashboard admin login (verified by Garage). CHANGE THESE.
+      GARAGE_ADMIN_USER: "${GARAGE_ADMIN_USER:-admin}"
+      GARAGE_ADMIN_PASSWORD: "${GARAGE_ADMIN_PASSWORD:-change-me}"
+      GARAGE_JWT_SECRET: "${GARAGE_JWT_SECRET:-}"  # random 32-byte hex in prod
+      # Optional bearer token guarding the MCP endpoint itself (separate from the
+      # Glorp API key its tools use). Leave empty to allow unauthenticated /mcp.
+      MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"
+    volumes:
+      - glorp-data:/data                 # keys (+ persisted MCP key) + snapshots
+      - glorp-workspaces:/workspaces     # agent working dirs, host-isolated
+      # Reuse your existing model credentials (incl. custom providers), read-only:
+      # - ${HOME}/.glorp/credentials.json:/data/credentials.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4271/api/v1/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  glorp-data:
+  glorp-workspaces:

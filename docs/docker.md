@@ -115,6 +115,72 @@ What's inside (`docker/Dockerfile.full`, ~3.4 GB):
   them later by re-running `docker/skills-install.sh` in the container (or
   rebuilding with a reachable `ANTHROPIC_SKILLS_REPO`).
 
+## All-in-one image (Garage + MCP + dashboard)
+
+The default image runs **only** the Garage API — the right call when you drive it
+from your own code or the kit. If instead you want one container that also serves
+the **MCP server** and the **web dashboard**, build the all-in-one variant
+(`docker/Dockerfile.allinone`):
+
+```bash
+docker compose -f docker-compose.allinone.yml up -d --build
+
+# grab the admin API key minted on first boot (used for REST + MCP)
+docker compose -f docker-compose.allinone.yml logs | grep -A2 "Admin API key"
+```
+
+One container, three surfaces:
+
+```
+┌─ container ───────────────────────────────────────────────┐
+│  glorp garage   ─ REST/WS API ........... :4271            │
+│      ▲   ▲                                                 │
+│      │   └─ dashboard (Next.js console) . :3270  ─▶ browser│
+│      └───── glorp-mcp (streamable HTTP) . :8787 /mcp       │
+│  /data  /workspaces (volumes)                              │
+└───────────────────────────────────────────────────────────┘
+```
+
+- **Dashboard** — open <http://localhost:3270> and sign in with
+  `GARAGE_ADMIN_USER` / `GARAGE_ADMIN_PASSWORD` (verified by Garage; **change the
+  defaults**). Set a strong `GARAGE_JWT_SECRET` in production.
+- **MCP** — point any MCP-capable agent at `http://localhost:8787/mcp` (POST /
+  streamable HTTP). Inside the container the server is auto-wired to Garage with
+  the minted admin key; set `MCP_AUTH_TOKEN` to require a Bearer token on the
+  endpoint itself.
+- **Garage API** — `http://localhost:4271`, same as the lean image.
+
+The Garage process supervises all three: if any exits, the container stops so the
+restart policy brings it back. Ports are configurable via `MCP_PORT` / `DASH_PORT`
+(remember to match the published `-p` mappings).
+
+### Plain `docker run`
+
+```bash
+docker build -f docker/Dockerfile.allinone -t glorp-allinone .
+docker run -d --name glorp \
+  -p 4271:4271 -p 3270:3270 -p 8787:8787 \
+  -e ANTHROPIC_API_KEY=sk-ant-… \
+  -e GARAGE_ADMIN_USER=admin -e GARAGE_ADMIN_PASSWORD='choose-a-password' \
+  -v glorp-data:/data -v glorp-workspaces:/workspaces \
+  glorp-allinone
+```
+
+### Browser URL & CORS (important)
+
+The dashboard talks to Garage **from your browser**, so the Garage URL is baked
+into its bundle at build time via `NEXT_PUBLIC_GARAGE_URL` (build arg
+`GARAGE_URL`, default `http://localhost:4271`). The default works for a local
+publish because Garage allows cross-origin browser requests **only when both the
+page and the API are on loopback** (`localhost` / `127.0.0.1`).
+
+For access from another host, the loopback rule no longer applies. Either:
+
+- put a **reverse proxy** in front so the dashboard and the API share one origin
+  (e.g. dashboard at `/`, Garage proxied under `/api` on the same host:port), or
+- rebuild with `--build-arg GARAGE_URL=https://garage.example.com` and serve the
+  dashboard from the **same origin** as that Garage.
+
 ## Image notes
 
 The lean image runs Garage from source on the `oven/bun` base (bun is present so
