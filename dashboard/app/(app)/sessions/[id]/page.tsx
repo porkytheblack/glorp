@@ -1,94 +1,136 @@
 "use client";
 
-import { use, useState, useRef, useEffect } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
+import { ArrowLeft, Bot, CircleStop, FolderGit2, ListChecks, MessageSquare, Settings2 } from "lucide-react";
 import { useQuery } from "@/lib/hooks";
-import { useSessionStream } from "@/lib/useSessionStream";
-import { PageHeader, Loading, StateBadge, ErrorNote } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
+import { useSession } from "@/lib/useSession";
+import { baseName } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { SessionStatus, Loading, ErrorState } from "@/components/shared";
+import { Conversation } from "@/components/chat/conversation";
+import { Composer } from "@/components/chat/composer";
+import { PermissionPrompt } from "@/components/chat/permission-prompt";
+import { TaskList } from "@/components/chat/task-list";
+import { AgentRoster } from "@/components/session/agent-roster";
+import { SessionDetails } from "@/components/session/session-details";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import type { SessionDto } from "@/lib/types";
 
-function summarize(ev: { type: string; [k: string]: unknown }): string {
-  if (ev.type === "text_delta") return String(ev.text ?? "");
-  if (ev.type === "tool_started" || ev.type === "tool_finished") {
-    const t = ev.tool as Record<string, unknown> | undefined;
-    return JSON.stringify(t ?? {}, null, 0).slice(0, 400);
-  }
-  if (ev.type === "error") return String(ev.message ?? "");
-  if (ev.type === "busy") return `busy=${ev.busy}`;
-  const { type, ...rest } = ev;
-  return Object.keys(rest).length ? JSON.stringify(rest).slice(0, 400) : "";
+function Count({ n }: { n: number }) {
+  if (!n) return null;
+  return <span className="ml-1 rounded-full bg-secondary px-1.5 text-[11px] text-muted-foreground">{n}</span>;
 }
 
-export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { data, loading, error } = useQuery<SessionDto>(`/sessions/${id}`);
-  const { events, connected, send } = useSessionStream(id);
-  const [text, setText] = useState("");
-  const streamRef = useRef<HTMLDivElement>(null);
+  const { data: session, loading, error } = useQuery<SessionDto>(`/sessions/${id}`);
+  const { identity } = useAuth();
+  const live = useSession(id);
+  const [tab, setTab] = useState("chat");
 
-  useEffect(() => {
-    streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight });
-  }, [events]);
-
-  const sendMessage = () => {
-    if (!text.trim()) return;
-    send({ type: "send_message", text: text.trim() });
-    setText("");
-  };
+  const title = live.title ?? session?.title ?? "Untitled session";
+  const state = session?.state ?? (live.busy ? "busy" : "idle");
+  const mode = live.mode ?? session?.permission_mode ?? "normal";
+  const permSlots = live.slots.filter((s) => s.isPermissionRequest);
+  const userInitial = (identity?.user ?? "U").slice(0, 1).toUpperCase();
 
   return (
-    <div>
-      <PageHeader
-        title={data?.title ?? "Session"}
-        subtitle={id}
-        action={
-          <div className="row">
-            <span className={`badge dot ${connected ? "green" : ""}`}>{connected ? "live" : "offline"}</span>
-            {data && <StateBadge state={data.state} />}
-            <Link href="/sessions" className="btn ghost sm">← All sessions</Link>
+    <div className="flex h-full flex-col">
+      <div className="shrink-0 border-b border-border px-6 py-3">
+        <div className="mb-1.5 flex items-center gap-2 text-[12px] text-muted-foreground">
+          <Link href="/sessions" className="inline-flex items-center gap-1 hover:text-foreground">
+            <ArrowLeft className="size-3.5" /> Sessions
+          </Link>
+          {session?.workspace && (
+            <>
+              <span className="text-muted-foreground/50">/</span>
+              <span className="inline-flex items-center gap-1">
+                <FolderGit2 className="size-3.5" /> {baseName(session.workspace)}
+              </span>
+            </>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <h1 className="truncate text-[17px] font-semibold tracking-tight">{title}</h1>
+            <SessionStatus state={state} />
           </div>
-        }
-      />
+          <div className="flex items-center gap-3">
+            <span className={cn("inline-flex items-center gap-1.5 text-[12px]", live.connected ? "text-muted-foreground" : "text-muted-foreground/50")}>
+              <span className={cn("size-1.5 rounded-full", live.connected ? "bg-success" : "bg-muted-foreground/40")} />
+              {live.connected ? "live" : "offline"}
+            </span>
+            {live.busy && (
+              <Button size="sm" variant="secondary" onClick={live.abort}>
+                <CircleStop /> Stop
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
 
-      {error && <ErrorNote message={error} />}
-      {loading && <Loading />}
-
-      {data && (
-        <div className="grid cols-4 mt-0" style={{ marginBottom: 18 }}>
-          <div className="card stat"><div className="label">Model</div><div className="value" style={{ fontSize: 15 }}>{data.model_label ?? "—"}</div></div>
-          <div className="card stat"><div className="label">Turns</div><div className="value">{data.turn_count}</div></div>
-          <div className="card stat"><div className="label">Tokens in/out</div><div className="value" style={{ fontSize: 15 }}>{data.tokens_in}/{data.tokens_out}</div></div>
-          <div className="card stat"><div className="label">Clients</div><div className="value">{data.connected_clients}</div></div>
+      {loading && <Loading label="Loading session…" />}
+      {error && (
+        <div className="p-6">
+          <ErrorState message={error} />
         </div>
       )}
 
-      <div className="stream" ref={streamRef}>
-        {events.length === 0 ? (
-          <div className="faint">Waiting for events… send a message to engage the agent.</div>
-        ) : (
-          events.map((ev, i) => {
-            const body = summarize(ev);
-            return (
-              <div className="ev" key={i}>
-                <span className="ev-type">{ev.type}</span>
-                {body && <pre>{body}</pre>}
-              </div>
-            );
-          })
-        )}
-      </div>
+      {session && (
+        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 px-6">
+            <TabsList>
+              <TabsTrigger value="chat">
+                <MessageSquare /> Chat
+              </TabsTrigger>
+              <TabsTrigger value="tasks">
+                <ListChecks /> Tasks
+                <Count n={live.tasks.length} />
+              </TabsTrigger>
+              <TabsTrigger value="agents">
+                <Bot /> Agents
+                <Count n={live.agents.length} />
+              </TabsTrigger>
+              <TabsTrigger value="details">
+                <Settings2 /> Details
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-      <div className="card mt-2 row" style={{ gap: 10 }}>
-        <input
-          className="input"
-          placeholder="Send a message to the agent…"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-        />
-        <button className="btn ghost" onClick={() => send({ type: "abort" })}>Abort</button>
-        <button className="btn primary" onClick={sendMessage} disabled={!text.trim()}>Send</button>
-      </div>
+          <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
+            <Conversation items={live.items} streaming={live.streaming} busy={live.busy} userInitial={userInitial} className="flex-1" />
+            {permSlots.length > 0 && (
+              <div className="px-4 md:px-6">
+                <div className="mx-auto w-full max-w-3xl space-y-2 pb-1">
+                  {permSlots.map((s) => (
+                    <PermissionPrompt key={s.slotId} slot={s} onResolve={live.resolvePermission} />
+                  ))}
+                </div>
+              </div>
+            )}
+            <Composer busy={live.busy} disabled={!live.connected} onSend={live.send} onStop={live.abort} />
+          </TabsContent>
+
+          <TabsContent value="tasks" className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            <div className="mx-auto max-w-2xl">
+              <TaskList tasks={live.tasks} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="agents" className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            <div className="mx-auto max-w-2xl">
+              <AgentRoster agents={live.agents} activeId={live.activeAgentId} onSwitch={live.switchAgent} onAdd={live.addAgent} onRemove={live.removeAgent} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="details" className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            <SessionDetails session={session} stats={live.stats} mode={mode} onMode={live.setMode} />
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 }

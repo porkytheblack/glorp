@@ -1,14 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useToasts } from "@/lib/hooks";
+import { FolderGit2, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
-import { PageHeader, Loading, EmptyState, ErrorNote, Modal, Field, DeleteButton, Toasts, timeAgo } from "@/components/ui";
+import { Page, PageHeader, Loading, EmptyState, ErrorState, ConfirmButton, Spinner } from "@/components/shared";
+import { timeAgo } from "@/lib/format";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import type { WorkspaceDto } from "@/lib/types";
 
 export default function WorkspacesPage() {
   const { data, loading, error, reload } = useQuery<{ workspaces: WorkspaceDto[] }>("/workspaces");
-  const { toasts, push } = useToasts();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
@@ -25,9 +32,9 @@ export default function WorkspacesPage() {
       setName("");
       setPath("");
       reload();
-      push("Workspace created", "success");
+      toast.success("Workspace created");
     } catch (e) {
-      push(e instanceof Error ? e.message : "Create failed", "error");
+      toast.error(e instanceof Error ? e.message : "Create failed");
     } finally {
       setBusy(false);
     }
@@ -36,56 +43,91 @@ export default function WorkspacesPage() {
   const destroy = async (id: string) => {
     try {
       await api(`/workspaces/${id}`, { method: "DELETE" });
-      push("Workspace deleted", "success");
+      toast.success("Workspace deleted");
       reload();
     } catch (e) {
-      push(e instanceof Error ? e.message : "Delete failed", "error");
+      toast.error(e instanceof Error ? e.message : "Delete failed");
     }
   };
 
   const workspaces = data?.workspaces ?? [];
 
   return (
-    <div>
+    <Page>
       <PageHeader
         title="Workspaces"
-        subtitle="Named directories on the Garage host that sessions run against."
-        action={<button className="btn primary" onClick={() => setOpen(true)}>+ New workspace</button>}
+        description="Named directories on the Garage host that sessions run against — the sandbox each agent works in."
+        actions={
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus /> New workspace
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>New workspace</DialogTitle>
+                <DialogDescription>Leave the path blank to create one under the Garage workspace root.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>Name</Label>
+                  <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="my-app" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Path (optional)</Label>
+                  <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/home/dev/my-app" />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button onClick={create} disabled={busy}>
+                  {busy ? <Spinner /> : null} Create
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        }
       />
 
-      {error && <ErrorNote message={error} />}
-      <div className="card" style={{ padding: 0 }}>
+      {error && <ErrorState message={error} className="mb-4" />}
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
         {loading ? (
           <Loading />
         ) : workspaces.length === 0 ? (
-          <EmptyState icon="▦" title="No workspaces" hint="Create one, or let sessions create them on demand." />
+          <EmptyState icon={FolderGit2} title="No workspaces" description="Create one, or let sessions create them on demand." />
         ) : (
-          <table className="table">
-            <thead><tr><th>Name</th><th>Path</th><th>Sessions</th><th>Created</th><th /></tr></thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Name</TableHead>
+                <TableHead>Path</TableHead>
+                <TableHead>Sessions</TableHead>
+                <TableHead className="hidden sm:table-cell">Created</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {workspaces.map((w) => (
-                <tr key={w.id}>
-                  <td>{w.name}</td>
-                  <td className="mono">{w.path}</td>
-                  <td>{w.session_count}</td>
-                  <td className="muted">{timeAgo(w.created_at)}</td>
-                  <td style={{ textAlign: "right" }}><DeleteButton onConfirm={() => destroy(w.id)} /></td>
-                </tr>
+                <TableRow key={w.id}>
+                  <TableCell className="font-medium text-foreground">{w.name}</TableCell>
+                  <TableCell className="font-mono text-[12.5px] text-muted-foreground">{w.path}</TableCell>
+                  <TableCell className="text-[13px] text-muted-foreground">{w.session_count}</TableCell>
+                  <TableCell className="hidden text-[13px] text-muted-foreground sm:table-cell">{timeAgo(w.created_at)}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">
+                      <ConfirmButton label="" icon={Trash2} onConfirm={() => destroy(w.id)} />
+                    </div>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </div>
-
-      {open && (
-        <Modal title="New workspace" onClose={() => setOpen(false)} onSubmit={create} busy={busy}>
-          <Field label="Name"><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label="Path (optional — created under the workspace root if blank)">
-            <input className="input" placeholder="/home/dev/my-app" value={path} onChange={(e) => setPath(e.target.value)} />
-          </Field>
-        </Modal>
-      )}
-      <Toasts toasts={toasts} />
-    </div>
+    </Page>
   );
 }

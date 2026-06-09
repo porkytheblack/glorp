@@ -1,14 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useToasts } from "@/lib/hooks";
+import { KeyRound, Plus } from "lucide-react";
+import { toast } from "sonner";
+import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
-import { PageHeader, Loading, EmptyState, ErrorNote, Modal, Field, DeleteButton, Toasts, timeAgo } from "@/components/ui";
+import { Page, PageHeader, Loading, EmptyState, ErrorState, ConfirmButton, SecretReveal, Spinner } from "@/components/shared";
+import { timeAgo } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import type { ApiKeyPublic } from "@/lib/types";
 
 export default function KeysPage() {
   const { data, loading, error, reload } = useQuery<{ data: ApiKeyPublic[] }>("/keys");
-  const { toasts, push } = useToasts();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [scope, setScope] = useState("admin");
@@ -18,14 +28,11 @@ export default function KeysPage() {
   const create = async () => {
     setBusy(true);
     try {
-      const res = await api<{ data: { key: string } }>("/keys", {
-        method: "POST",
-        body: { name: name.trim() || "api-key", scopes: [scope] },
-      });
+      const res = await api<{ data: { key: string } }>("/keys", { method: "POST", body: { name: name.trim() || "api-key", scopes: [scope] } });
       setMinted(res.data.key);
       reload();
     } catch (e) {
-      push(e instanceof Error ? e.message : "Mint failed", "error");
+      toast.error(e instanceof Error ? e.message : "Mint failed");
     } finally {
       setBusy(false);
     }
@@ -40,76 +47,122 @@ export default function KeysPage() {
   const revoke = async (id: string) => {
     try {
       await api(`/keys/${id}`, { method: "DELETE" });
-      push("Key revoked", "success");
+      toast.success("Key revoked");
       reload();
     } catch (e) {
-      push(e instanceof Error ? e.message : "Revoke failed", "error");
+      toast.error(e instanceof Error ? e.message : "Revoke failed");
     }
   };
 
   const keys = data?.data ?? [];
 
   return (
-    <div>
+    <Page>
       <PageHeader
         title="API Keys"
-        subtitle="Mint keys for the REST API and the MCP server. Set a key as GLORP_API_KEY for the MCP server, or send it as a Bearer token to the API."
-        action={<button className="btn primary" onClick={() => setOpen(true)}>+ Mint key</button>}
+        description="Keys for the REST API and the MCP server. Use one as GLORP_API_KEY, or send it as a Bearer token."
+        actions={
+          <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : close())}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus /> Mint key
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Mint API key</DialogTitle>
+                <DialogDescription>The raw key is shown once. Store it somewhere safe.</DialogDescription>
+              </DialogHeader>
+              {minted ? (
+                <SecretReveal value={minted} />
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label>Name</Label>
+                    <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="mcp-server" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Scope</Label>
+                    <Select value={scope} onValueChange={setScope}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">admin — full control</SelectItem>
+                        <SelectItem value="session">session — manage sessions only</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                {minted ? (
+                  <Button onClick={close}>Done</Button>
+                ) : (
+                  <>
+                    <Button variant="ghost" onClick={close} disabled={busy}>
+                      Cancel
+                    </Button>
+                    <Button onClick={create} disabled={busy}>
+                      {busy ? <Spinner /> : <KeyRound />} Mint key
+                    </Button>
+                  </>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        }
       />
 
-      {error && <ErrorNote message={error} />}
-      <div className="card" style={{ padding: 0 }}>
+      {error && <ErrorState message={error} className="mb-4" />}
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
         {loading ? (
           <Loading />
         ) : keys.length === 0 ? (
-          <EmptyState icon="⚷" title="No API keys" hint="Mint one for a client or the MCP server." />
+          <EmptyState icon={KeyRound} title="No API keys" description="Mint one for a client or the MCP server." />
         ) : (
-          <table className="table">
-            <thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Last used</th><th>Created</th><th /></tr></thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Name</TableHead>
+                <TableHead>Prefix</TableHead>
+                <TableHead>Scopes</TableHead>
+                <TableHead className="hidden sm:table-cell">Last used</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {keys.map((k) => (
-                <tr key={k.id} style={{ opacity: k.revoked ? 0.5 : 1 }}>
-                  <td>{k.name}{k.revoked && <span className="badge red" style={{ marginLeft: 8 }}>revoked</span>}</td>
-                  <td className="mono">{k.keyPrefix}…</td>
-                  <td>{k.scopes.map((s) => <span key={s} className="badge" style={{ marginRight: 4 }}>{s}</span>)}</td>
-                  <td className="muted">{timeAgo(k.lastUsed)}</td>
-                  <td className="muted">{timeAgo(k.createdAt)}</td>
-                  <td style={{ textAlign: "right" }}>{!k.revoked && <DeleteButton label="Revoke" onConfirm={() => revoke(k.id)} />}</td>
-                </tr>
+                <TableRow key={k.id} className={cn(k.revoked && "opacity-50")}>
+                  <TableCell className="font-medium text-foreground">
+                    {k.name}
+                    {k.revoked && (
+                      <Badge variant="destructive" className="ml-2">
+                        revoked
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="font-mono text-[12.5px] text-muted-foreground">{k.keyPrefix}…</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {k.scopes.map((s) => (
+                        <Badge key={s} variant="outline">
+                          {s}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell className="hidden text-[13px] text-muted-foreground sm:table-cell">{timeAgo(k.lastUsed)}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">{!k.revoked && <ConfirmButton label="Revoke" onConfirm={() => revoke(k.id)} />}</div>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </div>
-
-      {open && (
-        <Modal
-          title="Mint API key"
-          subtitle="The raw key is shown once. Store it somewhere safe."
-          submitLabel={minted ? "Done" : "Mint"}
-          onClose={close}
-          onSubmit={minted ? close : create}
-          busy={busy}
-        >
-          {minted ? (
-            <div>
-              <p className="muted mt-0">Copy this key now — it won&apos;t be shown again.</p>
-              <div className="code-pill" style={{ display: "block", wordBreak: "break-all", padding: 10 }}>{minted}</div>
-            </div>
-          ) : (
-            <>
-              <Field label="Name"><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="mcp-server" /></Field>
-              <Field label="Scope">
-                <select className="select" value={scope} onChange={(e) => setScope(e.target.value)}>
-                  <option value="admin">admin — full control</option>
-                  <option value="session">session — manage sessions only</option>
-                </select>
-              </Field>
-            </>
-          )}
-        </Modal>
-      )}
-      <Toasts toasts={toasts} />
-    </div>
+    </Page>
   );
 }

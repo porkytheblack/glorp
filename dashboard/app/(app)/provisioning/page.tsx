@@ -2,15 +2,21 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery, useToasts } from "@/lib/hooks";
+import { Rocket } from "lucide-react";
+import { toast } from "sonner";
+import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
-import { PageHeader, Loading, EmptyState, ErrorNote, Modal, Field, Toasts } from "@/components/ui";
+import { Page, PageHeader, Loading, EmptyState, ErrorState, Spinner } from "@/components/shared";
+import { plural } from "@/lib/format";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import type { TemplateDto, SessionDto } from "@/lib/types";
 
 export default function ProvisioningPage() {
   const router = useRouter();
   const { data, loading, error } = useQuery<{ templates: TemplateDto[] }>("/templates");
-  const { toasts, push } = useToasts();
   const [launch, setLaunch] = useState<TemplateDto | null>(null);
   const [params, setParams] = useState("");
   const [busy, setBusy] = useState(false);
@@ -19,13 +25,12 @@ export default function ProvisioningPage() {
     if (!launch) return;
     setBusy(true);
     try {
-      let parsed: Record<string, string> = {};
-      if (params.trim()) parsed = JSON.parse(params);
+      const parsed = params.trim() ? JSON.parse(params) : {};
       const s = await api<SessionDto>("/sessions", { method: "POST", body: { template: launch.name, params: parsed } });
-      push("Provisioning session created", "success");
+      toast.success("Provisioning session created");
       router.push(`/sessions/${s.id}`);
     } catch (e) {
-      push(e instanceof Error ? e.message : "Provision failed", "error");
+      toast.error(e instanceof Error ? e.message : "Provision failed");
       setBusy(false);
     }
   };
@@ -33,43 +38,57 @@ export default function ProvisioningPage() {
   const templates = data?.templates ?? [];
 
   return (
-    <div>
-      <PageHeader title="Provisioning" subtitle="Declarative setup templates — clone a repo, run init scripts, then hand the prepared workspace to a fresh session." />
-      {error && <ErrorNote message={error} />}
+    <Page>
+      <PageHeader title="Provisioning" description="Declarative setup templates — clone a repo, run init scripts, then hand the prepared workspace to a fresh session." />
+
+      {error && <ErrorState message={error} className="mb-4" />}
+
       {loading ? (
         <Loading />
       ) : templates.length === 0 ? (
-        <EmptyState icon="⚙" title="No templates" hint="Add JSON templates under the Garage templates dir to provision workspaces here." />
+        <div className="rounded-xl border border-border bg-card">
+          <EmptyState icon={Rocket} title="No templates" description="Add JSON templates to the Garage templates directory to provision workspaces here." />
+        </div>
       ) : (
-        <div className="grid cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((t) => (
-            <div className="card" key={t.name}>
-              <strong>{t.name}</strong>
-              <p className="muted" style={{ minHeight: 38, marginTop: 6 }}>{t.description ?? "No description."}</p>
-              <div className="row spread">
-                <span className="faint" style={{ fontSize: 12 }}>{(t.step_count ?? 0)} step(s)</span>
-                <button className="btn sm primary" onClick={() => { setLaunch(t); setParams(""); }}>Provision →</button>
+            <div key={t.name} className="flex flex-col rounded-xl border border-border bg-card p-5">
+              <div className="mb-1 flex items-center gap-2">
+                <Rocket className="size-4 text-muted-foreground" />
+                <h3 className="font-medium text-foreground">{t.name}</h3>
+              </div>
+              <p className="min-h-[40px] flex-1 text-[13px] text-muted-foreground">{t.description ?? "No description."}</p>
+              <div className="mt-3 flex items-center justify-between">
+                <span className="text-[12px] text-muted-foreground">{plural(t.step_count ?? 0, "step")}</span>
+                <Button size="sm" onClick={() => { setLaunch(t); setParams(""); }}>
+                  Provision
+                </Button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {launch && (
-        <Modal
-          title={`Provision from “${launch.name}”`}
-          subtitle="Optionally pass template params as JSON (e.g. for repo URLs)."
-          submitLabel="Provision"
-          onClose={() => setLaunch(null)}
-          onSubmit={provision}
-          busy={busy}
-        >
-          <Field label="Params (JSON)">
-            <textarea className="textarea" placeholder='{ "repo": "github.com/me/app" }' value={params} onChange={(e) => setParams(e.target.value)} />
-          </Field>
-        </Modal>
-      )}
-      <Toasts toasts={toasts} />
-    </div>
+      <Dialog open={!!launch} onOpenChange={(o) => !o && setLaunch(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Provision from “{launch?.name}”</DialogTitle>
+            <DialogDescription>Optionally pass template params as JSON (e.g. a repo URL).</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Params (JSON)</Label>
+            <Textarea value={params} onChange={(e) => setParams(e.target.value)} placeholder={'{ "repo": "github.com/me/app" }'} className="font-mono text-[12.5px]" />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setLaunch(null)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button onClick={provision} disabled={busy}>
+              {busy ? <Spinner /> : <Rocket />} Provision
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Page>
   );
 }

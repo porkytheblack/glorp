@@ -1,6 +1,6 @@
 "use client";
 
-/** Small data-fetching + toast hooks so pages stay declarative. */
+/** Small data-fetching hook so pages stay declarative. Toasts use `sonner`. */
 
 import { useState, useEffect, useCallback } from "react";
 import { api, ApiError } from "./api";
@@ -39,23 +39,4 @@ export function useQuery<T>(path: string | null, deps: unknown[] = []): Query<T>
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
   return { data, error, loading, reload };
-}
-
-export interface Toast {
-  id: number;
-  message: string;
-  kind: "info" | "success" | "error";
-}
-
-let toastSeq = 0;
-
-/** A tiny imperative toast queue. */
-export function useToasts() {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((message: string, kind: Toast["kind"] = "info") => {
-    const id = ++toastSeq;
-    setToasts((t) => [...t, { id, message, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
-  }, []);
-  return { toasts, push };
 }

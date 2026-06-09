@@ -32,8 +32,8 @@ Bearer token on every API request (and as `?api_key=` on the WebSocket).
 ```bash
 cd dashboard
 cp .env.example .env.local         # point NEXT_PUBLIC_GARAGE_URL at your Garage
-npm install
-npm run dev                        # http://localhost:3270
+bun install
+bun run dev                        # http://localhost:3270
 
 # in another terminal, with admin env vars set:
 glorp garage                       # the Garage API on http://127.0.0.1:4271
@@ -46,8 +46,17 @@ dashboard still requires login when admin credentials are configured.
 ## Build
 
 ```bash
-npm run build && npm run start
+bun run build && bun run start
 ```
 
 The dashboard holds no server-side secrets: it is a pure client of the Garage
-API, configured at runtime via `NEXT_PUBLIC_GARAGE_URL`.
+API, configured via `NEXT_PUBLIC_GARAGE_URL` (baked into the bundle at build).
+
+## Design system
+
+Built on **Tailwind CSS + shadcn/ui** (Radix primitives) with a graphite
+monochrome theme — tokens live in `app/globals.css`, primitives in
+`components/ui/`, and the Garage brand mark in `components/brand.tsx`. The app is
+session-centric: the session view (`/sessions/[id]`) hosts the live chat with
+**Chat · Tasks · Agents · Details** tabs, so agents and messages aren't separate
+pages.

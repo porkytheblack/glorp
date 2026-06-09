@@ -1,59 +1,61 @@
 "use client";
 
-/** Add-profile modal: pick a configured provider, choose/type a model (with
- * catalog suggestions), optionally set a label + reasoning effort + context
- * limit, and activate. Reasoning options are fetched per (provider, model) so
- * the picker matches exactly what the model supports. */
-
-import { useEffect, useMemo, useState } from "react";
+import * as React from "react";
+import { Plus } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { Modal, Field } from "@/components/ui";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/shared";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import type { Catalog, ProviderWire, ReasoningOption } from "@/lib/types";
 
-interface Props {
-  providers: ProviderWire[];
-  catalog: Catalog | null;
-  onClose: () => void;
-  onSaved: (msg: string) => void;
-}
+const isOff = (v: unknown) => typeof v === "object" && v !== null && (v as { kind?: string }).kind === "off";
 
-const isOff = (v: unknown): boolean =>
-  typeof v === "object" && v !== null && (v as { kind?: string }).kind === "off";
+export function AddProfileModal({ providers, catalog, onSaved }: { providers: ProviderWire[]; catalog: Catalog | null; onSaved: () => void }) {
+  const [open, setOpen] = React.useState(false);
+  const [providerId, setProviderId] = React.useState("");
+  const [model, setModel] = React.useState("");
+  const [label, setLabel] = React.useState("");
+  const [contextLimit, setContextLimit] = React.useState("");
+  const [opts, setOpts] = React.useState<ReasoningOption[]>([]);
+  const [reasoningIdx, setReasoningIdx] = React.useState("0");
+  const [busy, setBusy] = React.useState(false);
 
-export function AddProfileModal({ providers, catalog, onClose, onSaved }: Props) {
-  const [providerId, setProviderId] = useState(providers[0]?.id ?? "");
-  const [model, setModel] = useState("");
-  const [label, setLabel] = useState("");
-  const [contextLimit, setContextLimit] = useState("");
-  const [reasoningOpts, setReasoningOpts] = useState<ReasoningOption[]>([]);
-  const [reasoningIdx, setReasoningIdx] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  React.useEffect(() => {
+    if (open && !providerId && providers[0]) setProviderId(providers[0].id);
+  }, [open, providers, providerId]);
 
-  // Catalog suggestions follow the provider's effective known id (based_on for
-  // custom endpoints), so a custom provider still offers sensible model names.
-  const suggestions = useMemo(() => {
+  const suggestions = React.useMemo(() => {
     const prov = providers.find((p) => p.id === providerId);
     const key = prov?.based_on ?? providerId;
     return catalog?.providers.find((c) => c.id === key)?.default_models ?? [];
   }, [providers, catalog, providerId]);
 
-  // Fetch the reasoning options for the current (provider, model) pair.
-  useEffect(() => {
-    setReasoningIdx(0);
-    if (!providerId || !model.trim()) { setReasoningOpts([]); return; }
+  React.useEffect(() => {
+    setReasoningIdx("0");
+    if (!providerId || !model.trim()) {
+      setOpts([]);
+      return;
+    }
     let cancelled = false;
     const q = `?provider=${encodeURIComponent(providerId)}&model=${encodeURIComponent(model.trim())}`;
     api<{ options: ReasoningOption[] }>(`/models/reasoning-options${q}`)
-      .then((r) => !cancelled && setReasoningOpts(r.options))
-      .catch(() => !cancelled && setReasoningOpts([]));
-    return () => { cancelled = true; };
+      .then((r) => !cancelled && setOpts(r.options))
+      .catch(() => !cancelled && setOpts([]));
+    return () => {
+      cancelled = true;
+    };
   }, [providerId, model]);
 
   const save = async () => {
-    setErr(null);
-    if (!providerId || !model.trim()) { setErr("Provider and model are required."); return; }
-    const reasoning = reasoningOpts[reasoningIdx]?.value;
+    if (!providerId || !model.trim()) {
+      toast.error("Provider and model are required.");
+      return;
+    }
+    const reasoning = opts[Number(reasoningIdx)]?.value;
     setBusy(true);
     try {
       await api("/models/profiles", {
@@ -67,54 +69,99 @@ export function AddProfileModal({ providers, catalog, onClose, onSaved }: Props)
           ...(contextLimit.trim() ? { contextLimit: Number(contextLimit) } : {}),
         },
       });
-      onSaved("Profile added & activated");
-      onClose();
+      toast.success("Profile added & activated");
+      onSaved();
+      setOpen(false);
+      setModel("");
+      setLabel("");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to add profile");
+      toast.error(e instanceof Error ? e.message : "Failed to add profile");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <Modal title="Add model profile" onClose={onClose} onSubmit={save} busy={busy} submitLabel="Add">
-      <Field label="Provider">
-        {providers.length === 0 ? (
-          <p className="sub">Add a provider first.</p>
-        ) : (
-          <select className="select" autoFocus value={providerId} onChange={(e) => setProviderId(e.target.value)}>
-            {providers.map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
-          </select>
-        )}
-      </Field>
-      <Field label="Model">
-        <input
-          className="input"
-          list="model-suggestions"
-          placeholder="claude-sonnet-4-6"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-        />
-        <datalist id="model-suggestions">
-          {suggestions.map((m) => <option key={m} value={m} />)}
-        </datalist>
-      </Field>
-      {reasoningOpts.length > 0 && (
-        <Field label="Reasoning / thinking">
-          <select className="select" value={reasoningIdx} onChange={(e) => setReasoningIdx(Number(e.target.value))}>
-            {reasoningOpts.map((o, i) => (
-              <option key={i} value={i}>{o.label}{o.description ? ` — ${o.description}` : ""}</option>
-            ))}
-          </select>
-        </Field>
-      )}
-      <Field label="Label (optional)">
-        <input className="input" placeholder={`${providerId} · ${model || "model"}`} value={label} onChange={(e) => setLabel(e.target.value)} />
-      </Field>
-      <Field label="Context limit (tokens — optional)">
-        <input className="input" inputMode="numeric" placeholder="e.g. 200000" value={contextLimit} onChange={(e) => setContextLimit(e.target.value)} />
-      </Field>
-      {err && <p className="sub" style={{ color: "var(--danger, #e5544b)" }}>{err}</p>}
-    </Modal>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="secondary" size="sm" disabled={providers.length === 0}>
+          <Plus /> Add profile
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add model profile</DialogTitle>
+          <DialogDescription>Pair a provider with a model. Reasoning options adapt to what the model supports.</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Provider</Label>
+              <Select value={providerId} onValueChange={setProviderId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {providers.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Model</Label>
+              <Input list="model-suggestions" value={model} onChange={(e) => setModel(e.target.value)} placeholder="claude-sonnet-4-6" />
+              <datalist id="model-suggestions">
+                {suggestions.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+
+          {opts.length > 0 && (
+            <div className="space-y-1.5">
+              <Label>Reasoning / thinking</Label>
+              <Select value={reasoningIdx} onValueChange={setReasoningIdx}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {opts.map((o, i) => (
+                    <SelectItem key={i} value={String(i)}>
+                      {o.label}
+                      {o.description ? ` — ${o.description}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Label (optional)</Label>
+              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={`${providerId || "provider"} · ${model || "model"}`} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Context limit</Label>
+              <Input inputMode="numeric" value={contextLimit} onChange={(e) => setContextLimit(e.target.value)} placeholder="e.g. 200000" />
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={busy}>
+            {busy ? <Spinner /> : null} Add profile
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,101 +1,84 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery, useToasts } from "@/lib/hooks";
+import { ChevronRight, MessageSquare, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
-import { PageHeader, Loading, EmptyState, ErrorNote, StateBadge, Modal, Field, DeleteButton, Toasts, timeAgo } from "@/components/ui";
-import type { SessionDto } from "@/lib/types";
+import { Page, PageHeader, Loading, EmptyState, ErrorState, SessionStatus, ConfirmButton } from "@/components/shared";
+import { baseName, timeAgo } from "@/lib/format";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { NewSessionDialog } from "@/components/session/new-session-dialog";
+import type { SessionDto, WorkspaceDto, ProfileDto } from "@/lib/types";
 
 export default function SessionsPage() {
   const router = useRouter();
   const { data, loading, error, reload } = useQuery<{ sessions: SessionDto[]; total: number }>("/sessions");
-  const { toasts, push } = useToasts();
-  const [open, setOpen] = useState(false);
-  const [workspace, setWorkspace] = useState("");
-  const [permissionMode, setPermissionMode] = useState("normal");
-  const [busy, setBusy] = useState(false);
-
-  const create = async () => {
-    setBusy(true);
-    try {
-      const body: Record<string, unknown> = { permissionMode };
-      if (workspace.trim()) body.workspace = workspace.trim();
-      const s = await api<SessionDto>("/sessions", { method: "POST", body });
-      setOpen(false);
-      setWorkspace("");
-      router.push(`/sessions/${s.id}`);
-    } catch (e) {
-      push(e instanceof Error ? e.message : "Create failed", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const workspaces = useQuery<{ workspaces: WorkspaceDto[] }>("/workspaces");
+  const profiles = useQuery<{ profiles: ProfileDto[] }>("/models/profiles");
 
   const destroy = async (id: string) => {
     try {
       await api(`/sessions/${id}`, { method: "DELETE" });
-      push("Session destroyed", "success");
+      toast.success("Session destroyed");
       reload();
     } catch (e) {
-      push(e instanceof Error ? e.message : "Delete failed", "error");
+      toast.error(e instanceof Error ? e.message : "Delete failed");
     }
   };
 
-  const sessions = data?.sessions ?? [];
+  const sessions = [...(data?.sessions ?? [])].sort((a, b) => b.last_activity.localeCompare(a.last_activity));
 
   return (
-    <div>
+    <Page>
       <PageHeader
         title="Sessions"
-        subtitle="Every agent session in this namespace — live, idle, or rehydratable from disk."
-        action={<button className="btn primary" onClick={() => setOpen(true)}>+ New session</button>}
+        description="Every agent session in this namespace — live, idle, or rehydratable from disk."
+        actions={<NewSessionDialog workspaces={workspaces.data?.workspaces ?? []} profiles={profiles.data?.profiles ?? []} />}
       />
 
-      {error && <ErrorNote message={error} />}
-      <div className="card" style={{ padding: 0 }}>
+      {error && <ErrorState message={error} className="mb-4" />}
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
         {loading ? (
           <Loading />
         ) : sessions.length === 0 ? (
-          <EmptyState icon="▤" title="No sessions yet" hint="Launch one to put an agent to work." />
+          <EmptyState icon={MessageSquare} title="No sessions yet" description="Launch one to put an agent to work — it runs in a sandboxed workspace." />
         ) : (
-          <table className="table">
-            <thead><tr><th>Title</th><th>State</th><th>Model</th><th>Workspace</th><th>Turns</th><th>Activity</th><th /></tr></thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Session</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="hidden md:table-cell">Model</TableHead>
+                <TableHead className="hidden sm:table-cell">Activity</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {sessions.map((s) => (
-                <tr key={s.id}>
-                  <td onClick={() => router.push(`/sessions/${s.id}`)} style={{ cursor: "pointer" }}>
-                    {s.title ?? <span className="faint">untitled</span>}
-                    <div className="faint mono" style={{ fontSize: 11 }}>{s.id}</div>
-                  </td>
-                  <td><StateBadge state={s.state} /></td>
-                  <td className="muted">{s.model_label ?? "—"}</td>
-                  <td className="mono">{s.workspace}</td>
-                  <td>{s.turn_count}</td>
-                  <td className="muted">{timeAgo(s.last_activity)}</td>
-                  <td><DeleteButton onConfirm={() => destroy(s.id)} /></td>
-                </tr>
+                <TableRow key={s.id} className="cursor-pointer" onClick={() => router.push(`/sessions/${s.id}`)}>
+                  <TableCell>
+                    <div className="font-medium text-foreground">{s.title ?? "Untitled session"}</div>
+                    <div className="text-[12px] text-muted-foreground">{baseName(s.workspace)}</div>
+                  </TableCell>
+                  <TableCell>
+                    <SessionStatus state={s.state} />
+                  </TableCell>
+                  <TableCell className="hidden text-[13px] text-muted-foreground md:table-cell">{s.model_label ?? "Default"}</TableCell>
+                  <TableCell className="hidden text-[13px] text-muted-foreground sm:table-cell">{timeAgo(s.last_activity)}</TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-1">
+                      <ConfirmButton label="" icon={Trash2} onConfirm={() => destroy(s.id)} />
+                      <ChevronRight className="size-4 text-muted-foreground/50" />
+                    </div>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </div>
-
-      {open && (
-        <Modal title="New session" subtitle="Point Garage at a workspace; leave blank for the default." onClose={() => setOpen(false)} onSubmit={create} busy={busy}>
-          <Field label="Workspace path">
-            <input className="input" placeholder="/home/dev/my-app" value={workspace} onChange={(e) => setWorkspace(e.target.value)} />
-          </Field>
-          <Field label="Permission mode">
-            <select className="select" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>
-              <option value="normal">normal — prompt for risky tools</option>
-              <option value="auto">auto — auto-approve</option>
-              <option value="bypass">bypass — no prompts</option>
-            </select>
-          </Field>
-        </Modal>
-      )}
-      <Toasts toasts={toasts} />
-    </div>
+    </Page>
   );
 }

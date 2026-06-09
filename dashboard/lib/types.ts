@@ -146,3 +146,49 @@ export interface EventEnvelope {
   seq: number;
   event: { type: string; [k: string]: unknown };
 }
+
+/* ── Live session / chat model (mirrors src/shared/events.ts) ───────────── */
+
+export interface ToolEvent {
+  id: string;
+  name: string;
+  input: unknown;
+  status: "running" | "success" | "error" | "aborted";
+  output?: string;
+  startedAt: number;
+  endedAt?: number;
+}
+
+export interface ChatTurn {
+  id: string;
+  kind: "user" | "agent" | "tool" | "system" | "transmission";
+  text?: string;
+  reasoning?: string;
+  tool?: ToolEvent;
+  meta?: Record<string, unknown>;
+  createdAt: number;
+  /** UI-only: mark a system turn as an error. */
+  error?: boolean;
+}
+
+export interface TaskItem {
+  id: string;
+  content: string;
+  activeForm?: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
+export interface SessionStats {
+  turns: number;
+  tokens_in: number;
+  tokens_out: number;
+  contextPct: number;
+}
+
+export interface DisplaySlot {
+  slotId: string;
+  renderer: string;
+  input: unknown;
+  createdAt: number;
+  isPermissionRequest: boolean;
+}

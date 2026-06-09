@@ -1,0 +1,149 @@
+"use client";
+
+/**
+ * Live session model. Subscribes to the Garage session WebSocket, requests a
+ * full hydrate on open, and folds the event stream into a render-ready
+ * conversation: ordered turns, a streaming buffer, tasks, stats, the agent
+ * roster, and any open permission/display slots. Also exposes the inbound
+ * commands the chat needs (send, abort, resolve permission, switch agent…).
+ */
+
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { sessionWsUrl } from "./api";
+import type { ChatTurn, ToolEvent, TaskItem, SessionStats, DisplaySlot, AgentInfo } from "./types";
+
+interface State {
+  items: ChatTurn[];
+  streaming: string;
+  busy: boolean;
+  title: string | null;
+  tasks: TaskItem[];
+  stats: SessionStats | null;
+  agents: AgentInfo[];
+  activeAgentId: string | null;
+  mode: string | null;
+  slots: DisplaySlot[];
+}
+
+const INIT: State = {
+  items: [],
+  streaming: "",
+  busy: false,
+  title: null,
+  tasks: [],
+  stats: null,
+  agents: [],
+  activeAgentId: null,
+  mode: null,
+  slots: [],
+};
+
+type Ev = { type: string; [k: string]: any };
+
+function upsert(items: ChatTurn[], turn: ChatTurn): ChatTurn[] {
+  const i = items.findIndex((t) => t.id === turn.id);
+  if (i === -1) return [...items, turn];
+  const next = items.slice();
+  next[i] = { ...next[i], ...turn };
+  return next;
+}
+
+function reduce(state: State, ev: Ev): State {
+  switch (ev.type) {
+    case "session_hydrate":
+      return {
+        ...state,
+        items: (ev.turns ?? []) as ChatTurn[],
+        title: ev.title ?? state.title,
+        tasks: ev.tasks ?? [],
+        stats: ev.stats ?? state.stats,
+      };
+    case "session_reset":
+      return { ...state, items: [], streaming: "", tasks: [] };
+    case "turn":
+      return {
+        ...state,
+        items: upsert(state.items, ev.turn as ChatTurn),
+        streaming: ev.turn?.kind === "agent" ? "" : state.streaming,
+      };
+    case "turn_update":
+      return { ...state, items: state.items.map((t) => (t.id === ev.id ? { ...t, ...(ev.patch ?? {}) } : t)) };
+    case "text_delta":
+      return { ...state, streaming: state.streaming + (ev.text ?? "") };
+    case "text_clear":
+      return { ...state, streaming: "" };
+    case "tool_started":
+    case "tool_finished": {
+      const tool = ev.tool as ToolEvent;
+      return { ...state, items: upsert(state.items, { id: tool.id, kind: "tool", tool, createdAt: tool.startedAt ?? Date.now() }) };
+    }
+    case "tasks":
+      return { ...state, tasks: ev.tasks ?? [] };
+    case "stats":
+      return { ...state, stats: ev.stats ?? state.stats };
+    case "title":
+      return { ...state, title: ev.title ?? null };
+    case "busy":
+      return { ...state, busy: Boolean(ev.busy) };
+    case "agent_roster":
+      return { ...state, agents: ev.agents ?? [], activeAgentId: ev.activeId ?? null };
+    case "permission_mode_changed":
+      return { ...state, mode: ev.mode ?? state.mode };
+    case "display_slot_pushed":
+      return { ...state, slots: [...state.slots, ev.slot as DisplaySlot] };
+    case "display_slot_resolved":
+      return { ...state, slots: state.slots.filter((s) => s.slotId !== ev.slotId) };
+    case "error":
+      return {
+        ...state,
+        items: [
+          ...state.items,
+          { id: `err_${Date.now()}`, kind: "system", text: ev.detail ? `${ev.message} — ${ev.detail}` : ev.message, error: true, createdAt: Date.now() },
+        ],
+      };
+    default:
+      return state;
+  }
+}
+
+export function useSession(id: string) {
+  const [state, dispatch] = useReducer(reduce, INIT);
+  const [connected, setConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    const ws = new WebSocket(sessionWsUrl(id));
+    wsRef.current = ws;
+    ws.onopen = () => {
+      setConnected(true);
+      ws.send(JSON.stringify({ type: "resync" }));
+    };
+    ws.onclose = () => setConnected(false);
+    ws.onmessage = (e) => {
+      try {
+        const env = JSON.parse(String(e.data));
+        dispatch(env.event ?? env);
+      } catch {
+        /* ignore non-JSON frames */
+      }
+    };
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [id]);
+
+  const raw = useCallback((msg: Record<string, unknown>) => wsRef.current?.send(JSON.stringify(msg)), []);
+  const send = useCallback((text: string) => text.trim() && raw({ type: "send_message", text: text.trim() }), [raw]);
+  const abort = useCallback(() => raw({ type: "abort" }), [raw]);
+  const resolvePermission = useCallback((slotId: string, allow: boolean) => raw({ type: "resolve_permission", slot_id: slotId, allow }), [raw]);
+  const setMode = useCallback((mode: string) => raw({ type: "set_permission_mode", mode }), [raw]);
+  const switchAgent = useCallback((agentId: string) => raw({ type: "switch_agent", agent_id: agentId }), [raw]);
+  const addAgent = useCallback((role: string, label?: string) => raw({ type: "add_agent", role, label }), [raw]);
+  const removeAgent = useCallback((agentId: string) => raw({ type: "remove_agent", agent_id: agentId }), [raw]);
+
+  return { ...state, connected, send, abort, resolvePermission, setMode, switchAgent, addAgent, removeAgent };
+}
+
+export type SessionLive = ReturnType<typeof useSession>;

@@ -3,134 +3,151 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { ArrowRight, Boxes, ChevronRight, Cpu, FolderGit2, SendHorizontal } from "lucide-react";
 import { useQuery } from "@/lib/hooks";
-import { api } from "@/lib/api";
-import { Loading, StateBadge, timeAgo } from "@/components/ui";
-import type { SessionDto, NamespaceDto, WorkspaceDto, ProfileDto } from "@/lib/types";
+import { launchSession } from "@/lib/launch";
+import { baseName, timeAgo } from "@/lib/format";
+import { Loading, EmptyState, SessionStatus, Spinner } from "@/components/shared";
+import { Button } from "@/components/ui/button";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { MessageSquare } from "lucide-react";
+import { toast } from "sonner";
+import type { SessionDto, WorkspaceDto, ProfileDto, NamespaceDto } from "@/lib/types";
 
-function Stat({ label, value, href }: { label: string; value: number | string; href: string }) {
-  return (
-    <Link href={href} className="card stat">
-      <div className="label">{label}</div>
-      <div className="value">{value}</div>
-    </Link>
-  );
-}
+const DEFAULT_WS = "__default__";
+const DEFAULT_MODEL = "__default__";
 
-export default function HomePage() {
+export default function OverviewPage() {
   const router = useRouter();
   const sessions = useQuery<{ sessions: SessionDto[]; total: number }>("/sessions");
-  const namespaces = useQuery<{ namespaces: NamespaceDto[] }>("/namespaces");
   const workspaces = useQuery<{ workspaces: WorkspaceDto[] }>("/workspaces");
   const profiles = useQuery<{ profiles: ProfileDto[] }>("/models/profiles");
+  const namespaces = useQuery<{ namespaces: NamespaceDto[] }>("/namespaces");
 
   const [prompt, setPrompt] = useState("");
-  const [workspaceId, setWorkspaceId] = useState("");
-  const [workspacePath, setWorkspacePath] = useState("");
-  const [profileId, setProfileId] = useState("");
+  const [ws, setWs] = useState(DEFAULT_WS);
+  const [profile, setProfile] = useState(DEFAULT_MODEL);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const wsList = workspaces.data?.workspaces ?? [];
+  const profileList = profiles.data?.profiles ?? [];
+  const recent = [...(sessions.data?.sessions ?? [])]
+    .sort((a, b) => b.last_activity.localeCompare(a.last_activity))
+    .slice(0, 6);
 
   const launch = async () => {
     if (!prompt.trim()) return;
     setBusy(true);
-    setError(null);
     try {
-      const body: Record<string, unknown> = {};
-      if (workspaceId) body.workspaceId = workspaceId;
-      else if (workspacePath.trim()) body.workspace = workspacePath.trim();
-      if (profileId) body.profileId = profileId;
-      const session = await api<SessionDto>("/sessions", { method: "POST", body });
-      await api(`/sessions/${session.id}/messages`, { method: "POST", body: { text: prompt.trim() } });
-      router.push(`/sessions/${session.id}`);
+      const id = await launchSession({
+        prompt,
+        workspaceId: ws === DEFAULT_WS ? undefined : ws,
+        profileId: profile === DEFAULT_MODEL ? undefined : profile,
+      });
+      router.push(`/sessions/${id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to launch");
+      toast.error(e instanceof Error ? e.message : "Could not start the session");
       setBusy(false);
     }
   };
 
-  const wsList = workspaces.data?.workspaces ?? [];
-  const profileList = profiles.data?.profiles ?? [];
-  const recent = (sessions.data?.sessions ?? []).slice(0, 5);
+  const chips = [
+    { href: "/namespaces", icon: Boxes, label: "namespaces", n: namespaces.data?.namespaces.length },
+    { href: "/workspaces", icon: FolderGit2, label: "workspaces", n: wsList.length },
+    { href: "/credentials", icon: Cpu, label: "models", n: profileList.length },
+  ];
 
   return (
-    <div>
-      <div style={{ textAlign: "center", margin: "20px 0 26px" }}>
-        <h2 style={{ fontSize: 26, margin: 0, letterSpacing: "-0.4px" }}>What should the fleet build today?</h2>
-        <p className="muted" style={{ marginTop: 6 }}>Launch a new agent session, or jump back into a running one.</p>
-      </div>
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto w-full max-w-3xl px-6 py-12 md:px-8">
+        <h2 className="text-center text-2xl font-semibold tracking-tight">What should Glorp build?</h2>
+        <p className="mt-2 text-center text-[13.5px] text-muted-foreground">Describe a task to launch an agent, or jump back into a running session.</p>
 
-      <div className="card" style={{ maxWidth: 760, margin: "0 auto 30px", padding: 16 }}>
-        <textarea
-          className="textarea"
-          placeholder="Describe a task — e.g. “add rate limiting to the API routes”"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          style={{ border: "none", background: "transparent", minHeight: 70, padding: 6 }}
-        />
-        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-          <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
-            <span className="faint" style={{ fontSize: 12, marginRight: 2 }}>workspace</span>
-            <button
-              className={`btn sm${workspaceId === "" && !workspacePath ? " primary" : " ghost"}`}
-              onClick={() => { setWorkspaceId(""); setWorkspacePath(""); }}
-            >default</button>
-            {wsList.map((w) => (
-              <button
-                key={w.id}
-                className={`btn sm${workspaceId === w.id ? " primary" : " ghost"}`}
-                onClick={() => { setWorkspaceId(w.id); setWorkspacePath(""); }}
-              >{w.name}</button>
-            ))}
-            <input
-              className="input"
-              style={{ maxWidth: 220, height: 30, padding: "4px 10px" }}
-              placeholder="…or a custom path"
-              value={workspacePath}
-              onChange={(e) => { setWorkspacePath(e.target.value); setWorkspaceId(""); }}
-            />
-          </div>
-          <div className="row spread">
-            <select className="select" style={{ maxWidth: 320 }} value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-              <option value="">Default model</option>
-              {profileList.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-            </select>
-            <button className="btn primary" onClick={launch} disabled={busy || !prompt.trim()}>
-              {busy ? <span className="spinner" /> : "Launch ▸"}
-            </button>
+        <div className="mt-7 rounded-xl border border-border bg-card p-3 shadow-sm focus-within:border-ring/40">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) launch();
+            }}
+            placeholder="e.g. Add rate limiting to the API routes and write a test for it."
+            className="min-h-[84px] w-full resize-none bg-transparent px-2 py-1.5 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70"
+          />
+          <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+            <div className="flex items-center gap-2">
+              <Select value={ws} onValueChange={setWs}>
+                <SelectTrigger className="h-8 w-[170px] text-[13px]">
+                  <FolderGit2 className="size-3.5 text-muted-foreground" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_WS}>Default workspace</SelectItem>
+                  {wsList.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={profile} onValueChange={setProfile}>
+                <SelectTrigger className="h-8 w-[160px] text-[13px]">
+                  <Cpu className="size-3.5 text-muted-foreground" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_MODEL}>Default model</SelectItem>
+                  {profileList.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={launch} disabled={busy || !prompt.trim()}>
+              {busy ? <Spinner /> : <SendHorizontal />} Launch
+            </Button>
           </div>
         </div>
-        {error && <div className="badge red dot mt-2">{error}</div>}
-      </div>
 
-      <div className="grid cols-4 mt-2">
-        <Stat label="Sessions" value={sessions.data?.total ?? "—"} href="/sessions" />
-        <Stat label="Namespaces" value={namespaces.data?.namespaces.length ?? "—"} href="/namespaces" />
-        <Stat label="Workspaces" value={workspaces.data?.workspaces.length ?? "—"} href="/workspaces" />
-        <Stat label="Model profiles" value={profiles.data?.profiles.length ?? "—"} href="/credentials" />
-      </div>
+        <div className="mt-4 flex items-center justify-center gap-2 text-[12px] text-muted-foreground">
+          {chips.map((c) => (
+            <Link key={c.href} href={c.href} className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 transition-colors hover:bg-secondary hover:text-foreground">
+              <c.icon className="size-3.5" />
+              {c.n ?? "—"} {c.label}
+            </Link>
+          ))}
+        </div>
 
-      <h3 className="mt-3" style={{ fontSize: 15 }}>Recent sessions</h3>
-      <div className="card" style={{ padding: 0 }}>
-        {sessions.loading ? (
-          <Loading />
-        ) : recent.length === 0 ? (
-          <div className="empty"><div className="ico">▤</div>No sessions yet.</div>
-        ) : (
-          <table className="table">
-            <thead><tr><th>Title</th><th>State</th><th>Workspace</th><th>Activity</th></tr></thead>
-            <tbody>
-              {recent.map((s) => (
-                <tr key={s.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/sessions/${s.id}`)}>
-                  <td>{s.title ?? <span className="faint">untitled</span>}</td>
-                  <td><StateBadge state={s.state} /></td>
-                  <td className="mono">{s.workspace}</td>
-                  <td className="muted">{timeAgo(s.last_activity)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <div className="mt-10">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-[13px] font-medium text-muted-foreground">Recent sessions</h3>
+            <Link href="/sessions" className="inline-flex items-center gap-1 text-[12.5px] text-muted-foreground hover:text-foreground">
+              All sessions <ArrowRight className="size-3.5" />
+            </Link>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-border bg-card">
+            {sessions.loading ? (
+              <Loading />
+            ) : recent.length === 0 ? (
+              <EmptyState icon={MessageSquare} title="No sessions yet" description="Launch one above to put an agent to work." />
+            ) : (
+              <div className="divide-y divide-border">
+                {recent.map((s) => (
+                  <Link key={s.id} href={`/sessions/${s.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-secondary/40">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13.5px] text-foreground">{s.title ?? "Untitled session"}</div>
+                      <div className="truncate text-[12px] text-muted-foreground">{baseName(s.workspace)}</div>
+                    </div>
+                    <SessionStatus state={s.state} className="hidden sm:inline-flex" />
+                    <span className="w-12 shrink-0 text-right text-[12px] text-muted-foreground">{timeAgo(s.last_activity)}</span>
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
