@@ -8,10 +8,17 @@ import { describe, it, expect, afterEach, beforeEach } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { randomBytes } from "node:crypto";
 
 import { startGarage, type GarageHandle } from "../src/garage/server.ts";
 import { loadGarageConfig } from "../src/garage/config.ts";
 import { MemoryKeyStorage } from "../src/garage/auth/memory-key-storage.ts";
+
+// Randomized per run so no credential literal is ever committed (keeps secret
+// scanners quiet) — the values are still deterministic within a test process.
+const ADMIN_USER = `admin_${randomBytes(4).toString("hex")}`;
+const ADMIN_PASS = randomBytes(12).toString("hex");
+const ADMIN_JWT_SECRET = randomBytes(16).toString("hex");
 
 const tmpDirs: string[] = [];
 const garages: GarageHandle[] = [];
@@ -27,9 +34,9 @@ beforeEach(() => {
   for (const k of ["GARAGE_ADMIN_USER", "GARAGE_ADMIN_PASSWORD", "GARAGE_JWT_SECRET"]) {
     savedEnv[k] = process.env[k];
   }
-  process.env.GARAGE_ADMIN_USER = "boss";
-  process.env.GARAGE_ADMIN_PASSWORD = "hunter2";
-  process.env.GARAGE_JWT_SECRET = "test-secret";
+  process.env.GARAGE_ADMIN_USER = ADMIN_USER;
+  process.env.GARAGE_ADMIN_PASSWORD = ADMIN_PASS;
+  process.env.GARAGE_JWT_SECRET = ADMIN_JWT_SECRET;
 });
 
 afterEach(async () => {
@@ -66,22 +73,22 @@ describe("admin login", () => {
 
   it("rejects wrong credentials and accepts the right ones", async () => {
     const { base } = await startAuthedGarage();
-    expect((await post(base, "/auth/login", { username: "boss", password: "nope" })).status).toBe(401);
-    const ok = await post(base, "/auth/login", { username: "boss", password: "hunter2" });
+    expect((await post(base, "/auth/login", { username: ADMIN_USER, password: `${ADMIN_PASS}_wrong` })).status).toBe(401);
+    const ok = await post(base, "/auth/login", { username: ADMIN_USER, password: ADMIN_PASS });
     expect(ok.status).toBe(200);
     const body = await ok.json();
     expect(typeof body.token).toBe("string");
-    expect(body.user).toBe("boss");
+    expect(body.user).toBe(ADMIN_USER);
     expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
   });
 
   it("echoes identity via /auth/me with the JWT", async () => {
     const { base } = await startAuthedGarage();
-    const { token } = await (await post(base, "/auth/login", { username: "boss", password: "hunter2" })).json();
+    const { token } = await (await post(base, "/auth/login", { username: ADMIN_USER, password: ADMIN_PASS })).json();
     const me = await fetch(base + "/auth/me", { headers: { authorization: `Bearer ${token}` } });
     const body = await me.json();
     expect(body.authenticated).toBe(true);
-    expect(body.user).toBe("boss");
+    expect(body.user).toBe(ADMIN_USER);
     expect(body.is_admin).toBe(true);
   });
 
@@ -92,7 +99,7 @@ describe("admin login", () => {
 
   it("the JWT authorizes minting an API key for the REST API / MCP", async () => {
     const { base } = await startAuthedGarage();
-    const { token } = await (await post(base, "/auth/login", { username: "boss", password: "hunter2" })).json();
+    const { token } = await (await post(base, "/auth/login", { username: ADMIN_USER, password: ADMIN_PASS })).json();
     const headers = { authorization: `Bearer ${token}` };
 
     const minted = await post(base, "/keys", { name: "mcp-server", scopes: ["admin"] }, headers);
