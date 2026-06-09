@@ -78,6 +78,56 @@ export interface ProfileDto {
   reasoning?: unknown;
 }
 
+/** Wire shape of a configured provider (src/garage/routes/models.ts#providerDto). */
+export interface ProviderWire {
+  id: string;
+  type: "known" | "custom";
+  based_on: string | null;
+  adapter: string | null;
+  base_url: string | null;
+  context_limit: number | null;
+  has_api_key: boolean;
+}
+
+/** Wire shape of a model profile (src/garage/routes/models.ts#profileDto). */
+export interface ProfileWire {
+  id: string;
+  label: string;
+  provider_id: string;
+  model: string;
+  last_used_at: string | null;
+}
+
+/** A known provider from GET /models/catalog — drives guided pickers. */
+export interface CatalogProvider {
+  id: string;
+  label: string;
+  description: string;
+  env_var: string | null;
+  default_models: string[];
+  needs_api_key: boolean;
+  reasoning_capable: boolean;
+}
+
+/** A custom-endpoint adapter from GET /models/catalog. */
+export interface CatalogAdapter {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface Catalog {
+  providers: CatalogProvider[];
+  adapters: CatalogAdapter[];
+}
+
+/** One reasoning/thinking choice from GET /models/reasoning-options. */
+export interface ReasoningOption {
+  label: string;
+  description?: string;
+  value: unknown;
+}
+
 export interface TemplateDto {
   name: string;
   description?: string;

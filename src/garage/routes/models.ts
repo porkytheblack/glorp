@@ -5,7 +5,14 @@
  * `has_api_key`.
  */
 
-import { CredentialsStore, KNOWN_PROVIDERS, findKnownProvider } from "../../agent/credentials.ts";
+import {
+  CredentialsStore,
+  KNOWN_PROVIDERS,
+  CUSTOM_PROVIDER_ADAPTERS,
+  findKnownProvider,
+  effectiveProviderId,
+  reasoningOptionsFor,
+} from "../../agent/credentials.ts";
 import type {
   ProviderConfig,
   ModelProfile,
@@ -20,6 +27,7 @@ export interface ModelRoutes {
   profiles(): Response;
   activate(id: string): Response;
   catalog(): Response;
+  reasoningOptions(req: Request): Response;
   addProvider(req: Request): Promise<Response>;
   deleteProvider(id: string): Response;
   addProfile(req: Request): Promise<Response>;
@@ -59,7 +67,9 @@ export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
       return json({ active_profile_id: id });
     },
 
-    /** The known providers + their selectable models, to drive an "add model" UI. */
+    /** The known providers + their selectable models, plus the custom-endpoint
+     * adapters — everything an "add provider / add model" UI needs to offer
+     * guided choices instead of free-text. */
     catalog(): Response {
       const providers = KNOWN_PROVIDERS.map((p) => ({
         id: p.id,
@@ -70,7 +80,26 @@ export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
         needs_api_key: p.needsApiKey,
         reasoning_capable: p.reasoningCapableModelMatchers.length > 0,
       }));
-      return json({ providers });
+      const adapters = CUSTOM_PROVIDER_ADAPTERS.map((a) => ({
+        id: a.id,
+        label: a.label,
+        description: a.description,
+      }));
+      return json({ providers, adapters });
+    },
+
+    /** The reasoning/thinking options valid for a (provider, model) pair, so the
+     * UI can offer the same picker the CLI does. Resolves custom providers
+     * through their effective known provider (e.g. basedOn) before matching. */
+    reasoningOptions(req): Response {
+      const url = new URL(req.url);
+      const providerId = url.searchParams.get("provider") ?? "";
+      const model = url.searchParams.get("model") ?? "";
+      if (!providerId || !model) {
+        return errorJson("bad_request", "'provider' and 'model' query params are required", 400);
+      }
+      const effective = effectiveProviderId(providerId, credentials.getProvider(providerId), model);
+      return json({ options: reasoningOptionsFor(effective, model) });
     },
 
     async addProvider(req): Promise<Response> {

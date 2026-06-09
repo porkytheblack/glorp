@@ -70,6 +70,7 @@ export function createGarageRouter(
 
       // --- Models (per-namespace) ---
       if (pathname === "/models/catalog" && m === "GET") return g.models.catalog();
+      if (pathname === "/models/reasoning-options" && m === "GET") return g.models.reasoningOptions(req);
       if (pathname === "/models/providers" && m === "GET") return g.models.providers();
       if (pathname === "/models/providers" && m === "POST") return g.models.addProvider(req);
       if (pathname === "/models/profiles" && m === "GET") return g.models.profiles();
