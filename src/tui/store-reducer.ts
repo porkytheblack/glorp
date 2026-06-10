@@ -139,7 +139,8 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
     case "runner_agent_stats":
       next = { ...state, runnerStats: { ...state.runnerStats, [action.agent.agentId]: { ...action.agent, updatedAt: Date.now() } } }; break;
     case "display_slot_pushed":
-      next = { ...state, displaySlots: [...state.displaySlots, action.slot] }; break;
+      // Upsert: hydrate replays open slots, so a resync must not duplicate.
+      next = { ...state, displaySlots: [...state.displaySlots.filter((r) => r.slotId !== action.slot.slotId), action.slot] }; break;
     case "display_slot_resolved":
       next = { ...state, displaySlots: state.displaySlots.filter((r) => r.slotId !== action.slotId) }; break;
     case "session_reset":

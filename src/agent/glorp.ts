@@ -57,7 +57,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const labelListeners = new Set<(label: string) => void>();
   const diskExtensions = discoverExtensions(opts.workspace);
 
-  bridgeDisplaySlots(rawDM, bridge);
+  const slotBridge = bridgeDisplaySlots(rawDM, bridge);
   const meshDir = paths.meshDir;
   const loopRefresh = { stats: async () => {}, plan: async () => {}, tasks: async () => {}, inbox: async () => {} };
   const wsPrompt = (await discoverWorkspaceContext(opts.workspace)).promptBlock;
@@ -117,6 +117,20 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     async removeAgent(id) { abortController?.abort(); await removeAgentOp(activationDeps, state, id); },
     async hydrateUi() {
       await hydrateUiSession(state.active.store, bridge, state.contextLimit);
+      // Replay pending display slots (permission prompts, pickers): they live
+      // only in the display manager, so a client that connected after the push
+      // — or is resyncing — would otherwise never see them and the agent would
+      // hang on pushAndWait forever. Reducers upsert by slotId, so this is
+      // idempotent for clients that already have the slot.
+      for (const slot of slotBridge.openSlots()) {
+        bridge.emit({ type: "display_slot_pushed", slot });
+      }
+      for (const f of orchestrator.openForwardedSlots()) {
+        bridge.emit({
+          type: "display_slot_pushed",
+          slot: { slotId: f.slotId, renderer: f.renderer, input: f.input, createdAt: f.createdAt, isPermissionRequest: f.renderer === "permission_request" },
+        });
+      }
       hydrateAgentRecords(await orchestrator.loadPersistedAgents(), bridge);
       await state.active.titleScheduler.refreshTitle();
       state.active.titleScheduler.schedule();
@@ -156,6 +170,10 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     async send(text, images) {
       abortController?.abort();
       await state.active.titleScheduler.cancel();
+      // An aborted/errored previous turn can leave dangling tool calls (or
+      // late results out of position) — strict providers reject the replay.
+      // Heal the history before the new turn touches the model.
+      state.active.store.repairToolFlow();
       state.active.verification.onUserTurn();
       abortController = new AbortController();
       busy = true;

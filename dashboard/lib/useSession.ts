@@ -51,12 +51,16 @@ function upsert(items: ChatTurn[], turn: ChatTurn): ChatTurn[] {
 function reduce(state: State, ev: Ev): State {
   switch (ev.type) {
     case "session_hydrate":
+      // Open display slots are replayed as display_slot_pushed events right
+      // after the hydrate — reset here so stale slots from before a reconnect
+      // don't linger.
       return {
         ...state,
         items: (ev.turns ?? []) as ChatTurn[],
         title: ev.title ?? state.title,
         tasks: ev.tasks ?? [],
         stats: ev.stats ?? state.stats,
+        slots: [],
       };
     case "session_reset":
       return { ...state, items: [], streaming: "", tasks: [] };
@@ -89,8 +93,11 @@ function reduce(state: State, ev: Ev): State {
       return { ...state, agents: ev.agents ?? [], activeAgentId: ev.activeId ?? null };
     case "permission_mode_changed":
       return { ...state, mode: ev.mode ?? state.mode };
-    case "display_slot_pushed":
-      return { ...state, slots: [...state.slots, ev.slot as DisplaySlot] };
+    case "display_slot_pushed": {
+      // Upsert: the server replays open slots on hydrate/resync.
+      const slot = ev.slot as DisplaySlot;
+      return { ...state, slots: [...state.slots.filter((s) => s.slotId !== slot.slotId), slot] };
+    }
     case "display_slot_resolved":
       return { ...state, slots: state.slots.filter((s) => s.slotId !== ev.slotId) };
     case "error":

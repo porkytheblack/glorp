@@ -34,8 +34,9 @@ export class Orchestrator {
   private scheduler: Scheduler;
   private runner: RunnerHandle;
   private agents = new Map<AgentId, ManagedAgent>();
-  /** Maps forwarded slot IDs to the display manager that owns the pending promise. */
-  private forwardedSlots = new Map<string, ForwardingDisplayManager>();
+  /** Maps forwarded slot IDs to the owning display manager + the slot payload
+   * (kept so pending slots can be replayed to late-joining clients on hydrate). */
+  private forwardedSlots = new Map<string, { dm: ForwardingDisplayManager; renderer: string; input: unknown; createdAt: number }>();
   private config: OrchestratorConfig;
   private meshDir: string;
   private maxAgents: number;
@@ -165,7 +166,8 @@ export class Orchestrator {
       emit: (e: OrchestratorEvent) => this.eventBus.emit(e),
       workspace: this.config.workspace, dataDir: this.config.dataDir,
       meshDir: this.meshDir, resources: this.config.resources,
-      trackForwardedSlot: (slotId: string, dm: ForwardingDisplayManager) => this.forwardedSlots.set(slotId, dm),
+      trackForwardedSlot: (slotId: string, dm: ForwardingDisplayManager, slot?: { renderer: string; input: unknown }) =>
+        this.forwardedSlots.set(slotId, { dm, renderer: slot?.renderer ?? "unknown", input: slot?.input, createdAt: Date.now() }),
       createSubscriber: this.config.loopSubscriberFactory, signal, workspaceContext: this.config.workspaceContext,
     };
   }
@@ -188,25 +190,32 @@ export class Orchestrator {
   hasForwardedSlot(slotId: string): boolean { return this.forwardedSlots.has(slotId); }
 
   resolveForwardedSlot(slotId: string, value: unknown): boolean {
-    const dm = this.forwardedSlots.get(slotId);
-    if (!dm) return false;
-    dm.resolve(slotId, value);
+    const entry = this.forwardedSlots.get(slotId);
+    if (!entry) return false;
+    entry.dm.resolve(slotId, value);
     this.forwardedSlots.delete(slotId);
     return true;
   }
 
   rejectForwardedSlot(slotId: string, reason: unknown): boolean {
-    const dm = this.forwardedSlots.get(slotId);
-    if (!dm) return false;
-    dm.reject(slotId, reason);
+    const entry = this.forwardedSlots.get(slotId);
+    if (!entry) return false;
+    entry.dm.reject(slotId, reason);
     this.forwardedSlots.delete(slotId);
     return true;
+  }
+
+  /** Pending forwarded slots, for replay on hydrate/resync. */
+  openForwardedSlots(): Array<{ slotId: string; renderer: string; input: unknown; createdAt: number }> {
+    return [...this.forwardedSlots.entries()].map(([slotId, e]) => ({
+      slotId, renderer: e.renderer, input: e.input, createdAt: e.createdAt,
+    }));
   }
 
   async shutdown(): Promise<void> {
     await markAllInterrupted(this.meshDir).catch(() => {});
     for (const id of [...this.agents.keys()]) await this.stopAgent(id, "orchestrator shutting down");
-    for (const [slotId, dm] of this.forwardedSlots) dm.reject(slotId, new Error("Orchestrator shutting down"));
+    for (const [slotId, entry] of this.forwardedSlots) entry.dm.reject(slotId, new Error("Orchestrator shutting down"));
     this.forwardedSlots.clear();
     if (this.runnerStartPromise) {
       await this.runnerStartPromise.catch(() => {});
