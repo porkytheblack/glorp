@@ -23,6 +23,10 @@ interface State {
   activeAgentId: string | null;
   mode: string | null;
   slots: DisplaySlot[];
+  /** Honest status: seconds the model has been silent (null = streaming fine). */
+  waitingSec: number | null;
+  /** Messages queued behind the running turn. */
+  queueDepth: number;
 }
 
 const INIT: State = {
@@ -36,6 +40,8 @@ const INIT: State = {
   activeAgentId: null,
   mode: null,
   slots: [],
+  waitingSec: null,
+  queueDepth: 0,
 };
 
 type Ev = { type: string; [k: string]: any };
@@ -53,7 +59,9 @@ function reduce(state: State, ev: Ev): State {
     case "session_hydrate":
       // Open display slots are replayed as display_slot_pushed events right
       // after the hydrate — reset here so stale slots from before a reconnect
-      // don't linger.
+      // don't linger. Error turns arrive again right after (the session
+      // replays recent errors on every hydrate), so a plain reset stays
+      // duplicate-free.
       return {
         ...state,
         items: (ev.turns ?? []) as ChatTurn[],
@@ -88,7 +96,7 @@ function reduce(state: State, ev: Ev): State {
     case "title":
       return { ...state, title: ev.title ?? null };
     case "busy":
-      return { ...state, busy: Boolean(ev.busy) };
+      return { ...state, busy: Boolean(ev.busy), ...(ev.busy ? {} : { waitingSec: null }) };
     case "agent_roster":
       return { ...state, agents: ev.agents ?? [], activeAgentId: ev.activeId ?? null };
     case "permission_mode_changed":
@@ -103,11 +111,23 @@ function reduce(state: State, ev: Ev): State {
     case "error":
       return {
         ...state,
+        waitingSec: null,
         items: [
           ...state.items,
-          { id: `err_${Date.now()}`, kind: "system", text: ev.detail ? `${ev.message} — ${ev.detail}` : ev.message, error: true, createdAt: Date.now() },
+          {
+            id: `err_${Date.now()}`,
+            kind: "system",
+            text: ev.message,
+            error: true,
+            createdAt: Date.now(),
+            meta: { kind: ev.kind, hint: ev.hint, retryAfterSec: ev.retryAfterSec, detail: ev.detail },
+          },
         ],
       };
+    case "model_status":
+      return { ...state, waitingSec: ev.state === "waiting" ? (ev.elapsedSec ?? 0) : null };
+    case "queue_depth":
+      return { ...state, queueDepth: ev.depth ?? 0 };
     default:
       return state;
   }
@@ -130,7 +150,12 @@ export function useSession(id: string) {
     ws.onmessage = (e) => {
       try {
         const env = JSON.parse(String(e.data));
-        dispatch(env.event ?? env);
+        const ev = env.event ?? env;
+        dispatch(ev);
+        // A finished turn may include work from before this client connected
+        // (the launch flow posts the first message before navigating) — pull a
+        // fresh hydrate so the transcript is always complete.
+        if (ev.type === "busy" && ev.busy === false) ws.send(JSON.stringify({ type: "resync" }));
       } catch {
         /* ignore non-JSON frames */
       }

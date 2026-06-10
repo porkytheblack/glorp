@@ -77,3 +77,27 @@ describe("GarageSession", () => {
     expect((reborn as never as { init: { profileId?: string } }).init.profileId).toBe("custom-moonshot__kimi-k2-6");
   });
 });
+
+describe("error replay + dedupe", () => {
+  test("fail() emits once per distinct failure, even when multiple paths report it", () => {
+    const session = makeSession("s_fail");
+    const errors: unknown[] = [];
+    session.bridge.subscribe((ev) => { if (ev.type === "error") errors.push(ev); });
+    const boom = new Error("401 Invalid Authentication at generate");
+    session.fail(boom);
+    session.fail(boom); // hydrate-on-connect path reporting the same failure
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as { kind?: string }).kind).toBe("auth");
+    expect(session.state).toBe("error");
+  });
+
+  test("buffers recent errors (capped) for hydrate replay", () => {
+    const session = makeSession("s_buf");
+    for (let i = 0; i < 14; i++) {
+      session.bridge.emit({ type: "error", message: `e${i}` });
+    }
+    const buffered = (session as never as { recentErrors: unknown[] }).recentErrors;
+    expect(buffered.length).toBe(10); // capped
+    expect((buffered[9] as { message: string }).message).toBe("e13"); // newest kept
+  });
+});

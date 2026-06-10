@@ -5,6 +5,7 @@ import { ChevronRight } from "lucide-react";
 import { GarageMark } from "@/components/brand";
 import { cn } from "@/lib/utils";
 import { Md } from "./markdown";
+import { ErrorCard } from "./error-card";
 import type { ChatTurn } from "@/lib/types";
 
 /** The Glorp avatar glyph — quiet brand-tinted disc, shared by message + stream. */
@@ -36,16 +37,11 @@ function Reasoning({ text }: { text: string }) {
 
 export function Message({ turn, userInitial = "U" }: { turn: ChatTurn; userInitial?: string }) {
   if (turn.kind === "system") {
+    // Failed turns get the full actionable treatment, never a raw trace.
+    if (turn.error) return <ErrorCard turn={turn} />;
     return (
       <div className="flex justify-center py-0.5">
-        <span
-          className={cn(
-            "rounded-full border px-3 py-1 text-[11.5px]",
-            turn.error ? "border-destructive/30 bg-destructive/[0.07] text-destructive" : "border-border bg-surface-2/60 text-faint",
-          )}
-        >
-          {turn.text}
-        </span>
+        <span className="rounded-full border border-border bg-surface-2/60 px-3 py-1 text-[11.5px] text-faint">{turn.text}</span>
       </div>
     );
   }

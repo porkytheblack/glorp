@@ -65,6 +65,22 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2.5">
+          {/* Honest status: surface silent model waits and queued messages
+              instead of looking frozen. */}
+          {live.busy && live.waitingSec != null && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2.5 py-0.5 text-[11.5px] font-medium text-warning">
+              <span className="relative grid size-1.5 place-items-center">
+                <span className="absolute size-1.5 rounded-full bg-warning opacity-60 animate-pulse-ring" />
+                <span className="relative size-1.5 rounded-full bg-warning" />
+              </span>
+              waiting on model · {live.waitingSec}s
+            </span>
+          )}
+          {live.queueDepth > 0 && (
+            <span className="tnum rounded-full border border-border bg-surface-2 px-2.5 py-0.5 text-[11.5px] font-medium text-muted-foreground">
+              {live.queueDepth} queued
+            </span>
+          )}
           <span className={cn("inline-flex items-center gap-1.5 text-[12px] font-medium", live.connected ? "text-success" : "text-faint")}>
             <span className="relative grid size-2 place-items-center">
               {live.connected && <span className="absolute size-2 rounded-full bg-success opacity-60 animate-pulse-ring" />}

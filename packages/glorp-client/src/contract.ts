@@ -197,7 +197,9 @@ export type BridgeEvent =
   | { type: "agent_roster"; agents: unknown[]; activeId: string }
   | { type: "display_slot_pushed"; slot: Record<string, unknown> }
   | { type: "display_slot_resolved"; slotId: string }
-  | { type: "error"; message: string; detail?: string }
+  | { type: "error"; message: string; detail?: string; kind?: "config" | "auth" | "rate_limit" | "quota" | "network" | "upstream" | "internal"; hint?: string; retryAfterSec?: number }
+  | { type: "model_status"; state: "waiting" | "active"; elapsedSec?: number }
+  | { type: "queue_depth"; depth: number }
   // Forward-compatible fallback for every other server event.
   | { type: string; [k: string]: unknown };
 

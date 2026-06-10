@@ -7,6 +7,7 @@ import { buildGlorp } from "../agent/glorp.ts";
 import { GlorpStore } from "../agent/store.ts";
 import { CredentialsStore } from "../agent/credentials.ts";
 import { resolveSessionPaths } from "../agent/session-paths.ts";
+import { classifyModelError } from "../shared/error-classify.ts";
 import type { GlorpHandle, BuildGlorpOptions } from "../agent/glorp-types.ts";
 import { EventStream } from "./event-stream.ts";
 import { SessionCredentialsStore } from "./credentials.ts";
@@ -44,6 +45,9 @@ export class GarageSession {
   private readStore: GlorpStore | null = null;
   private credStore: SessionCredentialsStore | null = null;
   private readonly prefsPath: string;
+  /** Recent classified errors, replayed on hydrate — an error that fired with
+   * no client connected would otherwise be unobservable in the conversation. */
+  private recentErrors: Array<Extract<import("../shared/events.ts").BridgeEvent, { type: "error" }>> = [];
   /** FIFO of user turns: a message that arrives while a task runs WAITS for it
    * instead of aborting it (the old behavior silently killed in-flight work). */
   private sendChain: Promise<void> = Promise.resolve();
@@ -180,8 +184,10 @@ export class GarageSession {
   async send(text: string, images?: Array<{ data: string; media_type: string }>): Promise<void> {
     if (this.state === "destroyed") return;
     this.queuedMessages++;
+    if (this.queuedMessages > 1) this.bridge.emit({ type: "queue_depth", depth: this.queuedMessages - 1 });
     const turn = async (): Promise<void> => {
       this.queuedMessages--;
+      this.bridge.emit({ type: "queue_depth", depth: Math.max(0, this.queuedMessages - 1) });
       if (this.state === "destroyed") return;
       let handle: GlorpHandle;
       try {
@@ -203,16 +209,31 @@ export class GarageSession {
 
   /** Move the session to the unrecoverable error state without killing Garage. */
   fail(err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
+    const raw = err instanceof Error ? err.message : String(err);
+    const c = classifyModelError(err);
+    // The same root failure can surface through several paths (send chain,
+    // hydrate-on-connect) — one error event per distinct failure is enough.
+    if (this.state === "error" && this.error === c.title) return;
     this.state = "error";
-    this.error = message;
-    this.bridge.emit({ type: "error", message });
+    this.error = c.title;
+    this.bridge.emit({
+      type: "error",
+      message: c.title,
+      detail: raw,
+      kind: c.kind,
+      hint: c.hint,
+      ...(c.retryAfterSec ? { retryAfterSec: c.retryAfterSec } : {}),
+    });
   }
 
   /** Attach a freshly built (or existing) handle's hydrate snapshot to clients. */
   async hydrate(): Promise<void> {
     const handle = await this.ensureBuilt();
     await handle.hydrateUi();
+    // Replay errors after the snapshot (straight to the stream — not the
+    // bridge — so they don't re-enter the buffer). Clients reset their
+    // transcript on hydrate, so each cycle yields exactly one copy.
+    for (const e of this.recentErrors) this.stream.broadcast(e);
   }
 
   /** Read-through to the live handle, or null when not yet built. */
@@ -259,6 +280,10 @@ export class GarageSession {
   private onEvent(ev: Parameters<Parameters<Bridge["subscribe"]>[0]>[0]): void {
     this.lastActivity = Date.now();
     this.stats.apply(ev);
+    if (ev.type === "error") {
+      this.recentErrors.push(ev);
+      if (this.recentErrors.length > 10) this.recentErrors.shift();
+    }
     if (ev.type === "busy" && this.state !== "destroyed" && this.state !== "error") {
       this.state = ev.busy ? "busy" : "idle";
     }

@@ -25,6 +25,7 @@ import { loadRoster, saveRoster } from "./runtime/agent-roster.ts";
 import { resolveSessionPaths } from "./session-paths.ts";
 import { SessionErrorLog, setActiveErrorLog } from "./runtime/error-log.ts";
 import { PermissionDM } from "./runtime/permission-mode.ts";
+import { classifyModelError } from "../shared/error-classify.ts";
 import { teardownAgentMesh } from "../orchestrator/mesh-setup.ts";
 import { agentId as toAgentId } from "../orchestrator/types.ts";
 import { discoverWorkspaceContext } from "../orchestrator/workspace-context.ts";
@@ -180,6 +181,28 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       state.active.titleScheduler.setRequestInFlight(true);
       bridge.emit({ type: "busy", busy: true });
       bridge.emit({ type: "turn", turn: userTurn(text, images?.length) });
+      // Honest-status watchdog: the model call can sit silent for minutes
+      // (provider-side retry sleeps on 429, cold queues). Tick a model_status
+      // event whenever nothing has streamed for ~10s so UIs can say "waiting
+      // on the model" instead of looking frozen.
+      let lastActivity = Date.now();
+      let wasWaiting = false;
+      const unsubWatch = bridge.subscribe((ev) => {
+        if (ev.type === "text_delta" || ev.type === "tool_started" || ev.type === "turn") {
+          lastActivity = Date.now();
+          if (wasWaiting) {
+            wasWaiting = false;
+            bridge.emit({ type: "model_status", state: "active" });
+          }
+        }
+      });
+      const watchTimer = setInterval(() => {
+        const silentSec = Math.round((Date.now() - lastActivity) / 1000);
+        if (silentSec >= 10) {
+          wasWaiting = true;
+          bridge.emit({ type: "model_status", state: "waiting", elapsedSec: silentSec });
+        }
+      }, 5_000);
       try {
         const buildPrompt = parseBuildCommand(text);
         if (buildPrompt) {
@@ -192,8 +215,23 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         }
       } catch (err: any) {
         if (err?.name === "AbortError") bridge.emit({ type: "turn", turn: systemTurn("aborted") });
-        else bridge.emit({ type: "error", message: err?.message ?? String(err), detail: err?.stack });
+        else {
+          // Human headline + recovery hint up front; the raw error and stack
+          // stay on `detail` for the collapsed technical view and error log.
+          const c = classifyModelError(err);
+          bridge.emit({
+            type: "error",
+            message: c.title,
+            detail: [err?.message ?? String(err), err?.stack].filter(Boolean).join("\n"),
+            kind: c.kind,
+            hint: c.hint,
+            ...(c.retryAfterSec ? { retryAfterSec: c.retryAfterSec } : {}),
+          });
+        }
       } finally {
+        clearInterval(watchTimer);
+        unsubWatch();
+        if (wasWaiting) bridge.emit({ type: "model_status", state: "active" });
         state.active.titleScheduler.setRequestInFlight(false);
         busy = false;
         bridge.emit({ type: "busy", busy: false });
