@@ -1,3 +1,4 @@
+import { routingLine } from "./extensions-loader.ts";
 import type { ExtensionsBundle, LoadedSkill, LoadedSubagent } from "./extensions-loader.ts";
 import { readPrompt } from "./prompts/loader.ts";
 import { estimateTokens, xmlSection } from "./prompts/synthetic.ts";
@@ -38,7 +39,8 @@ function renderSkill(skill: LoadedSkill): string {
 }
 
 function renderSubagent(sub: LoadedSubagent): string {
-  return `- @${sub.name}: ${sub.description}\n  source: ${sub.sourcePath}`;
+  // Routing one-liner only — full descriptions live with the subagent itself.
+  return `- @${sub.name}: ${routingLine(sub.description)}\n  source: ${sub.sourcePath}`;
 }
 
 function fitLines(lines: string[], budget: number): { text: string; count: number } {
