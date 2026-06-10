@@ -102,14 +102,36 @@ function buildSessionStateMessage(state: SessionState): Message | null {
       verification,
       "Task rule: before claiming the requested work is complete, call glove_update_tasks with the full corrected task list and no applicable task left pending or in_progress.",
       "Resource rule: for glove_resources_write, use body objects like {\"type\":\"markdown\",\"text\":\"...\"}; for edits use exact oldStr/newStr on an existing resource path.",
-      "Verification rule: do not declare the work complete until every file modified since the last verification has been covered by a test/build/typecheck run, or you have explicitly explained why verification cannot apply (e.g. UI feature you cannot test headlessly — say so).",
+      verificationStalled(state.verification)
+        ? "Verification rule (stalled): conclude in this turn with explicit caveats about what remains unverified. Do not loop."
+        : "Verification rule: do not declare the work complete until every file modified since the last verification has been covered by a test/build/typecheck run, or you have explicitly explained why verification cannot apply (e.g. UI feature you cannot test headlessly — say so).",
       "[End current Glorp session state]",
     ].filter(Boolean).join("\n"),
   };
 }
 
+/** Same failed check ≥3 times, or pending code re-read ≥2 times: the loop is
+ * provably going nowhere — stop nagging and demand a conclusion instead. */
+export function verificationStalled(status: VerificationStatus | null | undefined): boolean {
+  if (!status) return false;
+  if ((status.futileReadCount ?? 0) >= 2) return true;
+  const failed = status.failedVerifications ?? [];
+  const byKind = new Map<string, number>();
+  for (const f of failed) byKind.set(f.kind, (byKind.get(f.kind) ?? 0) + 1);
+  return [...byKind.values()].some((n) => n >= 3);
+}
+
 function renderVerification(status: VerificationStatus | null | undefined): string {
   if (!status) return "";
+  if (verificationStalled(status)) {
+    return [
+      "VERIFICATION STALLED: modified files have been re-read repeatedly (or the same check keeps failing) without an objective check passing.",
+      "Stop re-reading files — that does not verify anything. Do ONE of the following NOW:",
+      "  (a) run the objective check (test/build/typecheck) if one exists, or",
+      "  (b) conclude: state exactly what was changed, what passed, and what remains unverified and why.",
+      "Do not call read on the modified files again.",
+    ].join("\n");
+  }
   const failed = status.failedVerifications ?? [];
   const blocks: string[] = [];
   if (status.pendingFiles.length > 0) {
