@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolveSafePath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
+import { extensionReadRoots, resolveSafePath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
 import { firstItems } from "./summaries.ts";
 import type { SummaryTool } from "./summaries.ts";
 
@@ -67,7 +67,7 @@ export function grepTool(workspace: string): SummaryTool<{
       } catch (err: any) {
         return { status: "error", data: null, message: `Invalid regex: ${err.message}` };
       }
-      const root = input.path ? resolveSafePath(workspace, input.path) : workspace;
+      const root = input.path ? resolveSafePath(workspace, input.path, extensionReadRoots(workspace)) : workspace;
       const filenameRe = input.glob ? globToRegex(input.glob) : null;
       const max = input.max_results ?? 200;
       const ctx = input.context ?? 0;

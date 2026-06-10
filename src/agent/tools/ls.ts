@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolveSafePath, relPath, isDir } from "./fs-shared.ts";
+import { extensionReadRoots, resolveSafePath, relPath, isDir } from "./fs-shared.ts";
 import { firstItems } from "./summaries.ts";
 import type { SummaryTool } from "./summaries.ts";
 
@@ -27,7 +27,7 @@ export function lsTool(workspace: string): SummaryTool<{
       show_hidden: z.boolean().optional().describe("Include dot-files (default: false)"),
     }),
     async do(input) {
-      const abs = input.path ? resolveSafePath(workspace, input.path) : workspace;
+      const abs = input.path ? resolveSafePath(workspace, input.path, extensionReadRoots(workspace)) : workspace;
       if (!(await isDir(abs))) {
         return { status: "error", data: null, message: `Not a directory: ${relPath(workspace, abs)}` };
       }

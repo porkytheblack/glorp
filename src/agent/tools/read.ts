@@ -1,6 +1,6 @@
 import { z } from "zod";
 import * as fs from "node:fs";
-import { resolveSafePath, relPath, isFile } from "./fs-shared.ts";
+import { extensionReadRoots, resolveSafePath, relPath, isFile } from "./fs-shared.ts";
 import type { SummaryTool } from "./summaries.ts";
 
 const MAX_BYTES = 1024 * 1024; // 1 MB cap before we truncate.
@@ -45,7 +45,7 @@ export function readTool(workspace: string): SummaryTool<{
         .describe(`Max lines to read (default ${DEFAULT_LINES}, max ${MAX_LINES})`),
     }),
     async do(input) {
-      const abs = resolveSafePath(workspace, input.path);
+      const abs = resolveSafePath(workspace, input.path, extensionReadRoots(workspace));
       if (!(await isFile(abs))) {
         return {
           status: "error",

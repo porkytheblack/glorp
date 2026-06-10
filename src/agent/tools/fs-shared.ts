@@ -27,15 +27,39 @@ export const IGNORED_DIRS: ReadonlySet<string> = new Set([
  * (the user owns the workspace), but worth knowing if the threat model
  * ever changes.
  */
-export function resolveSafePath(workspace: string, p: string): string {
+export function resolveSafePath(workspace: string, p: string, readRoots: string[] = []): string {
   const abs = path.isAbsolute(p) ? path.resolve(p) : path.resolve(workspace, p);
-  const rel = path.relative(workspace, abs);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(
-      `Path "${p}" is outside the workspace (${workspace}). Glorp refuses on principle.`,
-    );
+  if (within(workspace, abs)) return abs;
+  // Read-only allowlist: registered extension roots (skills/agents live in
+  // ~/.claude and ~/.agents). Their source paths are advertised to the model,
+  // so READ tools may follow them — write tools never pass readRoots.
+  for (const root of readRoots) {
+    if (within(root, abs)) return abs;
   }
-  return abs;
+  throw new Error(
+    `Path "${p}" is outside the workspace (${workspace}). Glorp refuses on principle.`,
+  );
+}
+
+function within(root: string, abs: string): boolean {
+  const rel = path.relative(root, abs);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
+ * Directories whose contents READ tools may access beyond the workspace:
+ * exactly the extension discovery roots (workspace + home `.claude`/`.agents`)
+ * — the skills/agents whose source paths the prompt advertises. Scoped on
+ * purpose: this is not general filesystem access.
+ */
+export function extensionReadRoots(workspace: string, homeDir: string = os.homedir()): string[] {
+  return [
+    path.join(workspace, ".claude"),
+    path.join(workspace, ".agents"),
+    path.join(homeDir, ".claude"),
+    path.join(homeDir, ".agents"),
+    path.join(homeDir, ".glorp", "skills"),
+  ];
 }
 
 export function relPath(workspace: string, p: string): string {
