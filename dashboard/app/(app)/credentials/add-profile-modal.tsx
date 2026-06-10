@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Field, FieldRow, ModalFooter } from "./form";
+import { ModelCombobox } from "./model-combobox";
 import type { Catalog, ProviderWire } from "@/lib/types";
 
 /** Add a (provider, model) profile. Reasoning effort is configured afterwards on
@@ -30,6 +31,8 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
     const key = prov?.based_on ?? providerId;
     return catalog?.providers.find((c) => c.id === key)?.default_models ?? [];
   }, [providers, catalog, providerId]);
+
+  const providerCtx = providers.find((p) => p.id === providerId)?.context_limit ?? null;
 
   const save = async () => {
     if (!providerId || !model.trim()) {
@@ -76,7 +79,13 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
         <div className="space-y-4">
           <FieldRow>
             <Field label="Provider">
-              <Select value={providerId} onValueChange={setProviderId}>
+              <Select
+                value={providerId}
+                onValueChange={(id) => {
+                  setProviderId(id);
+                  setModel("");
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select…" />
                 </SelectTrigger>
@@ -90,12 +99,7 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
               </Select>
             </Field>
             <Field label="Model">
-              <Input list="model-suggestions" value={model} onChange={(e) => setModel(e.target.value)} placeholder="claude-sonnet-4-6" />
-              <datalist id="model-suggestions">
-                {suggestions.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
+              <ModelCombobox providerId={providerId} catalog={suggestions} value={model} onChange={setModel} />
             </Field>
           </FieldRow>
           <FieldRow>
@@ -103,7 +107,7 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
               <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={`${providerId || "provider"} · ${model || "model"}`} />
             </Field>
             <Field label="Context limit">
-              <Input inputMode="numeric" value={contextLimit} onChange={(e) => setContextLimit(e.target.value)} placeholder="e.g. 200000" />
+              <Input inputMode="numeric" value={contextLimit} onChange={(e) => setContextLimit(e.target.value)} placeholder={providerCtx ? `${providerCtx} (provider default)` : "e.g. 200000"} />
             </Field>
           </FieldRow>
         </div>
