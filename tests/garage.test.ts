@@ -97,7 +97,7 @@ describe("Session isolation (success metric: 5 concurrent, no cross-talk)", () =
 
   it("tracks busy/idle lifecycle from its own bus", () => {
     const s = makeSession("busy-test", tmp());
-    expect(s.state).toBe("provisioning");
+    expect(s.state).toBe("idle"); // born idle — "provisioning" is reserved for template provisioning
     s.bridge.emit({ type: "busy", busy: true });
     expect(s.stats.busy).toBe(true);
     expect(s.state).toBe("busy");
@@ -318,7 +318,7 @@ describe("HTTP surface (integration)", () => {
       const id = created.body.id;
 
       expect((await call("GET", "/sessions")).body.total).toBeGreaterThanOrEqual(1);
-      expect((await call("GET", `/sessions/${id}`)).body.state).toBe("provisioning");
+      expect((await call("GET", `/sessions/${id}`)).body.state).toBe("idle"); // born idle, buildable on demand
       expect((await call("POST", `/sessions/${id}/abort`)).status).toBe(200);
       expect((await call("GET", `/sessions/${id}/history`)).body.turns).toEqual([]);
       expect((await call("GET", "/models/providers")).status).toBe(200);

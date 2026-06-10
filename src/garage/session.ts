@@ -1,9 +1,12 @@
 /** One workspace, one isolated Bridge, one lazily built GlorpHandle. */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { Bridge } from "../shared/bridge.ts";
 import { buildGlorp } from "../agent/glorp.ts";
 import { GlorpStore } from "../agent/store.ts";
 import { CredentialsStore } from "../agent/credentials.ts";
+import { resolveSessionPaths } from "../agent/session-paths.ts";
 import type { GlorpHandle, BuildGlorpOptions } from "../agent/glorp-types.ts";
 import { EventStream } from "./event-stream.ts";
 import { SessionCredentialsStore } from "./credentials.ts";
@@ -12,6 +15,12 @@ import { buildSessionDto } from "./session-dto.ts";
 import type { GarageSessionInit } from "./session-init.ts";
 import type { SessionLifecycle, SessionDto, SessionCredential } from "./types.ts";
 
+/** Per-session Garage preferences that must survive rebuilds and restarts —
+ * e.g. the model profile the user picked mid-session. */
+interface SessionPrefs {
+  profileId?: string;
+}
+
 export class GarageSession {
   readonly id: string;
   readonly workspace: string;
@@ -19,7 +28,11 @@ export class GarageSession {
   readonly bridge = new Bridge();
   readonly stream: EventStream;
   readonly stats = new SessionStats();
-  state: SessionLifecycle = "provisioning";
+  // Born idle: by registration time the workspace exists. "provisioning" is
+  // reserved for the template-provisioning window, not "not yet loaded" —
+  // dormant sessions are idle and rehydratable, and showing them as
+  // provisioning forever made the fleet read as perpetually stuck.
+  state: SessionLifecycle = "idle";
   error: string | null = null;
   readonly createdAt = Date.now();
   lastActivity = Date.now();
@@ -30,6 +43,11 @@ export class GarageSession {
   private buildPromise: Promise<GlorpHandle> | null = null;
   private readStore: GlorpStore | null = null;
   private credStore: SessionCredentialsStore | null = null;
+  private readonly prefsPath: string;
+  /** FIFO of user turns: a message that arrives while a task runs WAITS for it
+   * instead of aborting it (the old behavior silently killed in-flight work). */
+  private sendChain: Promise<void> = Promise.resolve();
+  queuedMessages = 0;
 
   constructor(init: GarageSessionInit) {
     this.init = init;
@@ -39,6 +57,36 @@ export class GarageSession {
     this.customCredential = init.customCredential ?? null;
     this.stream = new EventStream(init.id);
     this.bridge.subscribe((ev) => this.onEvent(ev));
+    this.prefsPath = path.join(path.dirname(resolveSessionPaths(init.dataDir, init.id).rosterFile), "garage.json");
+    // A profile picked mid-session in a previous process wins over the
+    // creation-time default.
+    const prefs = this.readPrefs();
+    if (prefs.profileId) this.init.profileId = prefs.profileId;
+  }
+
+  private readPrefs(): SessionPrefs {
+    try {
+      return JSON.parse(fs.readFileSync(this.prefsPath, "utf-8")) as SessionPrefs;
+    } catch {
+      return {};
+    }
+  }
+
+  private writePrefs(patch: SessionPrefs): void {
+    try {
+      fs.mkdirSync(path.dirname(this.prefsPath), { recursive: true });
+      fs.writeFileSync(this.prefsPath, JSON.stringify({ ...this.readPrefs(), ...patch }, null, 2));
+    } catch {
+      /* prefs are best-effort — never fail a session over them */
+    }
+  }
+
+  /** Swap the model profile AND persist the choice so rebuilds/restarts keep it. */
+  async swapProfile(profileId: string): Promise<void> {
+    const handle = await this.ensureBuilt();
+    await handle.swapProfile(profileId);
+    this.init.profileId = profileId;
+    this.writePrefs({ profileId });
   }
 
   /** The permission mode requested at creation (DTO fallback before build). */
@@ -122,21 +170,35 @@ export class GarageSession {
     credentials.clearCustom();
   }
 
-  /** Send a user message, building the agent if needed. Captures fatal errors. */
+  /**
+   * Send a user message, building the agent if needed. Messages queue FIFO
+   * per session: one that arrives mid-task WAITS for the running turn instead
+   * of aborting it. (The handle's own send() aborts in-flight work — correct
+   * for the TUI's REPL semantics, fatal for an orchestrator where "continue"
+   * used to silently kill hours of progress.)
+   */
   async send(text: string, images?: Array<{ data: string; media_type: string }>): Promise<void> {
     if (this.state === "destroyed") return;
-    let handle: GlorpHandle;
-    try {
-      handle = await this.ensureBuilt();
-    } catch (err) {
-      this.fail(err);
-      return;
-    }
-    try {
-      await handle.send(text, images);
-    } catch (err) {
-      this.fail(err);
-    }
+    this.queuedMessages++;
+    const turn = async (): Promise<void> => {
+      this.queuedMessages--;
+      if (this.state === "destroyed") return;
+      let handle: GlorpHandle;
+      try {
+        handle = await this.ensureBuilt();
+      } catch (err) {
+        this.fail(err);
+        return;
+      }
+      try {
+        await handle.send(text, images);
+      } catch (err) {
+        this.fail(err);
+      }
+    };
+    const next = this.sendChain.then(turn, turn);
+    this.sendChain = next;
+    await next;
   }
 
   /** Move the session to the unrecoverable error state without killing Garage. */

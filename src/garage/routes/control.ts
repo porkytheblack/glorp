@@ -84,8 +84,9 @@ export function controlRoutes(manager: SessionManager): ControlRoutes {
     },
 
     async setProfile(id, req): Promise<Response> {
-      const handle = manager.get(id)?.current();
-      if (!handle) return errorJson("not_active", `Session ${id} is not active`, 409);
+      const session = manager.get(id);
+      const handle = session?.current();
+      if (!session || !handle) return errorJson("not_active", `Session ${id} is not active`, 409);
       let body: { profile_id?: string };
       try {
         body = await readJson<{ profile_id?: string }>(req);
@@ -94,7 +95,8 @@ export function controlRoutes(manager: SessionManager): ControlRoutes {
       }
       if (!body.profile_id) return errorJson("bad_request", "Missing 'profile_id'", 400);
       try {
-        await handle.swapProfile(body.profile_id);
+        // Through the session (not the handle) so the choice persists.
+        await session.swapProfile(body.profile_id);
       } catch (err) {
         return errorJson("profile_error", err instanceof Error ? err.message : String(err), 400);
       }

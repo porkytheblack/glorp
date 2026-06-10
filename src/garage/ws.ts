@@ -92,7 +92,8 @@ async function dispatch(
       handle.setPermissionMode(msg.mode as never);
       break;
     case "swap_profile":
-      await handle.swapProfile(String(msg.profile_id)).catch(() => {});
+      // Through the session (not the handle) so the choice persists.
+      await session.swapProfile(String(msg.profile_id)).catch(() => {});
       break;
     case "switch_agent":
       await handle.switchAgent(String(msg.agent_id)).catch(() => {});
