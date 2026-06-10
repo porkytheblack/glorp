@@ -103,4 +103,60 @@ describe("Model endpoints", () => {
       expect((await call("DELETE", "/models/providers/nope")).status).toBe(404);
     });
   });
+
+  it("lists live models from the provider's own API, sending the stored key", async () => {
+    // Fake upstream: an OpenAI-compatible /models endpoint that records auth.
+    let seenAuth: string | null = null;
+    const upstream = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/v1/models") {
+          seenAuth = req.headers.get("authorization");
+          return Response.json({ data: [{ id: "mimo-v2.5-pro" }, { id: "mimo-v2.5" }, { id: "mimo-v2.5-pro" }] });
+        }
+        return new Response("nope", { status: 404 });
+      },
+    });
+    try {
+      await withGarage(async (call) => {
+        await call("POST", "/models/providers", {
+          type: "custom",
+          id: "custom-fake",
+          baseURL: `http://127.0.0.1:${upstream.port}/v1`,
+          apiKey: "tp-test-key",
+        });
+
+        const res = await call("GET", "/models/providers/custom-fake/models");
+        expect(res.status).toBe(200);
+        // Deduped, order-preserving, ids only.
+        expect(res.body.models).toEqual(["mimo-v2.5-pro", "mimo-v2.5"]);
+        // The stored key went upstream as a Bearer token — and never came back.
+        expect(seenAuth).toBe("Bearer tp-test-key");
+        expect(JSON.stringify(res.body)).not.toContain("tp-test-key");
+
+        expect((await call("GET", "/models/providers/ghost/models")).status).toBe(404);
+      });
+    } finally {
+      upstream.stop(true);
+    }
+  });
+
+  it("maps an unreachable provider to a 502, not a crash", async () => {
+    await withGarage(async (call) => {
+      // Grab a loopback port and close it again — connecting now refuses instantly.
+      const probe = Bun.serve({ port: 0, fetch: () => new Response("") });
+      const deadPort = probe.port;
+      probe.stop(true);
+      await call("POST", "/models/providers", {
+        type: "custom",
+        id: "custom-dead",
+        baseURL: `http://127.0.0.1:${deadPort}/v1`,
+        apiKey: "tp-x",
+      });
+      const res = await call("GET", "/models/providers/custom-dead/models");
+      expect(res.status).toBe(502);
+      expect(res.body.error).toBe("upstream_unreachable");
+    });
+  });
 });

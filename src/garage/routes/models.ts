@@ -15,6 +15,7 @@ import {
   normaliseReasoning,
   reasoningLabel,
 } from "../../agent/credentials.ts";
+import { defaultBaseURLFor } from "../../agent/model-picker.ts";
 import type {
   ProviderConfig,
   ModelProfile,
@@ -35,6 +36,7 @@ export interface ModelRoutes {
   addProfile(req: Request): Promise<Response>;
   setReasoning(id: string, req: Request): Promise<Response>;
   deleteProfile(id: string): Response;
+  listProviderModels(id: string): Promise<Response>;
 }
 
 function providerDto(p: ProviderConfig) {
@@ -217,6 +219,47 @@ export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
       if (!credentials.getProfile(id)) return errorJson("not_found", `Profile ${id} not found`, 404);
       credentials.removeProfile(id);
       return noContent();
+    },
+
+    /** Live model list straight from the provider's own API (GET {base}/models),
+     * fetched server-side so the stored key never reaches the browser. Lets the
+     * dashboard offer current models instead of the static catalog snapshot. */
+    async listProviderModels(id): Promise<Response> {
+      const provider = credentials.getProvider(id);
+      if (!provider) return errorJson("not_found", `Provider ${id} not found`, 404);
+      const effective = effectiveProviderId(id, provider);
+      const known = findKnownProvider(effective);
+      const apiKey = provider.apiKey ?? (known?.envVar ? process.env[known.envVar] : undefined);
+      const baseURL = (provider.baseURL ?? defaultBaseURLFor(effective)).replace(/\/+$/, "");
+      // Anthropic authenticates with x-api-key + a version header; everything
+      // else in the catalog speaks OpenAI-style Bearer.
+      const headers: Record<string, string> =
+        effective === "anthropic"
+          ? { "x-api-key": apiKey ?? "", "anthropic-version": "2023-06-01" }
+          : { authorization: `Bearer ${apiKey ?? ""}` };
+      try {
+        const res = await fetch(`${baseURL}/models`, { headers, signal: AbortSignal.timeout(8000) });
+        if (!res.ok) {
+          return errorJson("upstream_error", `Provider responded ${res.status} to ${baseURL}/models`, 502);
+        }
+        const data: unknown = await res.json();
+        const rows = Array.isArray((data as any)?.data)
+          ? (data as any).data
+          : Array.isArray((data as any)?.models)
+            ? (data as any).models
+            : [];
+        const models = [
+          ...new Set(
+            rows
+              .map((m: unknown) => (typeof m === "string" ? m : ((m as any)?.id ?? (m as any)?.name)))
+              .filter((x: unknown): x is string => typeof x === "string" && x.length > 0),
+          ),
+        ];
+        return json({ models });
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : String(e);
+        return errorJson("upstream_unreachable", `Could not reach ${baseURL}/models — ${detail}`, 502);
+      }
     },
   };
 }
