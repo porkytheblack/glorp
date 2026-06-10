@@ -53,23 +53,26 @@ export function ProvisionDialog({ template, onClose }: { template: TemplateDto |
         {loading ? (
           <Loading />
         ) : (
-          <div className="space-y-4">
-            <ol className="space-y-1.5">
-              {steps.map((step, i) => {
-                const Icon = STEP_ICON[step.type];
-                return (
-                  <li key={i} className="flex items-start gap-2.5 rounded-md border border-border bg-card px-3 py-2">
-                    <span className="mt-0.5 w-4 shrink-0 text-center text-[12px] text-muted-foreground">{i + 1}</span>
-                    <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 break-words font-mono text-[12.5px] text-foreground/85">{stepSummary(step)}</span>
-                  </li>
-                );
-              })}
-            </ol>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">Steps</p>
+              <ol className="overflow-hidden rounded-lg border border-border bg-surface-2/40 divide-y divide-border/60">
+                {steps.map((step, i) => {
+                  const Icon = STEP_ICON[step.type];
+                  return (
+                    <li key={i} className="flex items-start gap-2.5 px-3 py-2">
+                      <span className="tnum mt-0.5 w-4 shrink-0 text-center text-[12px] text-faint">{i + 1}</span>
+                      <Icon className="mt-0.5 size-3.5 shrink-0 text-faint" />
+                      <span className="min-w-0 break-words font-mono text-[12.5px] text-foreground/85">{stepSummary(step)}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
 
             {names.length > 0 && (
-              <div className="space-y-3 border-t border-border pt-3">
-                <p className="text-[12px] text-muted-foreground">This template needs:</p>
+              <div className="space-y-4 border-t border-border pt-4">
+                <p className="text-[12px] text-muted-foreground">Fill in the placeholders this template references:</p>
                 {names.map((n) => (
                   <div key={n} className="space-y-1.5">
                     <Label className="font-mono">{n}</Label>

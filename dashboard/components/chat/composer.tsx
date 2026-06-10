@@ -1,11 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { CircleStop, CornerDownLeft, SendHorizontal } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { CircleStop, SendHorizontal } from "lucide-react";
+import { Spinner } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 
-/** Message composer: auto-growing textarea, Enter to send, Stop while busy. */
+/** Message composer: auto-growing textarea, Enter to send, Stop while busy.
+ *  Mirrors the Fleet LaunchComposer idiom — this screen's one glow moment. */
 export function Composer({
   busy,
   disabled,
@@ -38,14 +39,14 @@ export function Composer({
   };
 
   return (
-    <div className="border-t border-border bg-background px-4 py-3 md:px-6">
-      <div className="flex w-full max-w-3xl items-end gap-2 rounded-xl border border-input bg-card px-3 py-2 shadow-sm transition-colors focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/30">
+    <div className="border-t border-border bg-background px-4 py-3.5 md:px-6">
+      <div className="group mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-2.5 shadow-card transition-shadow focus-within:border-brand/40 focus-within:shadow-glow">
         <textarea
           ref={ref}
           rows={1}
           value={text}
           disabled={disabled}
-          placeholder={disabled ? "Session offline…" : "Message Glorp — ⏎ to send, ⇧⏎ for a new line"}
+          placeholder={disabled ? "Session offline…" : "Message Glorp…"}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -53,29 +54,32 @@ export function Composer({
               submit();
             }
           }}
-          className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent py-1 text-[13.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 disabled:opacity-60"
+          className="max-h-[200px] min-h-[24px] w-full resize-none bg-transparent px-2.5 py-1.5 text-[13.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-60"
         />
-        {busy ? (
-          <Button size="icon-sm" variant="secondary" onClick={onStop} title="Stop the agent" className="shrink-0">
-            <CircleStop />
-          </Button>
-        ) : (
-          <Button size="icon-sm" onClick={submit} disabled={!text.trim() || disabled} title="Send" className="shrink-0">
-            <SendHorizontal />
-          </Button>
-        )}
-      </div>
-      <div className="mt-1.5 flex w-full max-w-3xl items-center justify-between gap-2 px-1">
-        <div className="flex min-w-0 items-center gap-1">{controls}</div>
-        <p className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground/70">
-          {busy ? (
-            <span className="text-warning">Glorp is working…</span>
-          ) : (
-            <>
-              <CornerDownLeft className="size-3" /> send <span className="mx-0.5">·</span> ⇧⏎ newline
-            </>
-          )}
-        </p>
+        <div className="flex items-center justify-between gap-2 border-t border-border/70 pt-2.5">
+          <div className="flex min-w-0 items-center gap-1">{controls}</div>
+          <div className="flex shrink-0 items-center gap-2.5">
+            {busy ? (
+              <>
+                <span className="text-[11.5px] font-medium text-warning">Working…</span>
+                <Button size="sm" variant="secondary" onClick={onStop} title="Stop the agent">
+                  <CircleStop /> Stop
+                </Button>
+              </>
+            ) : (
+              <>
+                <span className="hidden text-[11px] text-faint sm:inline">
+                  <kbd className="rounded border border-border bg-surface-2 px-1 py-0.5 font-mono text-[10px]">↵</kbd> send
+                  <span className="mx-1 text-faint/60">·</span>
+                  <kbd className="rounded border border-border bg-surface-2 px-1 py-0.5 font-mono text-[10px]">⇧↵</kbd> newline
+                </span>
+                <Button size="sm" onClick={submit} disabled={!text.trim() || disabled} title="Send">
+                  {disabled ? <Spinner /> : <SendHorizontal />} Send
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

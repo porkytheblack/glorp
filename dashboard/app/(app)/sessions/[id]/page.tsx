@@ -44,29 +44,32 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-6 py-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-6 py-3.5">
         <div className="min-w-0">
-          <div className="mb-1.5 flex items-center gap-2 text-[12px] text-muted-foreground">
-            <Link href="/sessions" className="inline-flex items-center gap-1 hover:text-foreground">
-              <ArrowLeft className="size-3.5" /> Sessions
+          <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-faint">
+            <Link href="/sessions" className="inline-flex items-center gap-1 transition-colors hover:text-foreground">
+              <ArrowLeft className="size-3" /> Sessions
             </Link>
             {session?.workspace && (
               <>
-                <span className="text-muted-foreground/50">/</span>
+                <span className="text-faint/50">/</span>
                 <span className="inline-flex items-center gap-1">
-                  <FolderGit2 className="size-3.5" /> {baseName(session.workspace)}
+                  <FolderGit2 className="size-3" /> {baseName(session.workspace)}
                 </span>
               </>
             )}
           </div>
           <div className="flex min-w-0 items-center gap-3">
             <h1 className="truncate text-[17px] font-semibold tracking-tight">{title}</h1>
-            <SessionStatus state={state} />
+            <SessionStatus state={state} className="shrink-0" />
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className={cn("inline-flex items-center gap-1.5 text-[12px]", live.connected ? "text-muted-foreground" : "text-muted-foreground/50")}>
-            <span className={cn("size-1.5 rounded-full", live.connected ? "bg-success" : "bg-muted-foreground/40")} />
+        <div className="flex shrink-0 items-center gap-2.5">
+          <span className={cn("inline-flex items-center gap-1.5 text-[12px] font-medium", live.connected ? "text-success" : "text-faint")}>
+            <span className="relative grid size-2 place-items-center">
+              {live.connected && <span className="absolute size-2 rounded-full bg-success opacity-60 animate-pulse-ring" />}
+              <span className={cn("relative size-2 rounded-full", live.connected ? "bg-success" : "bg-faint")} />
+            </span>
             {live.connected ? "live" : "offline"}
           </span>
           {live.busy && (

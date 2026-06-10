@@ -1,17 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { FolderGit2, Plus, Trash2 } from "lucide-react";
+import { FolderGit2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
-import { Page, PageHeader, Loading, EmptyState, ErrorState, ConfirmButton, Spinner } from "@/components/shared";
-import { timeAgo } from "@/lib/format";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Page, PageHeader, Loading, EmptyState, ErrorState, Spinner } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { WorkspaceRow } from "./list";
 import type { WorkspaceDto } from "@/lib/types";
 
 export default function WorkspacesPage() {
@@ -94,38 +93,17 @@ export default function WorkspacesPage() {
 
       {error && <ErrorState message={error} className="mb-4" />}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="surface overflow-hidden">
         {loading ? (
           <Loading />
         ) : workspaces.length === 0 ? (
           <EmptyState icon={FolderGit2} title="No workspaces" description="Create one, or let sessions create them on demand." />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Name</TableHead>
-                <TableHead>Path</TableHead>
-                <TableHead>Sessions</TableHead>
-                <TableHead className="hidden sm:table-cell">Created</TableHead>
-                <TableHead className="w-10" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {workspaces.map((w) => (
-                <TableRow key={w.id}>
-                  <TableCell className="font-medium text-foreground">{w.name}</TableCell>
-                  <TableCell className="font-mono text-[12.5px] text-muted-foreground">{w.path}</TableCell>
-                  <TableCell className="text-[13px] text-muted-foreground">{w.session_count}</TableCell>
-                  <TableCell className="hidden text-[13px] text-muted-foreground sm:table-cell">{timeAgo(w.created_at)}</TableCell>
-                  <TableCell>
-                    <div className="flex justify-end">
-                      <ConfirmButton label="" icon={Trash2} onConfirm={() => destroy(w.id)} />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="divide-y divide-border/60">
+            {workspaces.map((w) => (
+              <WorkspaceRow key={w.id} w={w} onDelete={destroy} />
+            ))}
+          </div>
         )}
       </div>
     </Page>

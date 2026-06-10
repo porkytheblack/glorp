@@ -11,10 +11,12 @@ import type { ChatTurn } from "@/lib/types";
 
 function Thinking() {
   return (
-    <div className="flex items-center gap-1.5 pl-10 text-muted-foreground">
-      {[0, 1, 2].map((i) => (
-        <span key={i} className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60" style={{ animationDelay: `${i * 160}ms` }} />
-      ))}
+    <div className="flex items-center gap-2 pl-10 text-[12px] text-faint">
+      <span className="relative grid size-2 place-items-center">
+        <span className="absolute size-2 rounded-full bg-brand opacity-60 animate-pulse-ring" />
+        <span className="relative size-2 rounded-full bg-brand" />
+      </span>
+      Thinking…
     </div>
   );
 }
@@ -58,7 +60,7 @@ export function Conversation({
   return (
     <div className={cn("relative min-h-0", className)}>
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto px-4 md:px-6">
-        <div className="flex w-full max-w-3xl flex-col gap-5 py-6">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 py-7">
           {empty ? (
             <div className="pt-10">
               <EmptyState icon={MessageSquare} title="Start the conversation" description="Send a message to put the agent to work in this session." />
@@ -74,7 +76,7 @@ export function Conversation({
       </div>
       {!stuck && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-          <Button size="sm" variant="secondary" onClick={jump} className="pointer-events-auto shadow-md">
+          <Button size="sm" variant="secondary" onClick={jump} className="pointer-events-auto shadow-elevated">
             <ArrowDown /> Jump to latest
           </Button>
         </div>

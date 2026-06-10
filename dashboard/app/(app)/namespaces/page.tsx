@@ -1,18 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { Boxes, KeyRound, Plus, Trash2 } from "lucide-react";
+import { Boxes, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
-import { Page, PageHeader, Loading, EmptyState, ErrorState, ConfirmButton, SecretReveal, Spinner } from "@/components/shared";
-import { timeAgo } from "@/lib/format";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Page, PageHeader, Loading, EmptyState, ErrorState, Spinner } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { NamespaceRow } from "./list";
+import { MintKeyDialog } from "./mint-dialog";
 import type { NamespaceDto } from "@/lib/types";
 
 export default function NamespacesPage() {
@@ -110,84 +109,29 @@ export default function NamespacesPage() {
 
       {error && <ErrorState message={error} className="mb-4" />}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="surface overflow-hidden">
         {loading ? (
           <Loading />
         ) : namespaces.length === 0 ? (
           <EmptyState icon={Boxes} title="No namespaces" description="Create one to partition tenants and their resources." />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Name</TableHead>
-                <TableHead>Slug</TableHead>
-                <TableHead>Sessions</TableHead>
-                <TableHead className="hidden sm:table-cell">Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {namespaces.map((n) => (
-                <TableRow key={n.id}>
-                  <TableCell>
-                    <span className="font-medium text-foreground">{n.name}</span>
-                    {n.is_default && (
-                      <Badge variant="outline" className="ml-2">
-                        default
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-[12.5px] text-muted-foreground">{n.slug}</TableCell>
-                  <TableCell className="text-[13px] text-muted-foreground">{n.session_count ?? 0}</TableCell>
-                  <TableCell className="hidden text-[13px] text-muted-foreground sm:table-cell">{timeAgo(n.created_at)}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => setMintFor(n)}>
-                        <KeyRound /> Mint key
-                      </Button>
-                      {!n.is_default && <ConfirmButton label="" icon={Trash2} onConfirm={() => destroy(n.id)} />}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="divide-y divide-border/60">
+            {namespaces.map((n) => (
+              <NamespaceRow key={n.id} n={n} onMint={setMintFor} onDelete={destroy} />
+            ))}
+          </div>
         )}
       </div>
 
-      <Dialog open={!!mintFor} onOpenChange={(o) => !o && closeMint()}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Mint key for {mintFor?.name}</DialogTitle>
-            <DialogDescription>A namespace-bound key may act only within this namespace.</DialogDescription>
-          </DialogHeader>
-          {minted ? (
-            <div className="space-y-2">
-              <p className="text-[13px] text-muted-foreground">Copy this key now — it won&apos;t be shown again.</p>
-              <SecretReveal value={minted} />
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <Label>Key name</Label>
-              <Input autoFocus value={keyName} onChange={(e) => setKeyName(e.target.value)} placeholder="ci-runner" />
-            </div>
-          )}
-          <DialogFooter>
-            {minted ? (
-              <Button onClick={closeMint}>Done</Button>
-            ) : (
-              <>
-                <Button variant="ghost" onClick={closeMint} disabled={busy}>
-                  Cancel
-                </Button>
-                <Button onClick={mint} disabled={busy}>
-                  {busy ? <Spinner /> : <KeyRound />} Mint key
-                </Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <MintKeyDialog
+        namespace={mintFor}
+        keyName={keyName}
+        minted={minted}
+        busy={busy}
+        onKeyName={setKeyName}
+        onMint={mint}
+        onClose={closeMint}
+      />
     </Page>
   );
 }

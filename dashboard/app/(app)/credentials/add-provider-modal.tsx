@@ -6,10 +6,9 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/shared";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Field, FieldRow, ModalFooter } from "./form";
 import type { Catalog } from "@/lib/types";
 
 const CUSTOM = "__custom__";
@@ -77,8 +76,7 @@ export function AddProviderModal({ catalog, onSaved }: { catalog: Catalog | null
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>Provider</Label>
+          <Field label="Provider" hint={meta ? `${meta.description}${meta.env_var ? ` · env: ${meta.env_var}` : ""}` : undefined}>
             <Select value={choice} onValueChange={setChoice}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a provider…" />
@@ -92,18 +90,15 @@ export function AddProviderModal({ catalog, onSaved }: { catalog: Catalog | null
                 <SelectItem value={CUSTOM}>Custom (OpenAI-compatible)…</SelectItem>
               </SelectContent>
             </Select>
-            {meta && <p className="text-[12px] text-muted-foreground">{meta.description}{meta.env_var ? ` · env: ${meta.env_var}` : ""}</p>}
-          </div>
+          </Field>
 
           {isCustom && (
             <>
-              <div className="space-y-1.5">
-                <Label>Provider id</Label>
+              <Field label="Provider id">
                 <Input value={customId} onChange={(e) => setCustomId(e.target.value)} placeholder="my-proxy" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Adapter</Label>
+              </Field>
+              <FieldRow>
+                <Field label="Adapter">
                   <Select value={adapter} onValueChange={setAdapter}>
                     <SelectTrigger>
                       <SelectValue />
@@ -116,9 +111,8 @@ export function AddProviderModal({ catalog, onSaved }: { catalog: Catalog | null
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Based on</Label>
+                </Field>
+                <Field label="Based on">
                   <Select value={basedOn} onValueChange={setBasedOn}>
                     <SelectTrigger>
                       <SelectValue />
@@ -132,35 +126,25 @@ export function AddProviderModal({ catalog, onSaved }: { catalog: Catalog | null
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-              </div>
+                </Field>
+              </FieldRow>
             </>
           )}
 
-          <div className="space-y-1.5">
-            <Label>{needsKey ? "API key" : "API key (optional)"}</Label>
+          <Field label={needsKey ? "API key" : "API key (optional)"}>
             <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>{isCustom ? "Base URL" : "Base URL (optional)"}</Label>
+          </Field>
+          <FieldRow>
+            <Field label={isCustom ? "Base URL" : "Base URL (optional)"}>
               <Input value={baseURL} onChange={(e) => setBaseURL(e.target.value)} placeholder="https://…/v1" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Context limit</Label>
+            </Field>
+            <Field label="Context limit">
               <Input inputMode="numeric" value={contextLimit} onChange={(e) => setContextLimit(e.target.value)} placeholder="e.g. 200000" />
-            </div>
-          </div>
+            </Field>
+          </FieldRow>
         </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={busy}>
-            {busy ? <Spinner /> : null} Save provider
-          </Button>
-        </DialogFooter>
+        <ModalFooter onCancel={() => setOpen(false)} onSubmit={save} submitLabel="Save provider" busy={busy} />
       </DialogContent>
     </Dialog>
   );

@@ -3,58 +3,61 @@
 @tailwind utilities;
 
 /*
- * Graphite monochrome theme. The app is dark-only: the values below ARE the
- * theme. A single brand accent (violet) is reserved for active nav, primary
- * actions, focus rings, and live state — it should touch < 5% of the pixels.
+ * Garage design language. Dark-only: the values below ARE the theme. Surfaces
+ * climb a deliberate elevation ladder (background → card → surface-2 →
+ * elevated); a single indigo brand accent is reserved for active nav, primary
+ * actions, focus, and live state. Depth comes from hairline borders + a top
+ * sheen, not heavy shadows.
  */
 @layer base {
   :root {
-    --background: 240 6% 4%;
+    --background: 240 9% 5%;
     --foreground: 0 0% 98%;
 
-    --card: 240 5% 8%;
+    --card: 240 7% 7.5%;
     --card-foreground: 0 0% 98%;
+    --surface-2: 240 6% 10%;
+    --elevated: 240 6% 12.5%;
 
-    --popover: 240 6% 7%;
+    --popover: 240 8% 8%;
     --popover-foreground: 0 0% 98%;
 
-    /* Primary == brand accent (used sparingly). */
-    --primary: 240 89% 70%;
+    /* Brand accent (indigo) — used sparingly. */
+    --primary: 243 72% 68%;
     --primary-foreground: 0 0% 100%;
+    --brand: 243 72% 68%;
+    --brand-foreground: 0 0% 100%;
+    --brand-strong: 244 84% 76%;
 
-    --secondary: 240 5% 13%;
+    --secondary: 240 6% 13%;
     --secondary-foreground: 0 0% 98%;
 
-    --muted: 240 5% 12%;
-    --muted-foreground: 240 5% 64%;
+    /* Three weights of quiet: muted (labels) → faint (hints) → icon dim. */
+    --muted: 240 6% 12%;
+    --muted-foreground: 240 6% 63%;
+    --faint: 240 5% 45%;
 
-    /* shadcn "accent" == subtle hover/selected surface (NOT the brand hue). */
-    --accent: 240 5% 14%;
+    --accent: 240 6% 14%;
     --accent-foreground: 0 0% 98%;
 
-    --destructive: 4 75% 60%;
-    --destructive-foreground: 0 0% 98%;
-
-    --success: 139 50% 52%;
+    --destructive: 3 74% 61%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 150 54% 50%;
     --success-foreground: 0 0% 100%;
-
-    --warning: 38 73% 55%;
+    --warning: 38 92% 58%;
     --warning-foreground: 0 0% 8%;
 
-    --border: 240 5% 15%;
-    --input: 240 5% 17%;
-    --ring: 240 89% 70%;
+    --border: 240 6% 14%;
+    --border-strong: 240 6% 22%;
+    --input: 240 6% 18%;
+    --ring: 243 72% 68%;
 
-    /* The brand accent, named explicitly for intentional use. */
-    --brand: 240 89% 70%;
-    --brand-foreground: 0 0% 100%;
-
-    --sidebar: 240 6% 6%;
+    --sidebar: 240 9% 6%;
     --sidebar-foreground: 0 0% 90%;
-    --sidebar-accent: 240 5% 12%;
-    --sidebar-border: 240 5% 13%;
+    --sidebar-accent: 240 6% 12%;
+    --sidebar-border: 240 6% 11%;
 
-    --radius: 0.625rem;
+    --radius: 0.7rem;
   }
 }
 
@@ -67,34 +70,67 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv01" 1;
     text-rendering: optimizeLegibility;
   }
   ::selection {
     background: hsl(var(--brand) / 0.3);
   }
-  /* Refined, unobtrusive scrollbars. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: hsl(var(--border)) transparent;
+    scrollbar-color: hsl(var(--border-strong)) transparent;
   }
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
+    background: hsl(var(--border-strong));
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.45);
+    background: hsl(var(--faint) / 0.6);
     background-clip: padding-box;
   }
 }
 
-/* Markdown rendering inside chat bubbles (prose-lite, theme-aware). */
+@layer components {
+  /* Faint top-lit vignette behind the whole app — barely perceptible, but it
+     keeps large dark fields from reading as dead flat. */
+  .app-backdrop {
+    background:
+      radial-gradient(115% 80% at 50% -10%, hsl(243 60% 16% / 0.18), transparent 60%),
+      radial-gradient(90% 60% at 100% 0%, hsl(240 30% 20% / 0.12), transparent 55%),
+      hsl(var(--background));
+  }
+  /* Surface with the signature sheen: hairline border + soft inner top edge. */
+  .surface {
+    @apply rounded-lg border border-border bg-card shadow-card;
+  }
+  /* Big, tightly-tracked display text for hero moments and metrics. */
+  .text-display {
+    font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.1rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Shimmering skeleton sweep. */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-secondary/60;
+  }
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.06), transparent);
+  }
+}
+
+/* Markdown rendering inside chat (prose-lite, theme-aware). */
 @layer components {
   .md > :first-child {
     margin-top: 0;
@@ -123,7 +159,7 @@
     margin: 0.15rem 0;
   }
   .md a {
-    color: hsl(var(--brand));
+    color: hsl(var(--brand-strong));
     text-underline-offset: 2px;
   }
   .md a:hover {
@@ -157,6 +193,7 @@
     font-weight: 600;
     line-height: 1.3;
     margin: 0.9rem 0 0.4rem;
+    letter-spacing: -0.01em;
   }
   .md h1 {
     font-size: 1.05rem;
@@ -168,7 +205,7 @@
     font-size: 0.95rem;
   }
   .md blockquote {
-    border-left: 2px solid hsl(var(--border));
+    border-left: 2px solid hsl(var(--border-strong));
     padding-left: 0.75rem;
     color: hsl(var(--muted-foreground));
   }

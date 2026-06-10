@@ -9,7 +9,7 @@ import { Loading } from "@/components/shared";
 import { BrandLockup } from "@/components/brand";
 
 const TITLES: Record<string, string> = {
-  "/": "Overview",
+  "/": "Fleet",
   "/sessions": "Sessions",
   "/namespaces": "Namespaces",
   "/workspaces": "Workspaces",
@@ -42,7 +42,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="app-backdrop flex min-h-screen">
       <AppSidebar />
       <div className="flex h-screen min-w-0 flex-1 flex-col">
         <AppTopbar title={titleFor(pathname)} />

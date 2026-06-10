@@ -38,7 +38,7 @@ export function GarageMark({ className, spark = true }: { className?: string; sp
 export function BrandLockup({ className, markClassName }: { className?: string; markClassName?: string }) {
   return (
     <span className={cn("inline-flex items-center gap-2.5", className)}>
-      <span className="grid size-8 place-items-center rounded-lg border border-border bg-secondary/60 text-foreground">
+      <span className="grid size-8 place-items-center rounded-lg border border-border bg-surface-2 text-foreground shadow-sheen">
         <GarageMark className={cn("size-[18px]", markClassName)} />
       </span>
       <span className="text-[15px] font-semibold tracking-tight">Garage</span>

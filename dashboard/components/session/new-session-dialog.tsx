@@ -62,9 +62,9 @@ export function NewSessionDialog({ workspaces, profiles }: { workspaces: Workspa
           <DialogDescription>Put an agent to work in a workspace. You can send the first instruction now or later.</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>First message (optional)</Label>
+        <div className="flex flex-col gap-5 py-1">
+          <div className="flex flex-col gap-2">
+            <Label>First message <span className="font-normal text-faint">(optional)</span></Label>
             <Textarea
               autoFocus
               value={prompt}
@@ -72,8 +72,8 @@ export function NewSessionDialog({ workspaces, profiles }: { workspaces: Workspa
               placeholder="e.g. Add rate limiting to the API routes and write a test."
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
               <Label>Workspace</Label>
               <Select value={ws} onValueChange={setWs}>
                 <SelectTrigger>
@@ -89,7 +89,7 @@ export function NewSessionDialog({ workspaces, profiles }: { workspaces: Workspa
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-2">
               <Label>Model</Label>
               <Select value={profile} onValueChange={setProfile}>
                 <SelectTrigger>
@@ -106,7 +106,7 @@ export function NewSessionDialog({ workspaces, profiles }: { workspaces: Workspa
               </Select>
             </div>
           </div>
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-2">
             <Label>Permission mode</Label>
             <Select value={mode} onValueChange={setMode}>
               <SelectTrigger>
@@ -121,7 +121,7 @@ export function NewSessionDialog({ workspaces, profiles }: { workspaces: Workspa
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="mt-1">
           <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
             Cancel
           </Button>

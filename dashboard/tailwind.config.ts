@@ -2,9 +2,13 @@ import type { Config } from "tailwindcss";
 import animate from "tailwindcss-animate";
 
 /**
- * Graphite monochrome design system. Near-grayscale surfaces, a single brand
- * accent (violet) reserved for active nav, primary actions, focus, and live
- * state. Everything is wired through the HSL CSS variables in globals.css.
+ * Garage design language — a refined, product-grade dark theme.
+ *
+ * Cool near-neutral surfaces arranged in a deliberate elevation ladder
+ * (background → card → surface-2 → elevated), a single indigo brand accent,
+ * and a depth model built from hairline borders + a top "sheen" highlight
+ * rather than heavy shadows. Every value is wired through the HSL CSS
+ * variables in globals.css so the whole system retunes from one place.
  */
 const config: Config = {
   darkMode: "class",
@@ -17,11 +21,18 @@ const config: Config = {
       },
       colors: {
         border: "hsl(var(--border))",
+        "border-strong": "hsl(var(--border-strong))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
-        brand: { DEFAULT: "hsl(var(--brand))", foreground: "hsl(var(--brand-foreground))" },
+        faint: "hsl(var(--faint))",
+        elevated: "hsl(var(--elevated))",
+        brand: {
+          DEFAULT: "hsl(var(--brand))",
+          foreground: "hsl(var(--brand-foreground))",
+          strong: "hsl(var(--brand-strong))",
+        },
         primary: { DEFAULT: "hsl(var(--primary))", foreground: "hsl(var(--primary-foreground))" },
         secondary: { DEFAULT: "hsl(var(--secondary))", foreground: "hsl(var(--secondary-foreground))" },
         destructive: { DEFAULT: "hsl(var(--destructive))", foreground: "hsl(var(--destructive-foreground))" },
@@ -30,7 +41,8 @@ const config: Config = {
         muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
         accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
         popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
-        card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
+        card: "hsl(var(--card))",
+        surface: { DEFAULT: "hsl(var(--card))", 2: "hsl(var(--surface-2))" },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar))",
           foreground: "hsl(var(--sidebar-foreground))",
@@ -39,23 +51,40 @@ const config: Config = {
         },
       },
       borderRadius: {
+        xl: "calc(var(--radius) + 4px)",
         lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        md: "calc(var(--radius) - 3px)",
+        sm: "calc(var(--radius) - 6px)",
+      },
+      boxShadow: {
+        sheen: "inset 0 1px 0 0 hsl(0 0% 100% / 0.04)",
+        card: "0 1px 2px 0 hsl(240 10% 2% / 0.5), inset 0 1px 0 0 hsl(0 0% 100% / 0.03)",
+        elevated:
+          "0 16px 40px -12px hsl(240 12% 1% / 0.75), 0 4px 12px -4px hsl(240 12% 1% / 0.55), inset 0 1px 0 0 hsl(0 0% 100% / 0.05)",
+        glow: "0 0 0 1px hsl(var(--brand) / 0.45), 0 0 28px -6px hsl(var(--brand) / 0.5)",
       },
       keyframes: {
         "accordion-down": { from: { height: "0" }, to: { height: "var(--radix-accordion-content-height)" } },
         "accordion-up": { from: { height: "var(--radix-accordion-content-height)" }, to: { height: "0" } },
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },
-        "slide-up": { from: { opacity: "0", transform: "translateY(6px)" }, to: { opacity: "1", transform: "translateY(0)" } },
+        "slide-up": { from: { opacity: "0", transform: "translateY(8px)" }, to: { opacity: "1", transform: "translateY(0)" } },
+        "pop-in": { from: { opacity: "0", transform: "scale(0.96)" }, to: { opacity: "1", transform: "scale(1)" } },
         "caret-blink": { "0%,70%,100%": { opacity: "1" }, "20%,50%": { opacity: "0" } },
+        "pulse-ring": {
+          "0%": { transform: "scale(0.6)", opacity: "0.7" },
+          "80%,100%": { transform: "scale(2.2)", opacity: "0" },
+        },
+        shimmer: { "100%": { transform: "translateX(100%)" } },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        "fade-in": "fade-in 0.2s ease-out",
-        "slide-up": "slide-up 0.24s cubic-bezier(0.16,1,0.3,1)",
+        "fade-in": "fade-in 0.25s ease-out",
+        "slide-up": "slide-up 0.32s cubic-bezier(0.16,1,0.3,1)",
+        "pop-in": "pop-in 0.2s cubic-bezier(0.16,1,0.3,1)",
         "caret-blink": "caret-blink 1.2s ease-out infinite",
+        "pulse-ring": "pulse-ring 2s cubic-bezier(0.16,1,0.3,1) infinite",
+        shimmer: "shimmer 1.6s infinite",
       },
     },
   },

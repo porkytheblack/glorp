@@ -5,10 +5,10 @@ import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/shared";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Field, ModalFooter } from "./form";
 import type { ProfileWire, ReasoningOption } from "@/lib/types";
 
 /** Change a profile's reasoning effort in place (mirrors the TUI `r` cycle):
@@ -69,8 +69,7 @@ export function EditReasoningModal({ profile, onSaved }: { profile: ProfileWire;
         ) : opts.length === 0 ? (
           <p className="py-2 text-[13px] text-muted-foreground">This model doesn’t expose reasoning controls.</p>
         ) : (
-          <div className="space-y-1.5">
-            <Label>Effort</Label>
+          <Field label="Effort">
             <Select value={idx} onValueChange={setIdx}>
               <SelectTrigger>
                 <SelectValue />
@@ -84,16 +83,9 @@ export function EditReasoningModal({ profile, onSaved }: { profile: ProfileWire;
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </Field>
         )}
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={busy || !opts || opts.length === 0}>
-            {busy ? <Spinner /> : null} Save
-          </Button>
-        </DialogFooter>
+        <ModalFooter onCancel={() => setOpen(false)} onSubmit={save} submitLabel="Save" busy={busy} disabled={!opts || opts.length === 0} />
       </DialogContent>
     </Dialog>
   );

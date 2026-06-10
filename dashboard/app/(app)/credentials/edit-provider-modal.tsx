@@ -6,9 +6,8 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/shared";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
+import { Field, FieldRow, ModalFooter } from "./form";
 import type { ProviderWire } from "@/lib/types";
 
 /** Update an existing provider's API key (and optionally base URL / context
@@ -57,8 +56,7 @@ export function EditProviderModal({ provider, onSaved }: { provider: ProviderWir
           <DialogDescription>Rotate the API key or adjust the endpoint. Anything left blank keeps its current value.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>API key</Label>
+          <Field label="API key">
             <Input
               type="password"
               autoFocus
@@ -66,26 +64,17 @@ export function EditProviderModal({ provider, onSaved }: { provider: ProviderWir
               onChange={(e) => setApiKey(e.target.value)}
               placeholder={provider.has_api_key ? "•••• stored — leave blank to keep" : "Set an API key"}
             />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Base URL</Label>
+          </Field>
+          <FieldRow>
+            <Field label="Base URL">
               <Input value={baseURL} onChange={(e) => setBaseURL(e.target.value)} placeholder="https://…/v1" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Context limit</Label>
+            </Field>
+            <Field label="Context limit">
               <Input inputMode="numeric" value={contextLimit} onChange={(e) => setContextLimit(e.target.value)} placeholder="e.g. 200000" />
-            </div>
-          </div>
+            </Field>
+          </FieldRow>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={busy}>
-            {busy ? <Spinner /> : null} Save
-          </Button>
-        </DialogFooter>
+        <ModalFooter onCancel={() => setOpen(false)} onSubmit={save} submitLabel="Save" busy={busy} />
       </DialogContent>
     </Dialog>
   );

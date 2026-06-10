@@ -6,14 +6,43 @@ import { toast } from "sonner";
 import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
 import { Page, PageHeader, Loading, EmptyState, ErrorState, SessionStatus, ConfirmButton } from "@/components/shared";
-import { baseName, timeAgo } from "@/lib/format";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { timeAgo, compact } from "@/lib/format";
 import { NewSessionDialog } from "@/components/session/new-session-dialog";
 import type { SessionDto, WorkspaceDto, ProfileDto } from "@/lib/types";
 
+const RANK: Record<string, number> = { busy: 0, provisioning: 1, error: 2, idle: 3, destroyed: 4 };
+const rank = (s: SessionDto) => RANK[s.state] ?? 3;
+
+/** One session in the registry: status, title + model, token/turn columns, activity. */
+function SessionRow({ s, onOpen, onDelete }: { s: SessionDto; onOpen: () => void; onDelete: () => void }) {
+  const tokens = (s.tokens_in ?? 0) + (s.tokens_out ?? 0);
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen())}
+      className="group flex cursor-pointer items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-surface-2"
+    >
+      <SessionStatus state={s.state} className="w-[104px] shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13.5px] text-foreground">{s.title ?? "Untitled session"}</div>
+        <div className="truncate text-[11.5px] text-faint">{s.model_label ?? "Default model"}</div>
+      </div>
+      <span className="tnum hidden w-16 shrink-0 text-right text-[12px] text-muted-foreground sm:block">{compact(tokens)} tok</span>
+      <span className="tnum hidden w-12 shrink-0 text-right text-[12px] text-faint md:block">{s.turn_count} {s.turn_count === 1 ? "turn" : "turns"}</span>
+      <span className="tnum w-12 shrink-0 text-right text-[12px] text-faint">{timeAgo(s.last_activity)}</span>
+      <span onClick={(e) => e.stopPropagation()} className="shrink-0">
+        <ConfirmButton label="" icon={Trash2} onConfirm={onDelete} />
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-faint/60 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+    </div>
+  );
+}
+
 export default function SessionsPage() {
   const router = useRouter();
-  const { data, loading, error, reload } = useQuery<{ sessions: SessionDto[]; total: number }>("/sessions");
+  const { data, loading, error, reload } = useQuery<{ sessions: SessionDto[]; total: number }>("/sessions", [], 4000);
   const workspaces = useQuery<{ workspaces: WorkspaceDto[] }>("/workspaces");
   const profiles = useQuery<{ profiles: ProfileDto[] }>("/models/profiles");
 
@@ -27,7 +56,9 @@ export default function SessionsPage() {
     }
   };
 
-  const sessions = [...(data?.sessions ?? [])].sort((a, b) => b.last_activity.localeCompare(a.last_activity));
+  const sessions = [...(data?.sessions ?? [])].sort(
+    (a, b) => rank(a) - rank(b) || b.last_activity.localeCompare(a.last_activity),
+  );
 
   return (
     <Page>
@@ -39,44 +70,17 @@ export default function SessionsPage() {
 
       {error && <ErrorState message={error} className="mb-4" />}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="surface overflow-hidden">
         {loading ? (
           <Loading />
         ) : sessions.length === 0 ? (
           <EmptyState icon={MessageSquare} title="No sessions yet" description="Launch one to put an agent to work — it runs in a sandboxed workspace." />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Session</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden md:table-cell">Model</TableHead>
-                <TableHead className="hidden sm:table-cell">Activity</TableHead>
-                <TableHead className="w-10" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sessions.map((s) => (
-                <TableRow key={s.id} className="cursor-pointer" onClick={() => router.push(`/sessions/${s.id}`)}>
-                  <TableCell>
-                    <div className="font-medium text-foreground">{s.title ?? "Untitled session"}</div>
-                    <div className="text-[12px] text-muted-foreground">{baseName(s.workspace)}</div>
-                  </TableCell>
-                  <TableCell>
-                    <SessionStatus state={s.state} />
-                  </TableCell>
-                  <TableCell className="hidden text-[13px] text-muted-foreground md:table-cell">{s.model_label ?? "Default"}</TableCell>
-                  <TableCell className="hidden text-[13px] text-muted-foreground sm:table-cell">{timeAgo(s.last_activity)}</TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-end gap-1">
-                      <ConfirmButton label="" icon={Trash2} onConfirm={() => destroy(s.id)} />
-                      <ChevronRight className="size-4 text-muted-foreground/50" />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="divide-y divide-border/60">
+            {sessions.map((s) => (
+              <SessionRow key={s.id} s={s} onOpen={() => router.push(`/sessions/${s.id}`)} onDelete={() => destroy(s.id)} />
+            ))}
+          </div>
         )}
       </div>
     </Page>

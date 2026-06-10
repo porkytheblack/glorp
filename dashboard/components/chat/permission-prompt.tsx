@@ -1,6 +1,6 @@
 "use client";
 
-import { ShieldQuestion } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DisplaySlot } from "@/lib/types";
 
@@ -14,7 +14,8 @@ function describe(input: unknown): string {
   return "The agent is requesting permission to run a tool.";
 }
 
-/** Inline approval card for a pending permission request. */
+/** Inline approval card for a pending permission request — blocks the agent,
+ *  so it reads urgent (warning-tinted) but composed. */
 export function PermissionPrompt({
   slot,
   onResolve,
@@ -23,11 +24,13 @@ export function PermissionPrompt({
   onResolve: (slotId: string, allow: boolean) => void;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
-      <ShieldQuestion className="mt-0.5 size-4 shrink-0 text-warning" />
+    <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 shadow-sheen">
+      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border border-warning/30 bg-warning/10 text-warning">
+        <ShieldAlert className="size-3.5" />
+      </span>
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-medium text-foreground">Permission requested</p>
-        <p className="mt-0.5 truncate text-[12.5px] text-muted-foreground">{describe(slot.input)}</p>
+        <p className="text-[12.5px] font-semibold text-foreground">Permission requested</p>
+        <p className="mt-0.5 truncate font-mono text-[12px] text-muted-foreground">{describe(slot.input)}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Button size="sm" variant="ghost" onClick={() => onResolve(slot.slotId, false)}>

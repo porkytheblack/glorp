@@ -8,7 +8,6 @@ import { api } from "@/lib/api";
 import { Page, PageHeader, Loading, EmptyState, ErrorState, ConfirmButton, SecretReveal, Spinner } from "@/components/shared";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +15,37 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import type { ApiKeyPublic } from "@/lib/types";
+
+/** One key, dense but legible — name + prefix, scopes, and quiet timestamps. */
+function KeyRow({ k, onRevoke }: { k: ApiKeyPublic; onRevoke: () => void }) {
+  return (
+    <div className={cn("flex items-center gap-3 px-3.5 py-2.5", k.revoked && "opacity-50")}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className={cn("truncate text-[13.5px] font-medium text-foreground", k.revoked && "line-through")}>{k.name}</span>
+          {k.revoked && <Badge variant="destructive">revoked</Badge>}
+        </div>
+        <div className="truncate font-mono text-[12px] text-faint">{k.keyPrefix}…</div>
+      </div>
+      <div className="hidden flex-wrap gap-1 sm:flex">
+        {k.scopes.map((s) => (
+          <Badge key={s} variant="outline">
+            {s}
+          </Badge>
+        ))}
+      </div>
+      <div className="hidden w-20 shrink-0 text-right sm:block">
+        <div className="tnum text-[12px] text-muted-foreground">{timeAgo(k.createdAt)}</div>
+        <div className="text-[11px] text-faint">created</div>
+      </div>
+      <div className="w-20 shrink-0 text-right">
+        <div className="tnum text-[12px] text-muted-foreground">{timeAgo(k.lastUsed)}</div>
+        <div className="text-[11px] text-faint">last used</div>
+      </div>
+      <div className="flex w-[88px] shrink-0 justify-end">{!k.revoked && <ConfirmButton label="Revoke" onConfirm={onRevoke} />}</div>
+    </div>
+  );
+}
 
 export default function KeysPage() {
   const { data, loading, error, reload } = useQuery<{ data: ApiKeyPublic[] }>("/keys");
@@ -116,51 +146,17 @@ export default function KeysPage() {
 
       {error && <ErrorState message={error} className="mb-4" />}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="surface overflow-hidden">
         {loading ? (
           <Loading />
         ) : keys.length === 0 ? (
           <EmptyState icon={KeyRound} title="No API keys" description="Mint one for a client or the MCP server." />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Name</TableHead>
-                <TableHead>Prefix</TableHead>
-                <TableHead>Scopes</TableHead>
-                <TableHead className="hidden sm:table-cell">Last used</TableHead>
-                <TableHead className="w-10" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {keys.map((k) => (
-                <TableRow key={k.id} className={cn(k.revoked && "opacity-50")}>
-                  <TableCell className="font-medium text-foreground">
-                    {k.name}
-                    {k.revoked && (
-                      <Badge variant="destructive" className="ml-2">
-                        revoked
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-[12.5px] text-muted-foreground">{k.keyPrefix}…</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {k.scopes.map((s) => (
-                        <Badge key={s} variant="outline">
-                          {s}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell className="hidden text-[13px] text-muted-foreground sm:table-cell">{timeAgo(k.lastUsed)}</TableCell>
-                  <TableCell>
-                    <div className="flex justify-end">{!k.revoked && <ConfirmButton label="Revoke" onConfirm={() => revoke(k.id)} />}</div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <div className="divide-y divide-border/60">
+            {keys.map((k) => (
+              <KeyRow key={k.id} k={k} onRevoke={() => revoke(k.id)} />
+            ))}
+          </div>
         )}
       </div>
     </Page>

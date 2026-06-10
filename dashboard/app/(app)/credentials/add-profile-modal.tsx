@@ -6,10 +6,9 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/shared";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Field, FieldRow, ModalFooter } from "./form";
 import type { Catalog, ProviderWire } from "@/lib/types";
 
 /** Add a (provider, model) profile. Reasoning effort is configured afterwards on
@@ -75,9 +74,8 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Provider</Label>
+          <FieldRow>
+            <Field label="Provider">
               <Select value={providerId} onValueChange={setProviderId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select…" />
@@ -90,37 +88,27 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Model</Label>
+            </Field>
+            <Field label="Model">
               <Input list="model-suggestions" value={model} onChange={(e) => setModel(e.target.value)} placeholder="claude-sonnet-4-6" />
               <datalist id="model-suggestions">
                 {suggestions.map((m) => (
                   <option key={m} value={m} />
                 ))}
               </datalist>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Label (optional)</Label>
+            </Field>
+          </FieldRow>
+          <FieldRow>
+            <Field label="Label (optional)">
               <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={`${providerId || "provider"} · ${model || "model"}`} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Context limit</Label>
+            </Field>
+            <Field label="Context limit">
               <Input inputMode="numeric" value={contextLimit} onChange={(e) => setContextLimit(e.target.value)} placeholder="e.g. 200000" />
-            </div>
-          </div>
+            </Field>
+          </FieldRow>
         </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={busy}>
-            {busy ? <Spinner /> : null} Add model
-          </Button>
-        </DialogFooter>
+        <ModalFooter onCancel={() => setOpen(false)} onSubmit={save} submitLabel="Add model" busy={busy} />
       </DialogContent>
     </Dialog>
   );

@@ -1,9 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronRight, CircleStop, FileText, Hammer, Pencil, Search, Terminal, X } from "lucide-react";
+import { ChevronRight, FileText, Hammer, Pencil, Search, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Spinner } from "@/components/shared";
 import type { ToolEvent } from "@/lib/types";
 
 function iconFor(name: string) {
@@ -33,11 +32,22 @@ function summarize(input: unknown): string {
   return String(input);
 }
 
-function StatusIcon({ status }: { status: ToolEvent["status"] }) {
-  if (status === "running") return <Spinner className="size-3.5 text-muted-foreground" />;
-  if (status === "success") return <Check className="size-3.5 text-success" />;
-  if (status === "error") return <X className="size-3.5 text-destructive" />;
-  return <CircleStop className="size-3.5 text-muted-foreground" />;
+// Status reads as a single semantic dot — quiet machinery, not a loud icon.
+const STATUS: Record<ToolEvent["status"], { dot: string; pulse?: boolean }> = {
+  running: { dot: "bg-warning", pulse: true },
+  success: { dot: "bg-success" },
+  error: { dot: "bg-destructive" },
+  aborted: { dot: "bg-faint" },
+};
+
+function StatusDot({ status }: { status: ToolEvent["status"] }) {
+  const s = STATUS[status];
+  return (
+    <span className="relative grid size-2 place-items-center">
+      {s.pulse && <span className={cn("absolute size-2 rounded-full opacity-60 animate-pulse-ring", s.dot)} />}
+      <span className={cn("relative size-2 rounded-full", s.dot)} />
+    </span>
+  );
 }
 
 export function ToolCall({ tool }: { tool: ToolEvent }) {
@@ -45,31 +55,32 @@ export function ToolCall({ tool }: { tool: ToolEvent }) {
   const Icon = iconFor(tool.name);
   const summary = summarize(tool.input);
   const hasDetail = Boolean(summary) || Boolean(tool.output);
+  const hasInputObj = typeof tool.input === "object" && tool.input !== null;
 
   return (
-    <div className="rounded-lg border border-border bg-card/40">
+    <div className="ml-10 overflow-hidden rounded-md border border-border bg-surface-2/40">
       <button
         type="button"
         onClick={() => hasDetail && setOpen((o) => !o)}
-        className={cn("flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px]", hasDetail && "hover:bg-secondary/40")}
+        className={cn("flex w-full items-center gap-2 px-2.5 py-1.5 text-left", hasDetail && "transition-colors hover:bg-surface-2")}
       >
-        <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90", !hasDetail && "opacity-0")} />
-        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="font-mono font-medium text-foreground">{tool.name}</span>
-        {summary && <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{summary}</span>}
-        <span className="ml-auto shrink-0">
-          <StatusIcon status={tool.status} />
+        <ChevronRight className={cn("size-3 shrink-0 text-faint transition-transform", open && "rotate-90", !hasDetail && "opacity-0")} />
+        <Icon className="size-3 shrink-0 text-faint" />
+        <span className="shrink-0 font-mono text-[12px] font-medium text-muted-foreground">{tool.name}</span>
+        {summary && <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-faint">{summary}</span>}
+        <span className="ml-auto shrink-0 pl-1.5">
+          <StatusDot status={tool.status} />
         </span>
       </button>
       {open && (
-        <div className="space-y-2 border-t border-border px-3 py-2.5">
-          {typeof tool.input === "object" && tool.input !== null && (
-            <pre className="overflow-x-auto rounded-md bg-background p-2.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">
+        <div className="space-y-2 border-t border-border/60 px-2.5 py-2.5">
+          {hasInputObj && (
+            <pre className="overflow-x-auto rounded-md border border-border bg-background p-2.5 font-mono text-[11.5px] leading-relaxed text-faint">
               {JSON.stringify(tool.input, null, 2)}
             </pre>
           )}
           {tool.output && (
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-2.5 font-mono text-[11.5px] leading-relaxed text-foreground/80">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background p-2.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">
               {tool.output}
             </pre>
           )}
