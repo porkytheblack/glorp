@@ -89,8 +89,12 @@ describe("NamespaceStore", () => {
 });
 
 describe("selectNamespaceId", () => {
-  it("pins unauthenticated requests to default (ignoring the header)", () => {
-    expect(selectNamespaceId(null, "ns_x")).toBe(DEFAULT_NAMESPACE_ID);
+  it("honors the requested namespace when auth is off (trusted local isolation)", () => {
+    // Auth-off means requireAuth never gated the request: the header is an
+    // isolation boundary, not a security one. Ignoring it made the dashboard
+    // namespace switcher a silent no-op on loopback.
+    expect(selectNamespaceId(null, "ns_x")).toBe("ns_x");
+    expect(selectNamespaceId(null, null)).toBe(DEFAULT_NAMESPACE_ID);
   });
   it("binds a tenant key to its own namespace", () => {
     const k = key(["run"], "ns_a");

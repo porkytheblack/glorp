@@ -55,16 +55,18 @@ export class NamespaceForbiddenError extends Error {
 
 /**
  * Resolve the namespace a request targets, enforcing tenancy:
- *  - no key (auth off) → the `default` namespace; a requested header is ignored
- *    (without authentication there is no tenant to isolate — namespaces require
- *    auth to be meaningful).
+ *  - no key (auth off, trusted local) → the requested namespace, falling back
+ *    to `default`. Auth-off means requireAuth never gated the request, so the
+ *    header is an ISOLATION boundary, not a security one — discarding it made
+ *    the dashboard's namespace switcher a silent no-op on loopback, bleeding
+ *    every namespace's sessions into one view.
  *  - a tenant key (bound to a namespace) may act ONLY in its own namespace; a
  *    mismatching `X-Glorp-Namespace` is a 403.
  *  - an `admin`-scoped key may target ANY namespace via the header; with no
  *    header it falls back to its own binding (or `default` when unbound).
  */
 export function selectNamespaceId(key: ApiKey | null, requested: string | null): string {
-  if (!key) return DEFAULT_NAMESPACE_ID;
+  if (!key) return requested ?? DEFAULT_NAMESPACE_ID;
   const bound = key.namespace ?? null;
   const isAdmin = key.scopes.includes("admin");
   if (requested && requested !== bound) {
