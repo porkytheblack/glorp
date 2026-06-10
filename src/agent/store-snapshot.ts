@@ -78,14 +78,28 @@ export function latestTriggerMessage(messages: Message[]): { id: string; index: 
   return { id: `message_${messages.length}`, index: -1, text: "" };
 }
 
-/** Find the first real user message in a transcript. Skips skill injections,
- *  tool results, and compaction summaries — those are not the user's words. */
+/** Greeting/ack-only message — not an ask. Conservative on purpose: anything
+ *  longer than a short salutation is treated as substantive. */
+export function isPleasantry(text: string): boolean {
+  const t = text.trim();
+  if (t.length === 0) return true;
+  if (t.length > 30) return false;
+  return /^(hey+|hi+|hello|yo|sup|howdy|hola|ok(ay)?|cool|nice|thanks?|thank you|ty|test(ing)?|ping|good (morning|afternoon|evening)|what'?s up)[\s!.,?]*$/i.test(t);
+}
+
+/** Find the first real ASK in a transcript: skips skill injections, tool
+ *  results, compaction summaries — and leading pleasantries ("hey", "ok"),
+ *  so the anchor pins the actual request, not the greeting. Falls back to
+ *  the first user message when everything is a pleasantry. */
 export function firstUserRequest(messages: Message[]): { id: string; index: number; text: string } | null {
+  let fallback: { id: string; index: number; text: string } | null = null;
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     if (m?.sender === "user" && !m.tool_results && !m.is_compaction && !m.is_skill_injection) {
-      return { id: m.id ?? `message_${i}`, index: i, text: m.text };
+      const entry = { id: m.id ?? `message_${i}`, index: i, text: m.text };
+      if (!isPleasantry(m.text)) return entry;
+      fallback ??= entry;
     }
   }
-  return null;
+  return fallback;
 }

@@ -79,3 +79,22 @@ describe("repairToolFlow", () => {
     expect(toolFlowIsClean(CORRUPTED)).toBe(false);
   });
 });
+
+describe("pleasantry-aware ask capture", () => {
+  const { isPleasantry, firstUserRequest } = require("../src/agent/store-snapshot.ts");
+  test("greetings and acks are pleasantries; asks are not", () => {
+    for (const t of ["hey", "Hi!", "ok", "thanks", "yo", "good morning"]) expect(isPleasantry(t)).toBe(true);
+    for (const t of ["hey can you fix the login bug", "Build a pitch deck from proxima.dterminal.net", "ok now add tests"]) expect(isPleasantry(t)).toBe(false);
+  });
+  test("firstUserRequest skips the greeting and pins the real ask", () => {
+    const msgs = [
+      { sender: "user", text: "hey" },
+      { sender: "agent", text: "Hey! How can I help you today?" },
+      { sender: "user", text: "I wanna create a power point presentation on proxima.dterminal.net" },
+    ];
+    expect(firstUserRequest(msgs as never)?.text).toContain("power point");
+  });
+  test("falls back to the greeting when nothing substantive exists yet", () => {
+    expect(firstUserRequest([{ sender: "user", text: "hey" }] as never)?.text).toBe("hey");
+  });
+});

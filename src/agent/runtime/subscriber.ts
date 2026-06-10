@@ -57,15 +57,18 @@ export function createGlorpSubscriber(
     },
   };
 
+  let compacting = false;
   async function dispatch(event_type: any, data: any): Promise<void> {
       switch (event_type) {
         case "text_delta": {
+          if (compacting) break; // the summary is bookkeeping, not conversation
           const { text } = data as { text: string };
           streamingTextBuffer += text;
           bridge.emit({ type: "text_delta", text });
           break;
         }
         case "model_response_complete": {
+          if (compacting) { streamingTextBuffer = ""; void refresh.stats(); break; }
           const d = data as { text: string; reasoning_content?: string };
           if (streamingTextBuffer || d.text) {
             const finalText = d.text || streamingTextBuffer;
@@ -86,6 +89,7 @@ export function createGlorpSubscriber(
           break;
         }
         case "model_response": {
+          if (compacting) break;
           const d = data as { text: string; reasoning_content?: string };
           if (!streamingTextBuffer && d.text) {
             bridge.emit({
@@ -143,9 +147,11 @@ export function createGlorpSubscriber(
           break;
         }
         case "compaction_start":
+          compacting = true;
           bridge.emit({ type: "compaction", phase: "start" });
           break;
         case "compaction_end":
+          compacting = false;
           bridge.emit({ type: "compaction", phase: "end" });
           void refresh.stats();
           break;

@@ -1,5 +1,6 @@
 import type { Message, ModelAdapter } from "glove-core/core";
 import { isVisibleTranscriptMessage, visibleMessageText } from "./model-guards.ts";
+import { isPleasantry } from "../store-snapshot.ts";
 
 const TITLE_MAX_MESSAGES = 10;
 const TITLE_MAX_CHARS_PER_MESSAGE = 700;
@@ -24,8 +25,17 @@ export async function generateSessionTitle(
 ): Promise<string | null> {
   const visible = messages.filter(isVisibleTranscriptMessage);
   if (!visible.some((m) => m.sender === "user")) return null;
+  // Skip the leading pleasantry exchange ("hey" / "How can I help?") so the
+  // title reflects the actual ask, not the greeting.
+  let start = 0;
+  while (start < visible.length) {
+    const m = visible[start]!;
+    if (m.sender === "user" && !isPleasantry(visibleMessageText(m))) break;
+    start++;
+  }
+  if (start >= visible.length) start = 0; // all pleasantries — title the chat anyway
   const transcript = visible
-    .slice(0, TITLE_MAX_MESSAGES)
+    .slice(start, start + TITLE_MAX_MESSAGES)
     .map((m) => `${m.sender === "user" ? "User" : "Assistant"}: ${truncate(visibleMessageText(m))}`)
     .join("\n");
   const result = await model.prompt({
