@@ -76,7 +76,7 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
           <DialogDescription>Pair a provider with a model. Set reasoning effort afterwards from the model’s row.</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-5">
           <FieldRow>
             <Field label="Provider">
               <Select

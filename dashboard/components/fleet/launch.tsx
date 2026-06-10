@@ -14,9 +14,9 @@ const DEFAULT_WS = "__default__";
 const DEFAULT_MODEL = "__default__";
 
 /** The hero: describe a task, pick where it runs, launch an agent. */
-export function LaunchComposer({ workspaces, profiles }: { workspaces: WorkspaceDto[]; profiles: ProfileDto[] }) {
+export function LaunchComposer({ workspaces, profiles, initialPrompt = "" }: { workspaces: WorkspaceDto[]; profiles: ProfileDto[]; initialPrompt?: string }) {
   const router = useRouter();
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [ws, setWs] = useState(DEFAULT_WS);
   const [profile, setProfile] = useState(DEFAULT_MODEL);
   const [busy, setBusy] = useState(false);

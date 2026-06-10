@@ -39,10 +39,11 @@ function TaskRow({ task }: { task: TaskItem }) {
   );
 }
 
-/** Renders the agent's task checklist. `compact` trims the empty state. */
+/** Renders the agent's task checklist. `compact` drops the empty state entirely
+ *  so the host (the inspector) can let the Tasks section emerge with content. */
 export function TaskList({ tasks, compact = false }: { tasks: TaskItem[]; compact?: boolean }) {
   if (tasks.length === 0) {
-    if (compact) return <p className="text-[12.5px] text-faint">No tasks tracked yet.</p>;
+    if (compact) return null;
     return <EmptyState icon={ListChecks} title="No tasks yet" description="When the agent plans its work, the checklist appears here." />;
   }
   return (

@@ -33,6 +33,10 @@ export function NewSessionDialog({ workspaces, profiles }: { workspaces: Workspa
   const [mode, setMode] = React.useState("normal");
   const [busy, setBusy] = React.useState(false);
 
+  // Show what the defaults actually resolve to. With exactly one profile, that
+  // profile *is* the default — name it instead of the generic "Default model".
+  const defaultModelLabel = profiles.length === 1 ? `Default — ${profiles[0].label}` : "Default model";
+
   const create = async () => {
     setBusy(true);
     try {
@@ -80,7 +84,7 @@ export function NewSessionDialog({ workspaces, profiles }: { workspaces: Workspa
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={DEFAULT_WS}>Default workspace</SelectItem>
+                  <SelectItem value={DEFAULT_WS}>Default — managed folder</SelectItem>
                   {workspaces.map((w) => (
                     <SelectItem key={w.id} value={w.id}>
                       {w.name}
@@ -96,7 +100,7 @@ export function NewSessionDialog({ workspaces, profiles }: { workspaces: Workspa
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={DEFAULT_MODEL}>Default model</SelectItem>
+                  <SelectItem value={DEFAULT_MODEL}>{defaultModelLabel}</SelectItem>
                   {profiles.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.label}

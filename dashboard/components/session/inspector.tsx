@@ -16,10 +16,21 @@ const MODE_LABEL: Record<string, string> = {
   bypass: "Bypass — no prompts",
 };
 
-/** A labeled section opened by the eyebrow idiom (11px uppercase tracking-wider). */
-function Section({ eyebrow, count, children }: { eyebrow: string; count?: React.ReactNode; children: React.ReactNode }) {
+/** A labeled section opened by the eyebrow idiom (11px uppercase tracking-wider).
+ *  `emerge` plays the slide-up entrance for sections that appear with content. */
+function Section({
+  eyebrow,
+  count,
+  emerge,
+  children,
+}: {
+  eyebrow: string;
+  count?: React.ReactNode;
+  emerge?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="border-b border-border/60 px-4 py-4">
+    <section className={cn("border-b border-border/60 px-4 py-4", emerge && "animate-slide-up")}>
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-[11px] font-medium uppercase tracking-wider text-faint">{eyebrow}</h3>
         {count != null && <span className="tnum text-[11.5px] text-faint">{count}</span>}
@@ -83,11 +94,15 @@ export function Inspector({
 
   return (
     <div className="h-full overflow-y-auto">
-      <Section eyebrow="Tasks" count={tasks.length > 0 ? `${done}/${tasks.length}` : null}>
-        <TaskList tasks={tasks} compact />
-      </Section>
+      {/* Tasks emerge with the first tracked item — never empty scaffolding. */}
+      {tasks.length > 0 && (
+        <Section eyebrow="Tasks" count={`${done}/${tasks.length}`} emerge>
+          <TaskList tasks={tasks} compact />
+        </Section>
+      )}
 
-      <Section eyebrow="Agents" count={agents.length > 0 ? agents.length : null}>
+      {/* Count only once the full roster is in play; a lone agent stays quiet. */}
+      <Section eyebrow="Agents" count={agents.length > 1 ? agents.length : null}>
         <AgentRoster agents={agents} activeId={activeAgentId} onSwitch={onSwitchAgent} onAdd={onAddAgent} onRemove={onRemoveAgent} />
       </Section>
 

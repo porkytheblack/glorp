@@ -62,29 +62,33 @@ export function EditReasoningModal({ profile, onSaved }: { profile: ProfileWire;
             {profile.provider_id} · <span className="font-mono">{profile.model}</span> — sets the thinking effort this model uses.
           </DialogDescription>
         </DialogHeader>
-        {opts === null ? (
-          <div className="py-4">
-            <Spinner />
-          </div>
-        ) : opts.length === 0 ? (
-          <p className="py-2 text-[13px] text-muted-foreground">This model doesn’t expose reasoning controls.</p>
-        ) : (
-          <Field label="Effort">
-            <Select value={idx} onValueChange={setIdx}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {opts.map((o, i) => (
-                  <SelectItem key={i} value={String(i)}>
-                    {o.label}
-                    {o.description ? ` — ${o.description}` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-        )}
+        <div className="space-y-5">
+          {opts === null ? (
+            <div className="flex items-center justify-center gap-2.5 py-6 text-[13px] text-muted-foreground">
+              <Spinner /> Loading effort levels…
+            </div>
+          ) : opts.length === 0 ? (
+            <p className="rounded-lg border border-border bg-surface-2/40 px-4 py-3 text-[13px] text-muted-foreground">
+              This model doesn’t expose reasoning controls.
+            </p>
+          ) : (
+            <Field label="Effort">
+              <Select value={idx} onValueChange={setIdx}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {opts.map((o, i) => (
+                    <SelectItem key={i} value={String(i)}>
+                      {o.label}
+                      {o.description ? ` — ${o.description}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+        </div>
         <ModalFooter onCancel={() => setOpen(false)} onSubmit={save} submitLabel="Save" busy={busy} disabled={!opts || opts.length === 0} />
       </DialogContent>
     </Dialog>
