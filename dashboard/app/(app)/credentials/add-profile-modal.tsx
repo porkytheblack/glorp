@@ -19,7 +19,6 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
   const [providerId, setProviderId] = React.useState("");
   const [model, setModel] = React.useState("");
   const [label, setLabel] = React.useState("");
-  const [contextLimit, setContextLimit] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -32,7 +31,6 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
     return catalog?.providers.find((c) => c.id === key)?.default_models ?? [];
   }, [providers, catalog, providerId]);
 
-  const providerCtx = providers.find((p) => p.id === providerId)?.context_limit ?? null;
 
   const save = async () => {
     if (!providerId || !model.trim()) {
@@ -48,7 +46,6 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
           model: model.trim(),
           label: label.trim() || undefined,
           activate: true,
-          ...(contextLimit.trim() ? { contextLimit: Number(contextLimit) } : {}),
         },
       });
       toast.success("Profile added & activated");
@@ -106,8 +103,8 @@ export function AddProfileModal({ providers, catalog, onSaved }: { providers: Pr
             <Field label="Label (optional)">
               <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={`${providerId || "provider"} · ${model || "model"}`} />
             </Field>
-            <Field label="Context limit">
-              <Input inputMode="numeric" value={contextLimit} onChange={(e) => setContextLimit(e.target.value)} placeholder={providerCtx ? `${providerCtx} (provider default)` : "e.g. 200000"} />
+            <Field label="Context window" hint="Detected automatically from the model catalog. Override per provider under its edit dialog if needed.">
+              <div className="flex h-9 items-center rounded-md border border-border/60 bg-surface-2/40 px-3 text-[13px] text-muted-foreground">Auto</div>
             </Field>
           </FieldRow>
         </div>

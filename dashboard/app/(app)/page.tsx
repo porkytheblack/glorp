@@ -17,7 +17,7 @@ export default function FleetPage() {
   // The fleet is live: poll sessions so running/idle counts and lanes stay fresh.
   const sessions = useQuery<{ sessions: SessionDto[]; total: number }>("/sessions", [], 4000);
   const workspaces = useQuery<{ workspaces: WorkspaceDto[] }>("/workspaces");
-  const profiles = useQuery<{ profiles: ProfileDto[] }>("/models/profiles");
+  const profiles = useQuery<{ profiles: ProfileDto[]; active_profile_id?: string | null }>("/models/profiles");
 
   const [skipped, setSkipped] = React.useState(false);
   React.useEffect(() => {
@@ -61,7 +61,11 @@ export default function FleetPage() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[1080px] animate-fade-in px-6 py-10 md:px-9 md:py-12">
         <div className="mx-auto max-w-2xl">
-          <LaunchComposer workspaces={workspaces.data?.workspaces ?? []} profiles={profs} />
+          <LaunchComposer
+            workspaces={workspaces.data?.workspaces ?? []}
+            profiles={profs}
+            defaultModelLabel={profs.find((p) => p.id === profiles.data?.active_profile_id)?.label ?? null}
+          />
         </div>
 
         {showMetrics && (

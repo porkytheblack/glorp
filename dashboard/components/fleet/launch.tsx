@@ -14,7 +14,7 @@ const DEFAULT_WS = "__default__";
 const DEFAULT_MODEL = "__default__";
 
 /** The hero: describe a task, pick where it runs, launch an agent. */
-export function LaunchComposer({ workspaces, profiles, initialPrompt = "" }: { workspaces: WorkspaceDto[]; profiles: ProfileDto[]; initialPrompt?: string }) {
+export function LaunchComposer({ workspaces, profiles, initialPrompt = "", defaultModelLabel }: { workspaces: WorkspaceDto[]; profiles: ProfileDto[]; initialPrompt?: string; defaultModelLabel?: string | null }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState(initialPrompt);
   const [ws, setWs] = useState(DEFAULT_WS);
@@ -76,7 +76,7 @@ export function LaunchComposer({ workspaces, profiles, initialPrompt = "" }: { w
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={DEFAULT_MODEL}>Default model</SelectItem>
+                <SelectItem value={DEFAULT_MODEL}>{defaultModelLabel ? `Default — ${defaultModelLabel}` : "Default model"}</SelectItem>
                 {profiles.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.label}

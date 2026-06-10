@@ -14,6 +14,7 @@ import { mcpRoutes } from "./routes/mcp.ts";
 import { stateRoutes } from "./routes/state.ts";
 import { controlRoutes } from "./routes/control.ts";
 import { modelRoutes } from "./routes/models.ts";
+import { ModelCatalog } from "../agent/model-catalog.ts";
 import { credentialRoutes } from "./routes/credentials.ts";
 import { fileRoutes } from "./routes/files.ts";
 
@@ -40,7 +41,7 @@ export function buildRouteGroups(
     mcp: mcpRoutes(manager),
     state: stateRoutes(manager),
     control: controlRoutes(manager),
-    models: modelRoutes(credentials),
+    models: modelRoutes(credentials, new ModelCatalog(config.dataDir)),
     creds: credentialRoutes(manager),
     files: fileRoutes(manager, config),
   };

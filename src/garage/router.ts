@@ -141,6 +141,9 @@ function routeSubpath(req: Request, m: RegExpMatchArray, g: RouteGroups): Promis
     case "history":
       if (method === "GET") return g.state.history(id);
       break;
+    case "extensions":
+      if (method === "GET") return g.state.extensions(id);
+      break;
     case "result":
       if (method === "GET") return g.state.result(id);
       break;

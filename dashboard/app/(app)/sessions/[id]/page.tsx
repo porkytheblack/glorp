@@ -14,6 +14,7 @@ import { Composer } from "@/components/chat/composer";
 import { PermissionPrompt } from "@/components/chat/permission-prompt";
 import { Inspector } from "@/components/session/inspector";
 import { ModelSwitcher } from "@/components/session/model-switcher";
+import { ReasoningKnob } from "@/components/session/reasoning-knob";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import type { SessionDto, ProfileWire } from "@/lib/types";
@@ -22,6 +23,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const { id } = use(params);
   const { data: session, loading, error } = useQuery<SessionDto>(`/sessions/${id}`);
   const profiles = useQuery<{ profiles: ProfileWire[] }>("/models/profiles");
+  const extensions = useQuery<{ slash: Array<{ name: string; description: string }> }>(`/sessions/${id}/extensions`);
+  // /quit and /help are TUI affordances — the dashboard has its own surfaces.
+  const commands = (extensions.data?.slash ?? []).filter((c) => c.name !== "/quit" && c.name !== "/help");
   const { identity } = useAuth();
   const live = useSession(id);
   const [panel, setPanel] = useState(true);
@@ -130,7 +134,20 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               disabled={!live.connected}
               onSend={live.send}
               onStop={live.abort}
-              controls={<ModelSwitcher profiles={profiles.data?.profiles ?? []} current={currentModel} onSwap={swap} />}
+              commands={commands}
+              controls={
+                <>
+                  <ModelSwitcher profiles={profiles.data?.profiles ?? []} current={currentModel} onSwap={swap} />
+                  <ReasoningKnob
+                    profiles={profiles.data?.profiles ?? []}
+                    currentLabel={currentModel}
+                    onSwapped={(id, label) => {
+                      swap(id, label);
+                      profiles.reload();
+                    }}
+                  />
+                </>
+              }
             />
           </div>
 

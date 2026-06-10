@@ -4,24 +4,43 @@ import * as React from "react";
 import { CircleStop, SendHorizontal } from "lucide-react";
 import { Spinner } from "@/components/shared";
 import { Button } from "@/components/ui/button";
+import { SlashMenu, type SlashCommand } from "./slash-menu";
 
 /** Message composer: auto-growing textarea, Enter to send, Stop while busy.
- *  Mirrors the Fleet LaunchComposer idiom — this screen's one glow moment. */
+ *  Typing "/" surfaces the agent's commands (hooks + skills) inline. */
 export function Composer({
   busy,
   disabled,
   onSend,
   onStop,
   controls,
+  commands = [],
 }: {
   busy: boolean;
   disabled?: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
   controls?: React.ReactNode;
+  commands?: SlashCommand[];
 }) {
   const [text, setText] = React.useState("");
+  const [slashIdx, setSlashIdx] = React.useState(0);
+  const [slashDismissed, setSlashDismissed] = React.useState(false);
   const ref = React.useRef<HTMLTextAreaElement>(null);
+
+  // The menu engages while the message is a bare leading "/token".
+  const slashQuery = /^\/([a-z0-9_-]*)$/i.exec(text)?.[1] ?? null;
+  const slashMatches =
+    slashQuery !== null && !slashDismissed
+      ? commands.filter((c) => c.name.slice(1).toLowerCase().startsWith(slashQuery.toLowerCase())).slice(0, 8)
+      : [];
+  const slashOpen = slashMatches.length > 0;
+
+  const pickSlash = (cmd: SlashCommand) => {
+    setText(`${cmd.name} `);
+    setSlashIdx(0);
+    ref.current?.focus();
+  };
 
   const grow = React.useCallback(() => {
     const el = ref.current;
@@ -40,15 +59,26 @@ export function Composer({
 
   return (
     <div className="border-t border-border bg-background px-4 py-3.5 md:px-6">
-      <div className="group mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-2.5 shadow-card transition-shadow focus-within:border-brand/40 focus-within:shadow-glow">
+      <div className="group relative mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-2.5 shadow-card transition-shadow focus-within:border-brand/40 focus-within:shadow-glow">
+        {slashOpen && <SlashMenu commands={slashMatches} activeIndex={slashIdx} onPick={pickSlash} />}
         <textarea
           ref={ref}
           rows={1}
           value={text}
           disabled={disabled}
           placeholder={disabled ? "Session offline…" : "Message Glorp…"}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setSlashDismissed(false);
+            setSlashIdx(0);
+          }}
           onKeyDown={(e) => {
+            if (slashOpen) {
+              if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx((i) => (i + 1) % slashMatches.length); return; }
+              if (e.key === "ArrowUp") { e.preventDefault(); setSlashIdx((i) => (i - 1 + slashMatches.length) % slashMatches.length); return; }
+              if (e.key === "Tab" || e.key === "Enter") { e.preventDefault(); pickSlash(slashMatches[slashIdx] ?? slashMatches[0]!); return; }
+              if (e.key === "Escape") { e.preventDefault(); setSlashDismissed(true); return; }
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();

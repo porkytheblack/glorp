@@ -4,7 +4,7 @@ import { Cpu, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
-import { timeAgo } from "@/lib/format";
+import { compact, timeAgo } from "@/lib/format";
 import { Page, PageHeader, Loading, EmptyState, ErrorState, ConfirmButton } from "@/components/shared";
 import { SectionHeading } from "@/components/primitives";
 import { Badge } from "@/components/ui/badge";
@@ -92,18 +92,21 @@ export default function CredentialsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 truncate text-[13.5px] text-foreground">
                       <span className="truncate font-medium">{p.label}</span>
-                      {p.id === activeId && <Badge variant="brand">active</Badge>}
+                      {p.id === activeId && <Badge variant="brand">Default</Badge>}
                     </div>
                     <div className="truncate font-mono text-[12px] text-faint">{p.provider_id} · {p.model}</div>
                   </div>
                   {p.reasoning_label && p.reasoning_label !== "off" && (
                     <Badge variant="outline" className="shrink-0">{p.reasoning_label}</Badge>
                   )}
+                  {p.context_limit != null && (
+                    <span className="tnum hidden shrink-0 text-[12px] text-faint md:block">{compact(p.context_limit)} ctx</span>
+                  )}
                   <span className="tnum hidden w-14 shrink-0 text-right text-[12px] text-faint sm:block">{timeAgo(p.last_used_at)}</span>
                   <div className="flex shrink-0 items-center gap-0.5">
                     {p.id !== activeId && (
                       <Button variant="ghost" size="sm" onClick={() => run(() => api(`/models/profiles/${p.id}/activate`, { method: "POST" }), "Profile activated", profiles.reload)}>
-                        Activate
+                        Make default
                       </Button>
                     )}
                     <EditReasoningModal profile={p} onSaved={profiles.reload} />

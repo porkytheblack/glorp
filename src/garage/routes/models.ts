@@ -16,6 +16,7 @@ import {
   reasoningLabel,
 } from "../../agent/credentials.ts";
 import { defaultBaseURLFor } from "../../agent/model-picker.ts";
+import type { ModelCatalog } from "../../agent/model-catalog.ts";
 import type {
   ProviderConfig,
   ModelProfile,
@@ -65,7 +66,18 @@ function profileDto(p: ModelProfile) {
   };
 }
 
-export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
+export function modelRoutes(credentials: CredentialsStore, catalog?: ModelCatalog): ModelRoutes {
+  /** Effective context window: explicit profile/provider override, else the
+   * models.dev catalog (which resolves custom-provider models by name) — so
+   * nobody has to hand-type context numbers. */
+  const resolveContext = (p: ModelProfile): number | null => {
+    if (p.contextLimit) return p.contextLimit;
+    const provider = credentials.getProvider(p.providerId);
+    if (provider?.contextLimit) return provider.contextLimit;
+    const effective = effectiveProviderId(p.providerId, provider, p.model);
+    return catalog?.getContextLimit(effective, p.model) ?? null;
+  };
+  const dto = (p: ModelProfile) => ({ ...profileDto(p), context_limit: resolveContext(p) });
   return {
     providers(): Response {
       return json({ providers: credentials.listProviders().map(providerDto) });
@@ -73,7 +85,7 @@ export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
 
     profiles(): Response {
       const active = credentials.getActiveProfile();
-      return json({ profiles: credentials.listProfiles().map(profileDto), active_profile_id: active?.id ?? null });
+      return json({ profiles: credentials.listProfiles().map(dto), active_profile_id: active?.id ?? null });
     },
 
     activate(id): Response {
@@ -185,7 +197,7 @@ export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
       };
       credentials.upsertProfile(profile);
       if (body.activate) credentials.setActive(id);
-      return json(profileDto(profile), 201);
+      return json(dto(profile), 201);
     },
 
     /** Change a profile's reasoning effort in place — the web equivalent of the
@@ -212,7 +224,7 @@ export function modelRoutes(credentials: CredentialsStore): ModelRoutes {
       if (newId !== id) credentials.removeProfile(id);
       credentials.upsertProfile(updated);
       if (wasActive) credentials.setActive(newId);
-      return json(profileDto(updated));
+      return json(dto(updated));
     },
 
     deleteProfile(id): Response {

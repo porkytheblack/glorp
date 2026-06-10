@@ -24,6 +24,7 @@ function resultReason(dto: SessionDto, text: string | null, lastError: string | 
 
 export interface StateRoutes {
   history(id: string): Promise<Response>;
+  extensions(id: string): Promise<Response>;
   result(id: string): Promise<Response>;
   plan(id: string): Promise<Response>;
   tasks(id: string): Promise<Response>;
@@ -43,6 +44,16 @@ export function stateRoutes(manager: SessionManager): StateRoutes {
       if (!session) return notFound(id);
       const messages = await session.peekStore().getDisplayMessages();
       return json({ turns: turnsFromMessages(messages) });
+    },
+
+    /** Slash commands (hooks + exposed skills) the session's agent accepts —
+     * drives the composer's "/" autocomplete. Empty until the agent is built;
+     * the composer fetches once the WS is live, by which point it is. */
+    async extensions(id): Promise<Response> {
+      const session = require(id);
+      if (!session) return notFound(id);
+      const handle = session.current();
+      return json(handle ? handle.extensions : { slash: [], skills: [], subagents: [] });
     },
 
     /**
