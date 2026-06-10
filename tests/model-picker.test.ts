@@ -561,3 +561,53 @@ describe("pickModel + titleAdapter (cheap model for session titles)", () => {
     expect(picked.titleAdapter).toBe(picked.adapter);
   });
 });
+
+describe("default reasoning capture for default-thinking models", () => {
+  /** Build a custom OpenAI-compat provider + profile and return the adapter's
+   * resolved reasoning state ({ enabled, echo, effort? }). */
+  async function reasoningFor(model: string, reasoning?: unknown) {
+    const credentials = new CredentialsStore(dataDir);
+    credentials.upsertProvider({
+      type: "custom",
+      id: "custom-moonshot",
+      baseURL: "https://api.moonshot.example/v1",
+      apiKey: "k",
+      adapter: "openai-compat",
+    });
+    credentials.upsertProfile({
+      id: `custom-moonshot__${model}`,
+      label: model,
+      providerId: "custom-moonshot",
+      model,
+      ...(reasoning !== undefined ? { reasoning: reasoning as any } : {}),
+    });
+    credentials.setActive(`custom-moonshot__${model}`);
+    const picked = await pickModel({ credentials });
+    return (picked.adapter as any).reasoning as { enabled: boolean; echo: boolean; effort?: string };
+  }
+
+  test("kimi without explicit reasoning still gets capture + echo (kimi-k2.6 thinks by default — Moonshot 400s tool loops without the echo)", async () => {
+    const r = await reasoningFor("kimi-k2.6");
+    expect(r.enabled).toBe(true);
+    expect(r.echo).toBe(true);
+    expect(r.effort).toBeUndefined(); // no hint unless the profile asks for one
+  });
+
+  test("kimi with explicit effort keeps the hint and the echo", async () => {
+    const r = await reasoningFor("kimi-k2.6", "medium");
+    expect(r.enabled).toBe(true);
+    expect(r.echo).toBe(true);
+    expect(r.effort).toBe("medium");
+  });
+
+  test("deepseek-r1 gets capture WITHOUT echo (R1 rejects echoed reasoning)", async () => {
+    const r = await reasoningFor("deepseek-r1");
+    expect(r.enabled).toBe(true);
+    expect(r.echo).toBe(false);
+  });
+
+  test("non-reasoning models keep reasoning disabled entirely", async () => {
+    const r = await reasoningFor("llama-3.3-70b-versatile");
+    expect(r.enabled).toBe(false);
+  });
+});

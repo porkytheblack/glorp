@@ -381,8 +381,17 @@ async function buildAdapter(args: {
     stream: true,
     maxTokens: args.maxTokens ?? DEFAULT_MAX_TOKENS,
   };
-  if (reasoning && reasoning.kind !== "off" && modelAcceptsReasoning(effectiveId, model)) {
+  const reasoningCapable = modelAcceptsReasoning(effectiveId, model);
+  if (reasoning && reasoning.kind !== "off" && reasoningCapable) {
     compatOpts.reasoning = translateReasoning(reasoning);
+  } else if (reasoningCapable) {
+    // Reasoning-capable models (kimi-k2.6, deepseek-chat-v4, …) think by
+    // default server-side. Without capture+echo the provider rejects the
+    // first multi-turn tool loop ("reasoning_content is missing in assistant
+    // tool call message") — so even profiles with no explicit reasoning get
+    // capture+echo, just no effort hint. DeepSeek-R1 is the documented
+    // exception: it rejects echoed reasoning, so capture only.
+    compatOpts.reasoning = { echo: !/deepseek-r1/i.test(model) };
   }
   return new OpenAICompatAdapter(compatOpts);
 }
@@ -424,8 +433,12 @@ function defaultModelFor(providerId: string): string {
   return known?.defaultModels[0] ?? "gpt-4.1";
 }
 
-function defaultBaseURLFor(providerId: string): string {
+/** Default REST base URL per provider. Exported for the Garage's live
+ * model-listing endpoint, which needs the same resolution outside an adapter. */
+export function defaultBaseURLFor(providerId: string): string {
   switch (providerId) {
+    case "anthropic":
+      return "https://api.anthropic.com/v1";
     case "openai":
       return "https://api.openai.com/v1";
     case "openrouter":
