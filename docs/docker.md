@@ -13,6 +13,22 @@ your host. You talk to it over the same API-key-secured HTTP/WS API.
                                    └───────────────────────────────────────┘
 ```
 
+## Prebuilt images (GHCR)
+
+CI publishes three images on every push to `main` (and `v*` tags):
+
+```bash
+docker pull ghcr.io/porkytheblack/glorp/garage:latest           # lean Garage API
+docker pull ghcr.io/porkytheblack/glorp/garage-full:latest      # + media/document toolchain
+docker pull ghcr.io/porkytheblack/glorp/garage-allinone:latest  # Garage + dashboard + MCP + companion
+```
+
+(The pre-rename `station`/`station-full` names are frozen — new pushes land on
+the `garage*` names only.) The all-in-one image bakes the dashboard's Garage URL
+as `http://localhost:4271`, which suits local published-port runs; for a remote
+URL, build from source with `--build-arg GARAGE_URL=…` or use a same-origin
+reverse proxy.
+
 ## Quick start
 
 ```bash
