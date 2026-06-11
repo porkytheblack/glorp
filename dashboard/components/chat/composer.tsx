@@ -24,12 +24,18 @@ export function Composer({
   commands?: SlashCommand[];
 }) {
   const [text, setText] = React.useState("");
+  const [caret, setCaret] = React.useState(0);
   const [slashIdx, setSlashIdx] = React.useState(0);
   const [slashDismissed, setSlashDismissed] = React.useState(false);
   const ref = React.useRef<HTMLTextAreaElement>(null);
 
-  // The menu engages while the message is a bare leading "/token".
-  const slashQuery = /^\/([a-z0-9_-]*)$/i.exec(text)?.[1] ?? null;
+  // The menu engages while the caret sits in a "/token" — anywhere in the
+  // message, as long as the slash follows start-of-text or whitespace
+  // (mirrors glove's own directive parser).
+  const beforeCaret = text.slice(0, caret);
+  const slashMatch = /(^|\s)\/([a-z0-9_-]*)$/i.exec(beforeCaret);
+  const slashQuery = slashMatch?.[2] ?? null;
+  const tokenStart = slashMatch ? beforeCaret.length - slashMatch[2]!.length - 1 : -1;
   const slashMatches =
     slashQuery !== null && !slashDismissed
       ? commands.filter((c) => c.name.slice(1).toLowerCase().startsWith(slashQuery.toLowerCase())).slice(0, 8)
@@ -37,9 +43,17 @@ export function Composer({
   const slashOpen = slashMatches.length > 0;
 
   const pickSlash = (cmd: SlashCommand) => {
-    setText(`${cmd.name} `);
+    const next = `${text.slice(0, tokenStart)}${cmd.name} ${text.slice(caret)}`;
+    const newCaret = tokenStart + cmd.name.length + 1;
+    setText(next);
     setSlashIdx(0);
-    ref.current?.focus();
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(newCaret, newCaret);
+      setCaret(newCaret);
+    });
   };
 
   const grow = React.useCallback(() => {
@@ -69,9 +83,11 @@ export function Composer({
           placeholder={disabled ? "Session offline…" : "Message Glorp…"}
           onChange={(e) => {
             setText(e.target.value);
+            setCaret(e.target.selectionStart ?? e.target.value.length);
             setSlashDismissed(false);
             setSlashIdx(0);
           }}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onKeyDown={(e) => {
             if (slashOpen) {
               if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx((i) => (i + 1) % slashMatches.length); return; }

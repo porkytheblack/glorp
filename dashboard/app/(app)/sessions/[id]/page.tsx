@@ -23,11 +23,15 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const { id } = use(params);
   const { data: session, loading, error } = useQuery<SessionDto>(`/sessions/${id}`);
   const profiles = useQuery<{ profiles: ProfileWire[] }>("/models/profiles");
-  const extensions = useQuery<{ slash: Array<{ name: string; description: string }> }>(`/sessions/${id}/extensions`);
-  // /quit and /help are TUI affordances — the dashboard has its own surfaces.
-  const commands = (extensions.data?.slash ?? []).filter((c) => c.name !== "/quit" && c.name !== "/help");
+
   const { identity } = useAuth();
   const live = useSession(id);
+  // The agent (and therefore its command catalogue) is built lazily on the
+  // first WS connect — refetch once the socket is live so the slash menu has
+  // real data instead of the pre-build empty list.
+  const extensions = useQuery<{ slash: Array<{ name: string; description: string }> }>(`/sessions/${id}/extensions`, [live.connected]);
+  // /quit and /help are TUI affordances — the dashboard has its own surfaces.
+  const commands = (extensions.data?.slash ?? []).filter((c) => c.name !== "/quit" && c.name !== "/help");
   const [panel, setPanel] = useState(true);
   const [pickedModel, setPickedModel] = useState<string | null>(null);
 
