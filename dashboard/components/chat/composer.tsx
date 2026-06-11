@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CircleStop, SendHorizontal } from "lucide-react";
+import { CircleStop, ImagePlus, SendHorizontal, X } from "lucide-react";
 import { Spinner } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { SlashMenu, type SlashCommand } from "./slash-menu";
@@ -18,7 +18,7 @@ export function Composer({
 }: {
   busy: boolean;
   disabled?: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, images?: Array<{ data: string; media_type: string }>) => void;
   onStop: () => void;
   controls?: React.ReactNode;
   commands?: SlashCommand[];
@@ -27,7 +27,22 @@ export function Composer({
   const [caret, setCaret] = React.useState(0);
   const [slashIdx, setSlashIdx] = React.useState(0);
   const [slashDismissed, setSlashDismissed] = React.useState(false);
+  const [images, setImages] = React.useState<Array<{ data: string; media_type: string; preview: string }>>([]);
   const ref = React.useRef<HTMLTextAreaElement>(null);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  const addImageFiles = React.useCallback((files: Iterable<File>) => {
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = String(reader.result);
+        const data = url.slice(url.indexOf(",") + 1); // strip the data: prefix
+        setImages((prev) => (prev.length >= 6 ? prev : [...prev, { data, media_type: file.type, preview: url }]));
+      };
+      reader.readAsDataURL(file);
+    }
+  }, []);
 
   // The menu engages while the caret sits in a "/token" — anywhere in the
   // message, as long as the slash follows start-of-text or whitespace
@@ -66,15 +81,34 @@ export function Composer({
   React.useEffect(grow, [text, grow]);
 
   const submit = () => {
-    if (!text.trim() || disabled) return;
-    onSend(text);
+    if ((!text.trim() && images.length === 0) || disabled) return;
+    onSend(text, images.length ? images.map(({ data, media_type }) => ({ data, media_type })) : undefined);
     setText("");
+    setImages([]);
   };
 
   return (
     <div className="border-t border-border bg-background px-4 py-3.5 md:px-6">
       <div className="group relative mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-2.5 shadow-card transition-shadow focus-within:border-brand/40 focus-within:shadow-glow">
         {slashOpen && <SlashMenu commands={slashMatches} activeIndex={slashIdx} onPick={pickSlash} />}
+        {images.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-2 pb-1 pt-1.5">
+            {images.map((img, i) => (
+              <span key={i} className="group/img relative overflow-hidden rounded-md border border-border shadow-sheen">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={img.preview} alt="attachment" className="size-14 object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                  className="absolute right-0.5 top-0.5 grid size-4 place-items-center rounded-full bg-background/80 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/img:opacity-100"
+                  title="Remove image"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <textarea
           ref={ref}
           rows={1}
@@ -88,6 +122,13 @@ export function Composer({
             setSlashIdx(0);
           }}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+          onPaste={(e) => {
+            const files = [...e.clipboardData.items].filter((it) => it.kind === "file").map((it) => it.getAsFile()).filter((f): f is File => Boolean(f));
+            if (files.length) {
+              e.preventDefault();
+              addImageFiles(files);
+            }
+          }}
           onKeyDown={(e) => {
             if (slashOpen) {
               if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx((i) => (i + 1) % slashMatches.length); return; }
@@ -103,7 +144,29 @@ export function Composer({
           className="max-h-[200px] min-h-[24px] w-full resize-none bg-transparent px-2.5 py-1.5 text-[13.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-60"
         />
         <div className="flex items-center justify-between gap-2 border-t border-border/70 pt-2.5">
-          <div className="flex min-w-0 items-center gap-1">{controls}</div>
+          <div className="flex min-w-0 items-center gap-1">
+            {controls}
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={disabled}
+              className="grid size-8 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+              title="Attach image (or paste one)"
+            >
+              <ImagePlus className="size-4" />
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) addImageFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
           <div className="flex shrink-0 items-center gap-2.5">
             {busy ? (
               <>
@@ -119,7 +182,7 @@ export function Composer({
                   <span className="mx-1 text-faint/60">·</span>
                   <kbd className="rounded border border-border bg-surface-2 px-1 py-0.5 font-mono text-[10px]">⇧↵</kbd> newline
                 </span>
-                <Button size="sm" onClick={submit} disabled={!text.trim() || disabled} title="Send">
+                <Button size="sm" onClick={submit} disabled={(!text.trim() && images.length === 0) || disabled} title="Send">
                   {disabled ? <Spinner /> : <SendHorizontal />} Send
                 </Button>
               </>

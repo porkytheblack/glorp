@@ -173,7 +173,12 @@ export function useSession(id: string) {
   }, [id]);
 
   const raw = useCallback((msg: Record<string, unknown>) => wsRef.current?.send(JSON.stringify(msg)), []);
-  const send = useCallback((text: string) => text.trim() && raw({ type: "send_message", text: text.trim() }), [raw]);
+  const send = useCallback(
+    (text: string, images?: Array<{ data: string; media_type: string }>) =>
+      (text.trim() || images?.length) &&
+      raw({ type: "send_message", text: text.trim(), ...(images?.length ? { images } : {}) }),
+    [raw],
+  );
   const abort = useCallback(() => raw({ type: "abort" }), [raw]);
   const resolvePermission = useCallback((slotId: string, allow: boolean) => raw({ type: "resolve_permission", slot_id: slotId, allow }), [raw]);
   const setMode = useCallback((mode: string) => raw({ type: "set_permission_mode", mode }), [raw]);
