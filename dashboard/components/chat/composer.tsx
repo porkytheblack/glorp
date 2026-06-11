@@ -91,8 +91,8 @@ export function Composer({
   };
 
   return (
-    <div className="border-t border-border bg-background px-4 py-3.5 md:px-6">
-      <div className="group relative mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-2.5 shadow-card transition-shadow focus-within:border-brand/40 focus-within:shadow-glow">
+    <div className="border-t border-border bg-background px-6 py-3.5 md:px-8">
+      <div className="group relative w-full rounded-xl border border-border bg-card p-2.5 shadow-card transition-shadow focus-within:border-brand/40 focus-within:shadow-glow">
         {slashOpen && <SlashMenu commands={slashMatches} activeIndex={slashIdx} onPick={pickSlash} />}
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2 px-2 pb-1 pt-1.5">

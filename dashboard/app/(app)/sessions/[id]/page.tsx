@@ -14,6 +14,7 @@ import { Composer } from "@/components/chat/composer";
 import { PermissionPrompt } from "@/components/chat/permission-prompt";
 import { Inspector } from "@/components/session/inspector";
 import { ModelSwitcher } from "@/components/session/model-switcher";
+import { SessionSwitcher } from "@/components/session/session-switcher";
 import { ReasoningKnob } from "@/components/session/reasoning-knob";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -71,7 +72,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             )}
           </div>
           <div className="flex min-w-0 items-center gap-3">
-            <h1 className="truncate text-[17px] font-semibold tracking-tight">{title}</h1>
+            <SessionSwitcher currentId={id} title={title} />
             <SessionStatus state={state} className="shrink-0" />
           </div>
         </div>
@@ -128,8 +129,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           <div className="flex min-w-0 flex-1 flex-col">
             <Conversation items={live.items} streaming={live.streaming} busy={live.busy} userInitial={userInitial} className="flex-1" />
             {permSlots.length > 0 && (
-              <div className="px-4 md:px-6">
-                <div className="w-full max-w-3xl space-y-2 pb-1">
+              <div className="px-6 md:px-8">
+                <div className="w-full space-y-2 pb-1">
                   {permSlots.map((s) => (
                     <PermissionPrompt key={s.slotId} slot={s} onResolve={live.resolvePermission} />
                   ))}
