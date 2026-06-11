@@ -118,6 +118,10 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     async removeAgent(id) { abortController?.abort(); await removeAgentOp(activationDeps, state, id); },
     async hydrateUi() {
       await hydrateUiSession(state.active.store, bridge, state.contextLimit);
+      // Tell (re)connecting clients the CURRENT busy state: busy events only
+      // fire at turn boundaries, so a client that joins mid-turn would render
+      // "idle" — no Stop button, composer armed — while the agent is working.
+      bridge.emit({ type: "busy", busy });
       // Replay pending display slots (permission prompts, pickers): they live
       // only in the display manager, so a client that connected after the push
       // — or is resyncing — would otherwise never see them and the agent would

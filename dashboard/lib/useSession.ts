@@ -147,6 +147,7 @@ export function useSession(id: string) {
       ws.send(JSON.stringify({ type: "resync" }));
     };
     ws.onclose = () => setConnected(false);
+    let wasBusy = false;
     ws.onmessage = (e) => {
       try {
         const env = JSON.parse(String(e.data));
@@ -154,8 +155,13 @@ export function useSession(id: string) {
         dispatch(ev);
         // A finished turn may include work from before this client connected
         // (the launch flow posts the first message before navigating) — pull a
-        // fresh hydrate so the transcript is always complete.
-        if (ev.type === "busy" && ev.busy === false) ws.send(JSON.stringify({ type: "resync" }));
+        // fresh hydrate so the transcript is always complete. Only on the
+        // busy true→false TRANSITION: hydrate itself re-emits the current
+        // busy state, so resyncing on every busy:false would loop forever.
+        if (ev.type === "busy") {
+          if (wasBusy && ev.busy === false) ws.send(JSON.stringify({ type: "resync" }));
+          wasBusy = Boolean(ev.busy);
+        }
       } catch {
         /* ignore non-JSON frames */
       }
