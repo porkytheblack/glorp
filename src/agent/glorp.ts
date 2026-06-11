@@ -25,6 +25,8 @@ import { loadRoster, saveRoster } from "./runtime/agent-roster.ts";
 import { resolveSessionPaths } from "./session-paths.ts";
 import { SessionErrorLog, setActiveErrorLog } from "./runtime/error-log.ts";
 import { PermissionDM } from "./runtime/permission-mode.ts";
+import { classifyModelError } from "../shared/error-classify.ts";
+import { estimateContextPressure } from "./runtime/context-pressure.ts";
 import { teardownAgentMesh } from "../orchestrator/mesh-setup.ts";
 import { agentId as toAgentId } from "../orchestrator/types.ts";
 import { discoverWorkspaceContext } from "../orchestrator/workspace-context.ts";
@@ -57,7 +59,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const labelListeners = new Set<(label: string) => void>();
   const diskExtensions = discoverExtensions(opts.workspace);
 
-  bridgeDisplaySlots(rawDM, bridge);
+  const slotBridge = bridgeDisplaySlots(rawDM, bridge);
   const meshDir = paths.meshDir;
   const loopRefresh = { stats: async () => {}, plan: async () => {}, tasks: async () => {}, inbox: async () => {} };
   const wsPrompt = (await discoverWorkspaceContext(opts.workspace)).promptBlock;
@@ -117,6 +119,24 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     async removeAgent(id) { abortController?.abort(); await removeAgentOp(activationDeps, state, id); },
     async hydrateUi() {
       await hydrateUiSession(state.active.store, bridge, state.contextLimit);
+      // Tell (re)connecting clients the CURRENT busy state: busy events only
+      // fire at turn boundaries, so a client that joins mid-turn would render
+      // "idle" — no Stop button, composer armed — while the agent is working.
+      bridge.emit({ type: "busy", busy });
+      // Replay pending display slots (permission prompts, pickers): they live
+      // only in the display manager, so a client that connected after the push
+      // — or is resyncing — would otherwise never see them and the agent would
+      // hang on pushAndWait forever. Reducers upsert by slotId, so this is
+      // idempotent for clients that already have the slot.
+      for (const slot of slotBridge.openSlots()) {
+        bridge.emit({ type: "display_slot_pushed", slot });
+      }
+      for (const f of orchestrator.openForwardedSlots()) {
+        bridge.emit({
+          type: "display_slot_pushed",
+          slot: { slotId: f.slotId, renderer: f.renderer, input: f.input, createdAt: f.createdAt, isPermissionRequest: f.renderer === "permission_request" },
+        });
+      }
       hydrateAgentRecords(await orchestrator.loadPersistedAgents(), bridge);
       await state.active.titleScheduler.refreshTitle();
       state.active.titleScheduler.schedule();
@@ -156,26 +176,84 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     async send(text, images) {
       abortController?.abort();
       await state.active.titleScheduler.cancel();
+      // An aborted/errored previous turn can leave dangling tool calls (or
+      // late results out of position) — strict providers reject the replay.
+      // Heal the history before the new turn touches the model.
+      state.active.store.repairToolFlow();
       state.active.verification.onUserTurn();
       abortController = new AbortController();
       busy = true;
       state.active.titleScheduler.setRequestInFlight(true);
       bridge.emit({ type: "busy", busy: true });
       bridge.emit({ type: "turn", turn: userTurn(text, images?.length) });
+      // Honest-status watchdog: the model call can sit silent for minutes
+      // (provider-side retry sleeps on 429, cold queues). Tick a model_status
+      // event whenever nothing has streamed for ~10s so UIs can say "waiting
+      // on the model" instead of looking frozen.
+      let lastActivity = Date.now();
+      let wasWaiting = false;
+      const unsubWatch = bridge.subscribe((ev) => {
+        if (ev.type === "text_delta" || ev.type === "tool_started" || ev.type === "turn") {
+          lastActivity = Date.now();
+          if (wasWaiting) {
+            wasWaiting = false;
+            bridge.emit({ type: "model_status", state: "active" });
+          }
+        }
+      });
+      const watchTimer = setInterval(() => {
+        const silentSec = Math.round((Date.now() - lastActivity) / 1000);
+        if (silentSec >= 10) {
+          wasWaiting = true;
+          bridge.emit({ type: "model_status", state: "waiting", elapsedSec: silentSec });
+        }
+      }, 5_000);
       try {
         const buildPrompt = parseBuildCommand(text);
         if (buildPrompt) {
           await runOrchestratorBuild(orchestrator, bridge, opts.workspace, buildPrompt, abortController.signal);
         } else {
-          const request = buildRequest(text, images);
+          // Early compaction: when the projected request is heavy (long live
+          // window, attached images), run glove's /compact hook FIRST in the
+          // same turn — the hook force-compacts, then the message proceeds
+          // against the fresh window. Waiting for glove's own threshold has
+          // been observed to let quality collapse before it fires.
+          let outgoing = text;
+          if (!/(^|\s)\/compact(\s|$)/.test(text)) {
+            const pressure = estimateContextPressure(
+              await state.active.store.getDisplayMessages(),
+              state.contextLimit,
+              images?.length ?? 0,
+            );
+            if (pressure.pressured) {
+              outgoing = `/compact ${text}`;
+              bridge.emit({ type: "turn", turn: systemTurn("context compacted automatically before this turn") });
+            }
+          }
+          const request = buildRequest(outgoing, images);
           await state.active.agent.processRequest(request, abortController.signal);
           await continueIfIntentOnly({ agent: state.active.agent, store: state.active.store, signal: abortController.signal });
           await continueOpenTasks({ agent: state.active.agent, store: state.active.store, signal: abortController.signal });
         }
       } catch (err: any) {
         if (err?.name === "AbortError") bridge.emit({ type: "turn", turn: systemTurn("aborted") });
-        else bridge.emit({ type: "error", message: err?.message ?? String(err), detail: err?.stack });
+        else {
+          // Human headline + recovery hint up front; the raw error and stack
+          // stay on `detail` for the collapsed technical view and error log.
+          const c = classifyModelError(err);
+          bridge.emit({
+            type: "error",
+            message: c.title,
+            detail: [err?.message ?? String(err), err?.stack].filter(Boolean).join("\n"),
+            kind: c.kind,
+            hint: c.hint,
+            ...(c.retryAfterSec ? { retryAfterSec: c.retryAfterSec } : {}),
+          });
+        }
       } finally {
+        clearInterval(watchTimer);
+        unsubWatch();
+        if (wasWaiting) bridge.emit({ type: "model_status", state: "active" });
         state.active.titleScheduler.setRequestInFlight(false);
         busy = false;
         bridge.emit({ type: "busy", busy: false });

@@ -43,6 +43,11 @@ function bridgeEventToAction(ev: BridgeEvent): UiAction | null {
     case "permission_mode_changed": return { kind: "permission_mode_changed", mode: ev.mode as UiState["permissionMode"] };
     case "session_reset": return { kind: "session_reset" };
     case "error": return { kind: "error", message: ev.message };
+    // Status telemetry consumed by the dashboard; the TUI renders its own
+    // spinner/queue affordances, so these are deliberate no-ops here.
+    case "model_status":
+    case "queue_depth":
+      return null;
   }
 }
 

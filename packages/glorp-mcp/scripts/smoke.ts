@@ -1,6 +1,6 @@
 /**
  * Live smoke test: link an MCP Client to our server in-process (InMemoryTransport)
- * and exercise the orchestration tools against a real Station.
+ * and exercise the orchestration tools against a real Garage.
  *   GLORP_ENDPOINT=… GLORP_API_KEY=glsk_… bun scripts/smoke.ts
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

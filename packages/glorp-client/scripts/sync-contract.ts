@@ -1,5 +1,5 @@
 /**
- * Vendors the Station wire contract into the kit. `src/station/contract.ts` is
+ * Vendors the Garage wire contract into the kit. `src/garage/contract.ts` is
  * the single source of truth (and `contract.guard.ts` keeps it in step with the
  * server DTOs); this copies it verbatim so the published package has zero
  * imports back into the app. Run `--check` in CI to fail on drift.
@@ -13,10 +13,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SRC = join(here, "../../../src/station/contract.ts");
+const SRC = join(here, "../../../src/garage/contract.ts");
 const OUT = join(here, "../src/contract.ts");
 const HEADER =
-  "// GENERATED from src/station/contract.ts by packages/glorp-client/scripts/sync-contract.ts.\n" +
+  "// GENERATED from src/garage/contract.ts by packages/glorp-client/scripts/sync-contract.ts.\n" +
   "// Do not edit — run `bun run client:sync` after changing the server contract.\n\n";
 
 const expected = HEADER + readFileSync(SRC, "utf8");

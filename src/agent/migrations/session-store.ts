@@ -6,6 +6,7 @@
 
 import { Migrator, type Migration } from "./engine.ts";
 import type { Snapshot } from "../store-snapshot.ts";
+import { repairToolFlow } from "../runtime/tool-flow-repair.ts";
 
 type VersionedSnapshot = Snapshot & { version: number };
 
@@ -30,6 +31,36 @@ const migrations: Migration[] = [
         tokensOut: typeof doc.tokensOut === "number" ? doc.tokensOut : 0,
         turnCount: typeof doc.turnCount === "number" ? doc.turnCount : 0,
       };
+    },
+  },
+  {
+    to: 2,
+    description:
+      "backfill reasoning_content on assistant tool-call messages captured " +
+      "before reasoning capture was always-on — default-thinking providers " +
+      "(kimi-k2.6 et al.) 400 a replayed tool-call turn that lacks it",
+    up(doc) {
+      const messages = Array.isArray(doc.messages) ? doc.messages : [];
+      return {
+        ...doc,
+        messages: messages.map((m: any) =>
+          m && m.sender === "agent" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0 &&
+          !(typeof m.reasoning_content === "string" && m.reasoning_content.length > 0)
+            ? { ...m, reasoning_content: " " }
+            : m,
+        ),
+      };
+    },
+  },
+  {
+    to: 3,
+    description:
+      "repair tool-call/result flow: aborted turns left dangling tool_calls " +
+      "with late or missing results — strict providers (Moonshot Kimi) reject " +
+      "the replay unless every tool_calls message is followed by its results",
+    up(doc) {
+      const messages = Array.isArray(doc.messages) ? doc.messages : [];
+      return { ...doc, messages: repairToolFlow(messages as never) };
     },
   },
 ];

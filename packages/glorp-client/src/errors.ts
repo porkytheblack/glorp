@@ -1,4 +1,4 @@
-/** A non-2xx response from a Station server. Mirrors `StationRemoteError`. */
+/** A non-2xx response from a Garage server. Mirrors `GarageRemoteError`. */
 export class GlorpRemoteError extends Error {
   readonly status: number;
   readonly code: string;

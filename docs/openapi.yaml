@@ -1,12 +1,12 @@
 openapi: 3.1.0
 info:
-  title: Glorp Station API
+  title: Glorp Garage API
   version: "1"
   description: >
-    Remote control plane for Glorp Station: create workspaces and run coding
+    Remote control plane for Glorp Garage: create workspaces and run coding
     agents over an API-key-secured HTTP/WS API. All endpoints are served under
     the stable `/api/v1` prefix (and, for backwards compatibility, at the root).
-    Auth is required whenever Station is bound to a non-loopback host.
+    Auth is required whenever Garage is bound to a non-loopback host.
 
 
     Multi-tenancy: an admin key can provision isolated **namespaces** (one per
@@ -19,7 +19,7 @@ servers:
     variables:
       endpoint:
         default: http://127.0.0.1:4271
-        description: Base URL of the Station server.
+        description: Base URL of the Garage server.
 
 security:
   - bearerAuth: []
@@ -418,7 +418,7 @@ paths:
       summary: Destroy a session
       parameters:
         - { $ref: "#/components/parameters/Id" }
-        - { name: workspace, in: query, schema: { type: boolean }, description: "Also delete the workspace folder — but only if it is a Station-provisioned sandbox (under workspaceRoot) that no other session references. Caller-supplied and shared workspaces are always kept." }
+        - { name: workspace, in: query, schema: { type: boolean }, description: "Also delete the workspace folder — but only if it is a Garage-provisioned sandbox (under workspaceRoot) that no other session references. Caller-supplied and shared workspaces are always kept." }
       responses:
         "204": { description: Destroyed }
   /sessions/{id}/messages:

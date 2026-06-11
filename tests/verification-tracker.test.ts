@@ -155,6 +155,7 @@ describe("VerificationTracker.observe", () => {
       lastVerifiedAt: null,
       lastVerificationKind: null,
       failedVerifications: [],
+      futileReadCount: 0,
     });
   });
 });
@@ -367,5 +368,49 @@ describe("GlorpStore.getMessages — verification injection end-to-end", () => {
     const msgs = await store.getMessages();
     const verification = msgs.find((m) => m.is_skill_injection && m.text.includes("Unverified mutations"));
     expect(verification).toBeUndefined();
+  });
+});
+
+describe("verification stall off-ramp (the noble-lynx loop)", () => {
+  test("re-reading pending code counts as futile and surfaces in status", () => {
+    const t = new VerificationTracker();
+    t.recordMutation("src/api/routes.ts");
+    // Re-reading code does NOT clear it (only objective checks do)…
+    t.observe("read", { file_path: "src/api/routes.ts" }, { status: "success", data: "" });
+    t.observe("read", { file_path: "src/api/routes.ts" }, { status: "success", data: "" });
+    const s = t.status();
+    expect(s.pendingFiles).toEqual(["src/api/routes.ts"]);
+    expect(s.futileReadCount).toBe(2);
+  });
+
+  test("a passing objective check clears the futile counter", () => {
+    const t = new VerificationTracker();
+    t.recordMutation("src/api/routes.ts");
+    t.observe("read", { file_path: "src/api/routes.ts" }, { status: "success", data: "" });
+    t.observe("bash", { command: "bun test" }, { status: "success", data: "ok" });
+    expect(t.status().futileReadCount).toBe(0);
+    expect(t.status().pendingFiles).toEqual([]);
+  });
+
+  test("a new user turn resets futility (the user moved the goalposts)", () => {
+    const t = new VerificationTracker();
+    t.recordMutation("a.ts");
+    t.observe("read", { file_path: "a.ts" }, { status: "success", data: "" });
+    t.observe("read", { file_path: "a.ts" }, { status: "success", data: "" });
+    t.onUserTurn();
+    expect(t.status().futileReadCount).toBe(0);
+  });
+});
+
+describe("verificationStalled", () => {
+  const { verificationStalled } = require("../src/agent/session-state.ts");
+  test("futile re-reads or repeated same-kind failures trip the stall", () => {
+    expect(verificationStalled({ pendingFiles: ["a.ts"], lastVerifiedAt: null, lastVerificationKind: null, futileReadCount: 2 })).toBe(true);
+    expect(verificationStalled({ pendingFiles: [], lastVerifiedAt: null, lastVerificationKind: null, failedVerifications: [
+      { kind: "bun test", message: "exit 1", commandHead: "bun test", at: 1 },
+      { kind: "bun test", message: "exit 1", commandHead: "bun test", at: 2 },
+      { kind: "bun test", message: "exit 1", commandHead: "bun test", at: 3 },
+    ] })).toBe(true);
+    expect(verificationStalled({ pendingFiles: ["a.ts"], lastVerifiedAt: null, lastVerificationKind: null, futileReadCount: 1 })).toBe(false);
   });
 });

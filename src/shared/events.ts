@@ -140,7 +140,21 @@ export type BridgeEvent =
   | { type: "compaction"; phase: "start" | "end" }
   | { type: "subagent"; name: string; phase: "start" | "end"; status?: "success" | "error"; message?: string }
   | { type: "transmission"; payload: string; severity: "low" | "medium" | "high" }
-  | { type: "error"; message: string; detail?: string }
+  | {
+      type: "error";
+      message: string;
+      detail?: string;
+      /** Classification so UIs can render a human headline + recovery action
+       * instead of a raw stack trace (see shared/error-classify.ts). */
+      kind?: "config" | "auth" | "modality" | "rate_limit" | "quota" | "network" | "upstream" | "internal";
+      hint?: string;
+      retryAfterSec?: number;
+    }
+  /** The model call is in flight but silent (e.g. provider-side retry sleeps).
+   * Emitted periodically while waiting so UIs can show honest progress. */
+  | { type: "model_status"; state: "waiting" | "active"; elapsedSec?: number }
+  /** Messages waiting behind the running turn (per-session FIFO). */
+  | { type: "queue_depth"; depth: number }
   | { type: "hook"; name: string }
   | { type: "skill"; name: string; source: "user" | "agent" }
   | { type: "display_slot_pushed"; slot: DisplaySlotEvent }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as fs from "node:fs";
 import type { GloveFoldArgs } from "glove-core/glove";
-import { resolveSafePath, relPath, isFile } from "./fs-shared.ts";
+import { extensionReadRoots, resolveSafePath, relPath, isFile } from "./fs-shared.ts";
 
 /**
  * Lets the agent actually *see* an image file — a screenshot it captured, a
@@ -48,7 +48,7 @@ export function viewImageTool(workspace: string): GloveFoldArgs<{ path: string }
       path: z.string().describe("Path to the image file (absolute or relative to the workspace)"),
     }),
     async do(input) {
-      const abs = resolveSafePath(workspace, input.path);
+      const abs = resolveSafePath(workspace, input.path, extensionReadRoots(workspace));
       const rel = relPath(workspace, abs);
       if (!(await isFile(abs))) {
         return { status: "error", data: null, message: `Not a file: ${rel}` };

@@ -22,6 +22,10 @@ import { GLORP_IMAGE_RENDER_KEY } from "../tools/view-image.ts";
 
 /** Cap how many images we re-send per request so context can't balloon. */
 const MAX_IMAGES_PER_REQUEST = 4;
+/** User-pasted images persist in history; only the most recent N still travel
+ * to the model. Older ones are replaced with a marker — a 400kB screenshot
+ * re-sent on every turn of a long session burns context for nothing. */
+const MAX_USER_IMAGES_PER_REQUEST = 2;
 
 interface ImagePayload { media_type: string; data: string; }
 
@@ -30,7 +34,8 @@ export function withImageToolResults(model: ModelAdapter): ModelAdapter {
     get name() { return model.name; },
     setSystemPrompt(sp: string) { model.setSystemPrompt(sp); },
     prompt(request, notify, signal) {
-      const messages = injectImageMessages(request.messages);
+      let messages = injectImageMessages(request.messages);
+      messages = capUserImages(messages);
       if (messages === request.messages) return model.prompt(request, notify, signal);
       return model.prompt({ ...request, messages }, notify, signal);
     },
@@ -81,4 +86,37 @@ function readImagePayload(result: unknown): ImagePayload | null {
     return { media_type: img.media_type, data: img.data };
   }
   return null;
+}
+
+/**
+ * Keep only the most recent N user-attached images in the outgoing request;
+ * older image parts become a short text marker. Operates on the request copy
+ * only — stored history keeps every image, so a later turn can still surface
+ * a newer one.
+ */
+export function capUserImages(messages: Message[]): Message[] {
+  const indices: Array<{ msg: number; part: number }> = [];
+  messages.forEach((m, mi) => {
+    if (m.sender !== "user" || !Array.isArray(m.content)) return;
+    m.content.forEach((p, pi) => {
+      if (p.type === "image") indices.push({ msg: mi, part: pi });
+    });
+  });
+  if (indices.length <= MAX_USER_IMAGES_PER_REQUEST) return messages;
+
+  const drop = new Set(
+    indices.slice(0, indices.length - MAX_USER_IMAGES_PER_REQUEST).map((x) => `${x.msg}:${x.part}`),
+  );
+  return messages.map((m, mi) => {
+    if (m.sender !== "user" || !Array.isArray(m.content)) return m;
+    if (!m.content.some((p, pi) => drop.has(`${mi}:${pi}`))) return m;
+    return {
+      ...m,
+      content: m.content.map((p, pi) =>
+        drop.has(`${mi}:${pi}`)
+          ? ({ type: "text", text: "[earlier attached image omitted to conserve context]" } as ContentPart)
+          : p,
+      ),
+    };
+  });
 }

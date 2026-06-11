@@ -2,7 +2,7 @@
 
 Code-level internals documentation for the Glorp source tree. These docs describe
 **how the code is structured and works**, complementing the user-facing guides in
-[`../`](../) (station usage/spec, docker, the OpenAPI schema).
+[`../`](../) (garage usage/spec, docker, the OpenAPI schema).
 
 > **Scope note.** The `dashboard/` web frontend is intentionally **not documented
 > here** — it is being deprecated. Everything else under `src/` and `packages/` is
@@ -16,7 +16,7 @@ Code-level internals documentation for the Glorp source tree. These docs describ
 | [tui.md](./tui.md) | **TUI frontend** — OpenTUI/React layout, the bridge wire-events, state reducer, components | `src/tui/**`, `src/ui/**`, `src/shared/**` |
 | [orchestrator.md](./orchestrator.md) | **Orchestrator & mesh** — the generate-evaluate loop, roles/blueprints, agent spawning, filesystem mesh | `src/orchestrator/**`, `src/agent/glorp.ts` |
 | [networking.md](./networking.md) | **Networking & client SDK** — REST + WebSocket server, in-repo client, the standalone `@porkytheblack/glorp-client` SDK, wire protocol | `src/server/**`, `src/client/**`, `src/protocol/**`, `packages/glorp-client/**` |
-| [station-internals.md](./station-internals.md) | **Station runtime internals** — route handlers, auth/KeyStore, session/workspace lifecycle, credentials (code-level companion to `../station-usage.md`) | `src/station/**`, `src/cli-station.ts` |
+| [garage-internals.md](./garage-internals.md) | **Garage runtime internals** — route handlers, auth/KeyStore, session/workspace lifecycle, credentials (code-level companion to `../garage-usage.md`) | `src/garage/**`, `src/cli-garage.ts` |
 | [cli-and-ops.md](./cli-and-ops.md) | **CLI & ops** — the `cli.ts` dispatch, arg parsing, subcommands, build pipeline, Docker/compose | `src/cli*.ts`, `Dockerfile`, `docker-compose.yml`, `scripts/**` |
 
 ## Notes flagged during documentation
@@ -34,7 +34,7 @@ inconsistencies — recorded here so they aren't lost, and detailed in the linke
   the README "Layout" section actually describes — still drives the same reducer
   off the in-process bridge. See [tui.md](./tui.md).
 - **Two servers, two protocols.** The in-repo `src/server/` (port 3271, `/ws`,
-  `?token=`) and the standalone SDK's Station target (port 4271, `/api/v1/...`,
+  `?token=`) and the standalone SDK's Garage target (port 4271, `/api/v1/...`,
   `?api_key=`) are different APIs with different framing. See [networking.md](./networking.md).
 - **`maxAgents` discrepancy.** Default is `5` in code (`orchestrator.ts`) vs the `8`
   in the `types.ts` comment. See [orchestrator.md](./orchestrator.md).

@@ -1,12 +1,12 @@
-// GENERATED from src/station/contract.ts by packages/glorp-client/scripts/sync-contract.ts.
+// GENERATED from src/garage/contract.ts by packages/glorp-client/scripts/sync-contract.ts.
 // Do not edit — run `bun run client:sync` after changing the server contract.
 
 /**
- * The Glorp Station **wire contract** — the public REST/WS types an external
+ * The Glorp Garage **wire contract** — the public REST/WS types an external
  * client needs. This file is intentionally SELF-CONTAINED (zero imports) so the
  * `@porkytheblack/glorp-client` kit can vendor it verbatim (see
  * `packages/glorp-client/scripts/sync-contract.ts`). Keep it in sync with
- * `src/station/types.ts`; `tests/station-contract.test.ts` enforces that the
+ * `src/garage/types.ts`; `tests/garage-contract.test.ts` enforces that the
  * REST DTOs here stay structurally identical to the canonical ones at compile
  * time. Do not add imports.
  */
@@ -59,6 +59,51 @@ export interface WorkspaceDto {
 export interface CreateWorkspaceInput {
   name?: string;
   path?: string;
+  /** Provision the (new or adopted) workspace from a named template. */
+  template?: string;
+  /** Values for the template's declared `{param:NAME}` placeholders. */
+  params?: Record<string, string>;
+}
+
+/** One declared template parameter, for client-side form rendering. */
+export interface TemplateParamDto {
+  name: string;
+  description: string | null;
+  required: boolean;
+  default: string | null;
+  secret: boolean;
+}
+
+/** Summary of a setup template returned by `GET /templates`. */
+export interface TemplateSummaryDto {
+  name: string;
+  description: string | null;
+  step_count: number;
+  repo_count: number;
+  skill_count: number;
+  mcp_count: number;
+  has_system_prompt: boolean;
+  params: TemplateParamDto[];
+}
+
+/** Secret-free remote-storage settings returned by `GET /storage`. */
+export interface StorageConfigDto {
+  enabled: boolean;
+  endpoint: string | null;
+  bucket: string | null;
+  prefix: string | null;
+  access_key_id: string | null;
+  has_secret: boolean;
+}
+
+/** Body accepted by `PUT /storage` (secret is write-only; omit to keep it). */
+export interface UpdateStorageConfigInput {
+  enabled?: boolean;
+  endpoint?: string | null;
+  bucket?: string | null;
+  prefix?: string | null;
+  access_key_id?: string | null;
+  secret_access_key?: string | null;
 }
 
 /** Body accepted by `POST /sessions` and `POST /workspaces/:id/sessions`. */
@@ -103,9 +148,18 @@ export interface FileEntry {
   modified_at: string;
 }
 
+/** Remote-mirror sync state for a session's uploads folder. */
+export interface FilesRemoteStatus {
+  enabled: boolean;
+  last_sync_at: string | null;
+  error: string | null;
+}
+
 /** Returned by `GET /sessions/:id/files` and `POST /sessions/:id/files`. */
 export interface FileListResponse {
   files: FileEntry[];
+  /** Present when a remote uploads mirror (R2) is configured. */
+  remote?: FilesRemoteStatus;
 }
 
 /**
@@ -179,7 +233,7 @@ export interface ApiKeyPublic {
 /**
  * Events streamed over a session WebSocket. This is an OPEN union: the
  * orchestration-relevant variants are typed, and the trailing member keeps it
- * forward-compatible so a client never breaks when Station adds an event. The
+ * forward-compatible so a client never breaks when Garage adds an event. The
  * authoritative, fully-typed union lives in `src/shared/events.ts`.
  */
 export type BridgeEvent =
@@ -197,7 +251,9 @@ export type BridgeEvent =
   | { type: "agent_roster"; agents: unknown[]; activeId: string }
   | { type: "display_slot_pushed"; slot: Record<string, unknown> }
   | { type: "display_slot_resolved"; slotId: string }
-  | { type: "error"; message: string; detail?: string }
+  | { type: "error"; message: string; detail?: string; kind?: "config" | "auth" | "modality" | "rate_limit" | "quota" | "network" | "upstream" | "internal"; hint?: string; retryAfterSec?: number }
+  | { type: "model_status"; state: "waiting" | "active"; elapsedSec?: number }
+  | { type: "queue_depth"; depth: number }
   // Forward-compatible fallback for every other server event.
   | { type: string; [k: string]: unknown };
 

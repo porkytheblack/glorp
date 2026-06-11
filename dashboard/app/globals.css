@@ -1,0 +1,297 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Garage design language — "sap & sunlight" (solarpunk graphite).
+ * Two modes, one structure: surfaces climb the same elevation ladder
+ * (background → card → surface-2 → elevated) in both; a single sap-green
+ * brand accent is reserved for active nav, primary actions, focus, and live
+ * state; solar amber is the working/caution warmth. Depth comes from hairline
+ * borders + a top sheen, not heavy shadows. The green and amber SHIFT per
+ * mode (light mode runs darker for contrast on cream) — structure never does.
+ */
+@layer base {
+  /* Light — "warm paper": cream surfaces, pine ink, darkened sap. */
+  :root {
+    --background: 44 51% 93%;
+    --foreground: 137 20% 14%;
+
+    --card: 44 60% 95%;
+    --card-foreground: 137 20% 14%;
+    --surface-2: 43 44% 89%;
+    --elevated: 47 90% 98%;
+
+    --popover: 46 75% 97%;
+    --popover-foreground: 137 20% 14%;
+
+    /* Brand accent (sap green) — used sparingly. */
+    --primary: 147 45% 34%;
+    --primary-foreground: 44 60% 96%;
+    --brand: 147 45% 34%;
+    --brand-foreground: 44 60% 96%;
+    --brand-strong: 147 52% 27%;
+
+    --secondary: 43 38% 87%;
+    --secondary-foreground: 137 20% 14%;
+
+    /* Three weights of quiet: muted (labels) → faint (hints) → icon dim. */
+    --muted: 43 36% 88%;
+    --muted-foreground: 110 10% 35%;
+    --faint: 105 8% 48%;
+
+    --accent: 43 40% 85%;
+    --accent-foreground: 137 20% 14%;
+
+    --destructive: 6 55% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 147 45% 32%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 76% 38%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 42 35% 81%;
+    --border-strong: 42 28% 70%;
+    --input: 42 32% 76%;
+    --ring: 147 45% 34%;
+
+    --sidebar: 44 48% 91%;
+    --sidebar-foreground: 137 15% 22%;
+    --sidebar-accent: 43 38% 85%;
+    --sidebar-border: 42 35% 84%;
+
+    --radius: 0.7rem;
+
+    /* Depth recipe (referenced from tailwind.config.ts shadows). */
+    --sheen: 0 0% 100% / 0.55;
+    --shimmer: 40 30% 20% / 0.05;
+    --shadow-card: 0 1px 2px 0 hsl(40 35% 25% / 0.1), inset 0 1px 0 0 hsl(0 0% 100% / 0.5);
+    --shadow-elevated:
+      0 16px 40px -12px hsl(40 35% 20% / 0.22), 0 4px 12px -4px hsl(40 35% 20% / 0.14),
+      inset 0 1px 0 0 hsl(0 0% 100% / 0.65);
+  }
+
+  /* Dark — "pine at dusk": green-black surfaces, luminous sap, amber glow. */
+  .dark {
+    --background: 150 25% 6%;
+    --foreground: 105 20% 92%;
+
+    --card: 150 20% 8.5%;
+    --card-foreground: 105 20% 92%;
+    --surface-2: 150 17% 11%;
+    --elevated: 150 16% 13.5%;
+
+    --popover: 150 18% 9%;
+    --popover-foreground: 105 20% 92%;
+
+    --primary: 145 44% 52%;
+    --primary-foreground: 150 25% 6%;
+    --brand: 145 44% 52%;
+    --brand-foreground: 150 25% 6%;
+    --brand-strong: 145 50% 64%;
+
+    --secondary: 150 14% 13%;
+    --secondary-foreground: 105 20% 92%;
+
+    --muted: 150 14% 12%;
+    --muted-foreground: 139 13% 66%;
+    --faint: 139 11% 46%;
+
+    --accent: 150 14% 14%;
+    --accent-foreground: 105 20% 92%;
+
+    --destructive: 6 65% 57%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 145 44% 50%;
+    --success-foreground: 150 25% 6%;
+    --warning: 39 87% 60%;
+    --warning-foreground: 150 25% 8%;
+
+    --border: 150 15% 15%;
+    --border-strong: 150 13% 23%;
+    --input: 150 13% 19%;
+    --ring: 145 44% 52%;
+
+    --sidebar: 150 24% 7%;
+    --sidebar-foreground: 105 15% 88%;
+    --sidebar-accent: 150 14% 12%;
+    --sidebar-border: 150 16% 11%;
+
+    --sheen: 0 0% 100% / 0.04;
+    --shimmer: 0 0% 100% / 0.06;
+    --shadow-card: 0 1px 2px 0 hsl(150 20% 2% / 0.5), inset 0 1px 0 0 hsl(0 0% 100% / 0.03);
+    --shadow-elevated:
+      0 16px 40px -12px hsl(150 25% 2% / 0.75), 0 4px 12px -4px hsl(150 25% 2% / 0.55),
+      inset 0 1px 0 0 hsl(0 0% 100% / 0.05);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv01" 1;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: hsl(var(--brand) / 0.3);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border-strong)) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-strong));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--faint) / 0.6);
+    background-clip: padding-box;
+  }
+}
+
+@layer components {
+  /* Faint top-lit vignette behind the whole app — barely perceptible, but it
+     keeps large fields from reading as dead flat. Light mode gets a low sun;
+     dark mode gets canopy green with an amber hint. */
+  .app-backdrop {
+    background:
+      radial-gradient(115% 80% at 50% -10%, hsl(39 85% 70% / 0.16), transparent 60%),
+      radial-gradient(90% 60% at 100% 0%, hsl(147 45% 55% / 0.1), transparent 55%),
+      hsl(var(--background));
+  }
+  .dark .app-backdrop {
+    background:
+      radial-gradient(115% 80% at 50% -10%, hsl(150 45% 14% / 0.35), transparent 60%),
+      radial-gradient(90% 60% at 100% 0%, hsl(39 60% 30% / 0.1), transparent 55%),
+      hsl(var(--background));
+  }
+  /* Surface with the signature sheen: hairline border + soft inner top edge. */
+  .surface {
+    @apply rounded-lg border border-border bg-card shadow-card;
+  }
+  /* Big, tightly-tracked display text for hero moments and metrics. */
+  .text-display {
+    font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.1rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Shimmering skeleton sweep. */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-secondary/60;
+  }
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background: linear-gradient(90deg, transparent, hsl(var(--shimmer)), transparent);
+  }
+}
+
+/* Markdown rendering inside chat (prose-lite, theme-aware). */
+@layer components {
+  .md > :first-child {
+    margin-top: 0;
+  }
+  .md > :last-child {
+    margin-bottom: 0;
+  }
+  .md p,
+  .md ul,
+  .md ol,
+  .md pre,
+  .md blockquote {
+    margin: 0.5rem 0;
+  }
+  .md ul,
+  .md ol {
+    padding-left: 1.25rem;
+  }
+  .md ul {
+    list-style: disc;
+  }
+  .md ol {
+    list-style: decimal;
+  }
+  .md li {
+    margin: 0.15rem 0;
+  }
+  .md a {
+    color: hsl(var(--brand-strong));
+    text-underline-offset: 2px;
+  }
+  .md a:hover {
+    text-decoration: underline;
+  }
+  .md code {
+    font-family: var(--font-geist-mono), monospace;
+    font-size: 0.85em;
+    background: hsl(var(--secondary));
+    border: 1px solid hsl(var(--border));
+    border-radius: 5px;
+    padding: 0.08em 0.34em;
+  }
+  .md pre {
+    background: hsl(var(--background));
+    border: 1px solid hsl(var(--border));
+    border-radius: 8px;
+    padding: 0.75rem 0.85rem;
+    overflow-x: auto;
+  }
+  .md pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+  .md h1,
+  .md h2,
+  .md h3 {
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 0.9rem 0 0.4rem;
+    letter-spacing: -0.01em;
+  }
+  .md h1 {
+    font-size: 1.05rem;
+  }
+  .md h2 {
+    font-size: 1rem;
+  }
+  .md h3 {
+    font-size: 0.95rem;
+  }
+  .md blockquote {
+    border-left: 2px solid hsl(var(--border-strong));
+    padding-left: 0.75rem;
+    color: hsl(var(--muted-foreground));
+  }
+  .md table {
+    border-collapse: collapse;
+    font-size: 0.85em;
+  }
+  .md th,
+  .md td {
+    border: 1px solid hsl(var(--border));
+    padding: 0.3rem 0.55rem;
+    text-align: left;
+  }
+}

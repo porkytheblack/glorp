@@ -1,4 +1,4 @@
-# Glorp Station in a box — a sandboxed runtime where agents can freely run tools
+# Glorp Garage in a box — a sandboxed runtime where agents can freely run tools
 # (bash, file writes, package installs, git) inside the container without ever
 # touching your host. Drive it remotely with @porkytheblack/glorp-client or curl.
 FROM oven/bun:1.3
@@ -19,10 +19,10 @@ RUN bun install --frozen-lockfile
 COPY . .
 RUN bun run prebuild
 
-# /data  → Station state (API keys + session snapshots, persisted)
+# /data  → Garage state (API keys + session snapshots, persisted)
 # /workspaces → agent working directories (persisted, isolated from /app)
 ENV GLORP_DATA_DIR=/data \
-    GLORP_STATION_AUTH=required \
+    GLORP_GARAGE_AUTH=required \
     GLORP_AUTO_KEY=1
 RUN mkdir -p /data /workspaces
 VOLUME ["/data", "/workspaces"]

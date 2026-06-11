@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolveSafePath, relPath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
+import { extensionReadRoots, resolveSafePath, relPath, globToRegex, IGNORED_DIRS } from "./fs-shared.ts";
 import { firstItems } from "./summaries.ts";
 import type { SummaryTool } from "./summaries.ts";
 
@@ -45,7 +45,7 @@ export function globTool(workspace: string): SummaryTool<{
       limit: z.number().int().min(1).max(2000).optional().describe("Max paths to return (default 500)"),
     }),
     async do(input) {
-      const root = input.path ? resolveSafePath(workspace, input.path) : workspace;
+      const root = input.path ? resolveSafePath(workspace, input.path, extensionReadRoots(workspace)) : workspace;
       const limit = input.limit ?? 500;
       const re = globToRegex(input.pattern);
       const hits: { p: string; mtime: number }[] = [];

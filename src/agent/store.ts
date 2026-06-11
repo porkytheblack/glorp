@@ -3,11 +3,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { PlanDocument } from "../shared/events.ts";
 import type { OriginalRequest, Snapshot, SnapshotMeta, StoreOptions } from "./store-snapshot.ts";
-import { firstUserRequest, latestTriggerMessage, safeFilePart } from "./store-snapshot.ts";
+import { firstUserRequest, isPleasantry, latestTriggerMessage, safeFilePart } from "./store-snapshot.ts";
 import { withSessionState } from "./session-state.ts";
 import { canonicalPermissionKey } from "./permission-key.ts";
 import { deriveProjectId } from "./workspace-id.ts";
 import { sessionMigrator, CURRENT_SESSION_VERSION } from "./migrations/session-store.ts";
+import { repairToolFlow, toolFlowIsClean } from "./runtime/tool-flow-repair.ts";
 import type { VerificationTracker } from "./runtime/verification-tracker.ts";
 
 export class GlorpStore implements StoreAdapter {
@@ -151,6 +152,15 @@ export class GlorpStore implements StoreAdapter {
     });
   }
   async getDisplayMessages(): Promise<Message[]> { return [...this.messages]; }
+
+  /** Repair dangling tool calls / out-of-position results (e.g. after an
+   * aborted turn) so the next replay satisfies strict providers. No-op when
+   * the history is already clean. */
+  repairToolFlow(): void {
+    if (toolFlowIsClean(this.messages)) return;
+    this.messages = repairToolFlow(this.messages);
+    this.scheduleFlush();
+  }
   async getTitle(): Promise<string | null> { return this.title; }
   getOriginalRequest(): OriginalRequest | null { return this.originalRequest; }
   getMetadata(): SnapshotMeta { return { ...this.metadata }; }
@@ -167,9 +177,12 @@ export class GlorpStore implements StoreAdapter {
 
   async appendMessages(msgs: Message[]): Promise<void> {
     this.messages.push(...msgs);
-    if (!this.originalRequest) {
+    // Capture the anchor — and UPGRADE it when the locked-in text was just a
+    // pleasantry ("hey") and a substantive ask arrives later, so compaction
+    // anchors the real request.
+    if (!this.originalRequest || isPleasantry(this.originalRequest.text)) {
       const first = firstUserRequest(msgs);
-      if (first) {
+      if (first && (!this.originalRequest || !isPleasantry(first.text))) {
         this.originalRequest = {
           id: first.id,
           text: first.text,

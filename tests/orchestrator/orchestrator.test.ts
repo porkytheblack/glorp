@@ -142,8 +142,9 @@ describe("Orchestrator", () => {
       const promise = dm.pushAndWait({ renderer: "permission_request", input: {} } as any)
         .catch((e: Error) => e);
 
-      // Access internal forwardedSlots map
-      (orch as any).forwardedSlots.set("fwd_test_1", dm);
+      // Access internal forwardedSlots map (entries carry the slot payload so
+      // pending slots can be replayed on hydrate)
+      (orch as any).forwardedSlots.set("fwd_test_1", { dm, renderer: "permission_request", input: {}, createdAt: Date.now() });
 
       await orch.shutdown();
 

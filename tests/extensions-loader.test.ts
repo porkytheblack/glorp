@@ -278,3 +278,27 @@ describe("discoverExtensions — ordering + sorting", () => {
     expect(bundle.shadowedSubagents).toEqual([]);
   });
 });
+
+describe("routingLine", () => {
+  const { routingLine } = require("../src/agent/extensions-loader.ts");
+
+  test("keeps short one-line descriptions verbatim", () => {
+    expect(routingLine("Reviews code for bugs.")).toBe("Reviews code for bugs.");
+  });
+
+  test("takes the first sentence of a multi-sentence description", () => {
+    const long = "Designs an executable methodology without writing code. Use this when planning. <example>lots of text</example>";
+    expect(routingLine(long)).toBe("Designs an executable methodology without writing code.");
+  });
+
+  test("hard-caps run-on first lines and marks the cut", () => {
+    const runOn = "a".repeat(500);
+    const line = routingLine(runOn);
+    expect(line.length).toBeLessThanOrEqual(220);
+    expect(line.endsWith("…")).toBe(true);
+  });
+
+  test("uses only the first line of multi-line descriptions", () => {
+    expect(routingLine("First line summary\nSecond line detail\nThird")).toBe("First line summary");
+  });
+});

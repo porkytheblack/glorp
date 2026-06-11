@@ -2,7 +2,7 @@
 
 This is a code-level reference for the agent orchestration subsystem under
 `src/orchestrator/`. It complements [`../remote-orchestration.md`](../remote-orchestration.md),
-which documents the *external* HTTP/WS API for driving Station from another machine.
+which documents the *external* HTTP/WS API for driving Garage from another machine.
 This document instead covers the *internal* machinery: how agents are
 constructed, scheduled, run as subprocesses, communicate over a filesystem mesh,
 and drive the generate-evaluate loop.

@@ -135,41 +135,55 @@ export function defineOrchestratorAgent(
       const uid = `${agentName}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
       return new GlorpStore(uid, dd);
     })
-    .factory(async (ctx) => {
-      const dataDir = process.env.GLORP_DATA_DIR ?? config.dataDir;
-      const workspace = process.env.GLORP_WORKSPACE ?? config.workspace;
-      const meshDir = process.env.GLORP_MESH_DIR ?? config.meshDir;
-      const uid = `${ctx.name}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      // ctx.store is typed as the generic StoreAdapter, but the `.store()`
-      // factory above always returns a GlorpStore — narrow it so store-backed
-      // tools (the plan tool) get the concrete type they require.
-      const store = (ctx.store as GlorpStore | undefined) ?? new GlorpStore(uid, dataDir);
-      const model = withImageToolResults(buildSubprocessModel());
+    .factory(async (ctx) => buildTriggeredRunnable(role, config, { name: ctx.name, store: ctx.store as GlorpStore | undefined, subscriber: ctx.subscriber }) as any);
+}
 
-      const builder = new Glove({
-        store, model,
-        displayManager: new NoopDisplayManager() as any,
-        serverMode: true,
-        systemPrompt: enrichWithContext(rolePrompt(role)),
-        compaction_config: { compaction_instructions: def.compaction, max_turns: def.maxTurns },
-      });
-      // Pass the agent's own store so store-backed tools (e.g. the planner's
-      // glorp_update_plan) construct correctly. Without it the generator role
-      // — the only built-in role with the plan tool — threw "Tool registry
-      // missing store" and the subprocess died ("exited unexpectedly").
-      const registry = createToolRegistry({ workspace, dataDir, store, meshDir });
-      registerTools(builder, registry, def.tools);
-      if (ctx.subscriber) builder.addSubscriber(ctx.subscriber);
-      const runnable = builder.build();
-      const meshId = `${ctx.name}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      const meshAdapter = await mountAgentMesh(runnable, meshId, meshDir, [...def.capabilities]);
-      const orig = runnable.processRequest.bind(runnable);
-      (runnable as any).processRequest = async (prompt: string, signal?: AbortSignal) => {
-        try { return await orig(prompt, signal); }
-        finally { await teardownAgentMesh(meshAdapter).catch(() => {}); }
-      };
-      return runnable as any;
-    });
+/**
+ * Construct the subprocess agent runnable for a role. Shared by the continuum
+ * factory above AND the compiled-binary self-spawn path (`glorp __agent-run`),
+ * which cannot use continuum's node bootstrap: that resolves script paths via
+ * import.meta.url, which inside a compiled binary is a virtual /$bunfs path no
+ * child process can read.
+ */
+export async function buildTriggeredRunnable(
+  role: string,
+  config: { dataDir: string; workspace: string; meshDir: string },
+  ctx: { name: string; store?: GlorpStore; subscriber?: SubscriberAdapter },
+): Promise<IGloveRunnable> {
+  const def = roleDef(role);
+  const dataDir = process.env.GLORP_DATA_DIR ?? config.dataDir;
+  const workspace = process.env.GLORP_WORKSPACE ?? config.workspace;
+  const meshDir = process.env.GLORP_MESH_DIR ?? config.meshDir;
+  const uid = `${ctx.name}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  // ctx.store is typed as the generic StoreAdapter upstream, but the `.store()`
+  // factory always returns a GlorpStore — narrow it so store-backed tools
+  // (the plan tool) get the concrete type they require.
+  const store = ctx.store ?? new GlorpStore(uid, dataDir);
+  const model = withImageToolResults(buildSubprocessModel());
+
+  const builder = new Glove({
+    store, model,
+    displayManager: new NoopDisplayManager() as any,
+    serverMode: true,
+    systemPrompt: enrichWithContext(rolePrompt(role)),
+    compaction_config: { compaction_instructions: def.compaction, max_turns: def.maxTurns },
+  });
+  // Pass the agent's own store so store-backed tools (e.g. the planner's
+  // glorp_update_plan) construct correctly. Without it the generator role
+  // — the only built-in role with the plan tool — threw "Tool registry
+  // missing store" and the subprocess died ("exited unexpectedly").
+  const registry = createToolRegistry({ workspace, dataDir, store, meshDir });
+  registerTools(builder, registry, def.tools);
+  if (ctx.subscriber) builder.addSubscriber(ctx.subscriber);
+  const runnable = builder.build();
+  const meshId = `${ctx.name}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const meshAdapter = await mountAgentMesh(runnable, meshId, meshDir, [...def.capabilities]);
+  const orig = runnable.processRequest.bind(runnable);
+  (runnable as any).processRequest = async (prompt: string, signal?: AbortSignal) => {
+    try { return await orig(prompt, signal); }
+    finally { await teardownAgentMesh(meshAdapter).catch(() => {}); }
+  };
+  return runnable;
 }
 
 /**

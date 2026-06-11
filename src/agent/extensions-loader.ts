@@ -229,6 +229,22 @@ function loadSubagentsIn(
  * the file doesn't start with `---\n`, treats the whole thing as body
  * with no frontmatter.
  */
+/**
+ * Routing one-liner for a subagent/skill description. Agent-file frontmatter
+ * descriptions are often multi-KB (usage guides, <example> blocks) — that text
+ * belongs to the subagent's own prompt. The parent's roster listings (dispatch
+ * tool + system prompt section) only need enough to route: clamping here took
+ * a real session's request from 122.6kB to ~60kB, i.e. ~2× more work per
+ * provider quota-day.
+ */
+export function routingLine(description: string, max = 220): string {
+  const firstLine = description.split("\n", 1)[0]!.trim();
+  // Prefer a sentence boundary when one lands inside the cap.
+  const sentence = firstLine.match(/^.{20,}?[.!?](?=\s|$)/)?.[0] ?? firstLine;
+  const line = sentence.length <= max ? sentence : `${sentence.slice(0, max - 1).trimEnd()}…`;
+  return line || description.slice(0, max);
+}
+
 export function parseFrontmatter(raw: string): {
   frontmatter: Record<string, unknown>;
   body: string;

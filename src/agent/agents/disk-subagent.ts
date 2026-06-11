@@ -2,6 +2,7 @@ import { Glove } from "glove-core/glove";
 import type { DefineSubAgentArgs } from "glove-core/extensions";
 import type { ModelAdapter, StoreAdapter } from "glove-core/core";
 import type { DisplayManagerAdapter } from "glove-core/display-manager";
+import { routingLine } from "../extensions-loader.ts";
 import type { LoadedSubagent } from "../extensions-loader.ts";
 import { GlorpStore } from "../store.ts";
 import { createToolRegistry, READ_ONLY_TOOLS, registerTools } from "../tools/registry.ts";
@@ -42,7 +43,10 @@ export function makeDiskSubAgent(
 
   return {
     name: sub.name,
-    description: sub.description,
+    // Routing one-liner: the dispatch tool embeds every subagent's entry in
+    // its description, so multi-KB frontmatter descriptions ride on EVERY
+    // model request otherwise. The full text stays on sub.systemPrompt.
+    description: routingLine(sub.description),
     factory: async ({ parentStore, parentControls }: {
       parentStore: StoreAdapter;
       parentControls: ParentControls;

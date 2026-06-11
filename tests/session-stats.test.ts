@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { SessionStats } from "../src/station/session-stats.ts";
+import { SessionStats } from "../src/garage/session-stats.ts";
 import type { BridgeEvent } from "../src/shared/events.ts";
 
 function feed(stats: SessionStats, ...events: BridgeEvent[]): void {

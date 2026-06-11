@@ -46,6 +46,11 @@ export class VerificationTracker {
   private lastVerifiedAt: number | null = null;
   private lastVerificationKind: string | null = null;
   private failedVerifications: FailedVerification[] = [];
+  /** Re-reads of pending files whose category does NOT accept re-reading as
+   * verification (code). Each one is a wasted loop iteration — past a couple,
+   * the injected guidance flips to "stop and conclude" so a model that can't
+   * run an objective check doesn't spiral re-reading the same files forever. */
+  private futileReads = new Map<string, number>();
 
   /** Mark a file as modified by a successful write/edit/apply_patch. */
   recordMutation(filePath: string, at: number = Date.now()): void {
@@ -59,6 +64,7 @@ export class VerificationTracker {
   recordPassingCheck(signals: ClearSignal[], kind: string, at: number = Date.now()): void {
     this.clearBySignals(signals, at, kind);
     this.failedVerifications = [];
+    this.futileReads.clear();
   }
 
   /** Back-compat shorthand: a passing code toolchain command. */
@@ -81,7 +87,11 @@ export class VerificationTracker {
   /** Re-reading a produced artifact (self-review) clears just that file. */
   recordRereadPass(filePath: string, at: number = Date.now()): void {
     if (!this.mutations.has(filePath)) return;
-    if (!classifyPath(filePath).clearedBy.has("reread")) return;
+    if (!classifyPath(filePath).clearedBy.has("reread")) {
+      // Re-reading code is not verification — count the futile pass.
+      this.futileReads.set(filePath, (this.futileReads.get(filePath) ?? 0) + 1);
+      return;
+    }
     this.mutations.delete(filePath);
     this.lastVerifiedAt = at;
     this.lastVerificationKind = "re-read artifact";
@@ -111,6 +121,7 @@ export class VerificationTracker {
   /** New user message — the user has moved on from prior deliberation. */
   onUserTurn(): void {
     this.failedVerifications = [];
+    this.futileReads.clear();
   }
 
   /** Wipe all state — used when starting a fresh session. */
@@ -119,6 +130,7 @@ export class VerificationTracker {
     this.lastVerifiedAt = null;
     this.lastVerificationKind = null;
     this.failedVerifications = [];
+    this.futileReads.clear();
   }
 
   /** Inspect tracker state for session-state injection / UI. */
@@ -130,6 +142,7 @@ export class VerificationTracker {
       lastVerifiedAt: this.lastVerifiedAt,
       lastVerificationKind: this.lastVerificationKind,
       failedVerifications: [...this.failedVerifications],
+      futileReadCount: [...this.futileReads.values()].reduce((n, c) => n + c, 0),
     };
   }
 
@@ -197,4 +210,6 @@ export interface VerificationStatus {
   lastVerificationKind: string | null;
   /** Optional for back-compat with status objects produced before this field existed. */
   failedVerifications?: FailedVerification[];
+  /** Re-reads of pending code files (which re-reading cannot clear). */
+  futileReadCount?: number;
 }

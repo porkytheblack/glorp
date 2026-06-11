@@ -1,11 +1,17 @@
 /**
- * Streamable-HTTP transport (stateless): each POST /mcp gets a fresh server +
- * transport, so tool calls are independent request/response round-trips with no
- * server-side session state. Set MCP_AUTH_TOKEN to require a Bearer token on the
- * MCP endpoint itself (separate from the Glorp API key the tools use).
+ * Streamable-HTTP transport (stateless), served by Hono via @hono/node-server:
+ * each POST /mcp gets a fresh MCP server + transport, so tool calls are
+ * independent request/response round-trips with no server-side session state.
+ * The MCP SDK transport writes directly to the Node response, so we hand it the
+ * raw `incoming`/`outgoing` from Hono's Node bindings. Set MCP_AUTH_TOKEN to
+ * require a Bearer token on the endpoint itself (separate from the Glorp API
+ * key the tools use).
  */
 
-import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { serve, type HttpBindings } from "@hono/node-server";
+import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
+import { Hono } from "hono";
+import type { Server } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { buildServer } from "./server.js";
 import type { McpContext } from "./client.js";
@@ -13,84 +19,71 @@ import type { McpContext } from "./client.js";
 /** Cap on the request body — 413 beyond this. Keeps a client from buffering us OOM. */
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
-/** An error carrying the HTTP status the handler should return. */
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+type Bindings = { Bindings: HttpBindings };
 
-/** Read + parse a JSON body with a size cap; rejects HttpError(413|400). */
-function readJson(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on("data", (c: Buffer) => {
-      size += c.length;
-      if (size > maxBytes) {
-        req.destroy();
-        reject(new HttpError(413, `Request body exceeds ${maxBytes} bytes`));
-        return;
-      }
-      chunks.push(c);
-    });
-    req.on("end", () => {
-      const body = Buffer.concat(chunks).toString("utf8");
-      if (!body) return resolve(undefined);
-      try {
-        resolve(JSON.parse(body));
-      } catch {
-        reject(new HttpError(400, "Invalid JSON body"));
-      }
-    });
-    req.on("error", (err) => reject(new HttpError(400, err.message)));
-  });
-}
-
-async function handle(req: IncomingMessage, res: ServerResponse, ctx: McpContext, token?: string): Promise<void> {
-  if ((req.url ?? "").split("?")[0] !== "/mcp") return void res.writeHead(404).end();
-  if (token && req.headers.authorization !== `Bearer ${token}`) return void res.writeHead(401).end();
-  if (req.method !== "POST") {
-    // Stateless server: no long-lived SSE (GET) or session teardown (DELETE).
-    return void res.writeHead(405, { allow: "POST" }).end();
-  }
-  try {
-    const body = await readJson(req);
-    const server = buildServer(ctx);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    res.on("close", () => {
-      void transport.close();
-      void server.close();
-    });
-    await server.connect(transport);
-    await transport.handleRequest(req, res, body);
-  } catch (err) {
-    const status = err instanceof HttpError ? err.status : 500;
-    if (!res.headersSent) {
-      res.writeHead(status, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
-    }
-  }
+/** Parse the JSON body once (the transport reuses the parsed value, not the stream). */
+async function parseBody(text: string): Promise<unknown> {
+  if (!text) return undefined;
+  return JSON.parse(text);
 }
 
 /** Bind the HTTP server; resolves once listening, rejects on a bind error. */
 export function startHttp(ctx: McpContext, host: string, port: number): Promise<Server> {
   const token = process.env.MCP_AUTH_TOKEN;
-  const httpServer = createServer((req, res) => void handle(req, res, ctx, token));
-  return new Promise<Server>((resolve, reject) => {
-    httpServer.on("error", (err) => {
-      // Before `listening`, this is a bind failure (EADDRINUSE/EACCES) → reject.
-      // After, the promise is already settled, so this just logs (no crash).
-      console.error("[glorp-mcp] http server error:", err instanceof Error ? err.message : err);
-      reject(err);
+  const app = new Hono<Bindings>();
+
+  app.post("/mcp", async (c) => {
+    if (token && c.req.header("authorization") !== `Bearer ${token}`) return c.body(null, 401);
+    // Enforce the body cap up front. We buffer the whole body (the SDK transport
+    // reuses the parsed value), so require a declared, in-bounds Content-Length
+    // rather than streaming unbounded — a missing or oversized length is rejected.
+    const declared = c.req.header("content-length");
+    if (declared === undefined) {
+      return c.json({ error: "Content-Length header is required" }, 411);
+    }
+    if (!/^\d+$/.test(declared) || Number(declared) > MAX_BODY_BYTES) {
+      return c.json({ error: `Request body exceeds ${MAX_BODY_BYTES} bytes` }, 413);
+    }
+    let body: unknown;
+    try {
+      body = await parseBody(await c.req.text());
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const { incoming, outgoing } = c.env;
+    const server = buildServer(ctx);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    outgoing.on("close", () => {
+      void transport.close();
+      void server.close();
     });
-    httpServer.listen(port, host, () => {
-      console.error(`[glorp-mcp] streamable HTTP listening on http://${host}:${port}/mcp`);
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(incoming, outgoing, body);
+    } catch (err) {
+      if (!outgoing.headersSent) {
+        outgoing.writeHead(500, { "content-type": "application/json" });
+        outgoing.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+    }
+    return RESPONSE_ALREADY_SENT;
+  });
+
+  // Stateless server: no long-lived SSE (GET) or session teardown (DELETE).
+  app.all("/mcp", (c) => c.body(null, 405, { allow: "POST" }));
+  app.all("*", (c) => c.body(null, 404));
+
+  return new Promise<Server>((resolve, reject) => {
+    const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
+      console.error(`[glorp-mcp] streamable HTTP listening on http://${host}:${info.port}/mcp`);
       if (!token) console.error("[glorp-mcp] WARNING: no MCP_AUTH_TOKEN set — the MCP endpoint is unauthenticated.");
-      resolve(httpServer);
+      resolve(server as unknown as Server);
+    }) as unknown as Server;
+    // Before `listening` this is a bind failure (EADDRINUSE/EACCES) → reject;
+    // after, the promise is already settled, so this just logs (no crash).
+    server.on("error", (err: Error) => {
+      console.error("[glorp-mcp] http server error:", err.message);
+      reject(err);
     });
   });
 }

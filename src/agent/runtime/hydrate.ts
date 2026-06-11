@@ -108,7 +108,10 @@ function messageTurn(message: Message, index: number, createdAt: number): ChatTu
   return {
     id: message.id ?? `m_hydrated_${index}`,
     kind: message.sender === "user" ? "user" : "agent",
-    text: message.text,
+    // Bound extension directives persist as non-triggerable placeholders
+    // ("[invoked_extension__hook_compact] fix the bug") — display the message
+    // the user actually wrote.
+    text: message.text.replace(/\[invoked_extension__(?:hook|skill)_[\w-]+\]\s*/g, ""),
     reasoning: (message as { reasoning_content?: string }).reasoning_content || undefined,
     createdAt,
   };

@@ -3,7 +3,7 @@
 Technical reference for Glorp's command-line interface, its subcommand modules,
 and the build / Docker / ops tooling that ships and runs the binary.
 
-> Scope note: `cli-serve.ts`, `cli-station.ts`, and `cli-mesh.ts` appear in the
+> Scope note: `cli-serve.ts`, `cli-garage.ts`, and `cli-mesh.ts` appear in the
 > dispatch table below but are documented in depth elsewhere. The deprecated
 > `dashboard/` directory is intentionally not covered.
 
@@ -43,8 +43,8 @@ unhandled rejection (`src/cli.ts:72-75`).
 | `migrate`                     | `migrate`      | `cli-migrate.ts` → `runMigrate`         | |
 | `doctor` [`--kill`]           | `doctor`       | `cli-doctor.ts` → `runDoctor`           | |
 | `mesh [agents\|log\|summary]` | `mesh`         | `cli-mesh.ts` → `runMesh` *(other agent)* | |
-| `station ...`                 | `station`      | `cli-station.ts` → `runStation` *(other agent)* | |
-| `station keys <add\|list\|revoke>` | `station` (+ `stationKeysSub`) | `cli-keys.ts` → `runKeys` | Routed before `runStation` when `args.stationKeysSub` is set (`src/cli.ts:48-52`) |
+| `garage ...`                 | `garage`      | `cli-garage.ts` → `runGarage` *(other agent)* | |
+| `garage keys <add\|list\|revoke>` | `garage` (+ `garageKeysSub`) | `cli-keys.ts` → `runKeys` | Routed before `runGarage` when `args.garageKeysSub` is set (`src/cli.ts:48-52`) |
 | `-p` / `--print "<prompt>"`   | `headless`     | `cli-headless.ts` → `runHeadless`       | |
 | *(default — no command word)* | `tui`          | `cli-tui.ts` → `runTui`                 | Default when nothing else matches |
 
@@ -64,10 +64,10 @@ library. Defaults are seeded first (`src/cli-args.ts:42-46`):
 
 ### Command words
 
-`serve`, `station`, `migrate`, `doctor`, `mesh` set `args.command`. Special
+`serve`, `garage`, `migrate`, `doctor`, `mesh` set `args.command`. Special
 positional handling:
 
-- `station keys <sub> [<name|id>]` — sets `stationKeysSub` to `add` / `revoke`
+- `garage keys <sub> [<name|id>]` — sets `garageKeysSub` to `add` / `revoke`
   (anything else ⇒ `list`), then consumes a following non-flag token as
   `keyName` (for `add`) or `keyId` (for `revoke`) (`src/cli-args.ts:50-65`).
 - `mesh <sub>` — consumes the next non-flag token as `meshSub`
@@ -81,15 +81,15 @@ positional handling:
 | `-s`, `--session <id>`     | `sessionId`       | `""`            | Resume a session |
 | `--provider <name>`        | `provider`        | unset           | `anthropic\|openai\|openrouter\|gemini\|…` |
 | `-m`, `--model <name>`     | `model`           | unset           | Model override |
-| `--port <port>`            | `port`            | unset (`Number(...)`) | serve: 3271, station: 4271 (set by the handlers) |
+| `--port <port>`            | `port`            | unset (`Number(...)`) | serve: 3271, garage: 4271 (set by the handlers) |
 | `--token <token>`          | `token`           | unset           | Bearer token for server auth |
 | `-p`, `--print <prompt>`   | `command=headless`, `prompt` | — | One-shot mode |
 | `--auto-mode`              | `permissionMode`  | unset           | `"auto"` — auto-approve safe ops |
 | `--bypass`                 | `permissionMode`  | unset           | `"bypass"` — no permission prompts |
 | `--kill`                   | `doctorKill`      | `false`         | `doctor` only |
-| `--host <addr>`            | `host`            | unset           | Station bind address |
-| `--data-dir <dir>`         | `dataDir`         | unset           | Station state dir override |
-| `--workspace-root <dir>`   | `workspaceRoot`   | unset           | `path.resolve`d; Station auto-provision base |
+| `--host <addr>`            | `host`            | unset           | Garage bind address |
+| `--data-dir <dir>`         | `dataDir`         | unset           | Garage state dir override |
+| `--workspace-root <dir>`   | `workspaceRoot`   | unset           | `path.resolve`d; Garage auto-provision base |
 | `--scopes <a,b,c>`         | `scopes`          | unset           | Split on `,`, trimmed; for `keys add` |
 | `--dashboard`              | `dashboard`       | `false`         | Serve the (deprecated) Dashboard SPA |
 | `-h`, `--help`             | `command=help`    | — | |
@@ -105,7 +105,7 @@ both reach a handler with a prompt.
 
 `HELP_TEXT` (`src/cli-args.ts:102-146`) is the canonical user-facing usage
 string, also covering environment variables (`ANTHROPIC_API_KEY`, `GLORP_PORT`,
-`GLORP_TOKEN`, `GLORP_DATA_DIR`, `GLORP_STATION_AUTH`) and the TUI keyboard
+`GLORP_TOKEN`, `GLORP_DATA_DIR`, `GLORP_GARAGE_AUTH`) and the TUI keyboard
 shortcuts.
 
 ## Subcommand modules
@@ -152,9 +152,9 @@ result to stdout, exits (`runHeadless`, `src/cli-headless.ts:17-91`):
 
 ### `keys` — `src/cli-keys.ts`
 
-`glorp station keys <add|list|revoke>` operates **directly on the on-disk key
+`glorp garage keys <add|list|revoke>` operates **directly on the on-disk key
 store** — no running server required, which is how the very first key is minted
-(`runKeys`, `src/cli-keys.ts:13-50`). It loads `loadStationConfig({ dataDir })`
+(`runKeys`, `src/cli-keys.ts:13-50`). It loads `loadGarageConfig({ dataDir })`
 and opens a `KeyStore` at `config.auth.keyStorage` or
 `<dataDir>/glorp-keys.json`.
 
@@ -263,7 +263,7 @@ warns if the destination isn't on `$PATH`.
 
 ## Docker / Compose deployment
 
-The image packages **Glorp Station in a box** — a sandboxed runtime where agents
+The image packages **Glorp Garage in a box** — a sandboxed runtime where agents
 freely run tools (`bash`, file writes, package installs, `git`) inside the
 container against `/workspaces`, never touching the host. See `docs/docker.md`
 for the full operator guide.
@@ -274,9 +274,9 @@ for the full operator guide.
   agent's sandbox toolchain (`Dockerfile:4-10`).
 - Installs deps from `package.json` + `bun.lock` with `--frozen-lockfile`
   (layer-cached), copies source, runs `bun run prebuild` (embeds prompts)
-  (`Dockerfile:14-20`). The image runs Station **from source**, not from a
+  (`Dockerfile:14-20`). The image runs Garage **from source**, not from a
   compiled binary.
-- Env: `GLORP_DATA_DIR=/data`, `GLORP_STATION_AUTH=required`, `GLORP_AUTO_KEY=1`
+- Env: `GLORP_DATA_DIR=/data`, `GLORP_GARAGE_AUTH=required`, `GLORP_AUTO_KEY=1`
   (`Dockerfile:24-26`).
 - Volumes `/data` (keys + session snapshots) and `/workspaces` (isolated agent
   working dirs); `EXPOSE 4271` (`Dockerfile:27-29`).
@@ -286,17 +286,17 @@ for the full operator guide.
 
 ### `docker/entrypoint.sh`
 
-On first boot, if auth is on (`GLORP_STATION_AUTH != off`), `GLORP_AUTO_KEY=1`,
+On first boot, if auth is on (`GLORP_GARAGE_AUTH != off`), `GLORP_AUTO_KEY=1`,
 the command isn't `keys`, and no `glorp-keys.json` exists yet, it auto-mints an
-admin key via `bun run src/cli.ts station keys add docker --scopes admin`
-(printed to the logs), then `exec`s `bun run src/cli.ts station "$@"`
+admin key via `bun run src/cli.ts garage keys add docker --scopes admin`
+(printed to the logs), then `exec`s `bun run src/cli.ts garage "$@"`
 (`docker/entrypoint.sh:9-21`). `set -euo pipefail`.
 
 ### `docker-compose.yml`
 
-Service `glorp` (`docker-compose.yml:7-35`): `build: .`, image `glorp-station`,
+Service `glorp` (`docker-compose.yml:7-35`): `build: .`, image `glorp-garage`,
 publishes `4271:4271`. Passes through `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
-`OPENROUTER_API_KEY` and forces `GLORP_STATION_AUTH=required` + `GLORP_AUTO_KEY=1`.
+`OPENROUTER_API_KEY` and forces `GLORP_GARAGE_AUTH=required` + `GLORP_AUTO_KEY=1`.
 Named volumes `glorp-data:/data` and `glorp-workspaces:/workspaces` persist
 across `docker compose down` (wiped only with `-v`). Has a `/api/v1/health`
 healthcheck and `restart: unless-stopped`. Commented-out `mem_limit` / `cpus` /
@@ -321,11 +321,11 @@ image: `.git`, `.claude`, `.glorp`, all `node_modules`/`dist` trees,
 | `src/cli-args.ts` | `parseCliArgs`, the `CliArgs` interface, and `HELP_TEXT` |
 | `src/cli-doctor.ts` | `glorp doctor [--kill]` — diagnose/clean stale processes & `server.json` |
 | `src/cli-headless.ts` | `glorp -p` one-shot; streams one prompt's result to stdout |
-| `src/cli-keys.ts` | `glorp station keys add\|list\|revoke` over the on-disk key store |
+| `src/cli-keys.ts` | `glorp garage keys add\|list\|revoke` over the on-disk key store |
 | `src/cli-migrate.ts` | `glorp migrate` — eager whole-store schema upgrade |
 | `src/cli-tui.ts` | `runTui` — interactive TUI (default command), onboarding, session resume |
 | `src/cli-serve.ts` | `glorp serve` — server only *(documented elsewhere)* |
-| `src/cli-station.ts` | `glorp station` — multi-session runtime *(documented elsewhere)* |
+| `src/cli-garage.ts` | `glorp garage` — multi-session runtime *(documented elsewhere)* |
 | `src/cli-mesh.ts` | `glorp mesh` — inter-agent mesh inspection *(documented elsewhere)* |
 | `src/shared/version.ts` | `GLORP_VERSION`, codename, build constants |
 | `bin/glorp.js` | npm `bin` shim → `src/cli.ts` |
@@ -334,8 +334,8 @@ image: `.git`, `.claude`, `.glorp`, all `node_modules`/`dist` trees,
 | `scripts/install.sh` | Install `dist/glorp` (+ dashboard SPA) onto `$PATH` |
 | `scripts/bench-conventions.ts` | Convention-loading benchmark harness |
 | `scripts/test-orchestrator.sh` | Orchestrator typecheck/tests/line-ceiling/barrel gate |
-| `Dockerfile` | Station-in-a-box image (`oven/bun:1.3`, from source) |
+| `Dockerfile` | Garage-in-a-box image (`oven/bun:1.3`, from source) |
 | `docker-compose.yml` | Compose service, volumes, healthcheck, guardrails |
-| `docker/entrypoint.sh` | First-boot key auto-mint, then `station "$@"` |
+| `docker/entrypoint.sh` | First-boot key auto-mint, then `garage "$@"` |
 | `.dockerignore` | Trims build context / blocks host state |
-| `docs/docker.md` | Operator guide for the containerized Station |
+| `docs/docker.md` | Operator guide for the containerized Garage |

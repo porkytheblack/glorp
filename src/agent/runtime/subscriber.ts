@@ -39,6 +39,11 @@ export function createGlorpSubscriber(
     streamingTextBuffer = "";
   };
 
+  // Hoisted closure state for dispatch (which is declared below the return —
+  // function declarations hoist, `let` initializers do NOT, so this must sit
+  // before the return or every dispatch call dies in the temporal dead zone).
+  let compacting = false;
+
   return {
     async record(event_type, data) {
       // glove-core's loop fires this for every tool result. Some call sites
@@ -60,12 +65,14 @@ export function createGlorpSubscriber(
   async function dispatch(event_type: any, data: any): Promise<void> {
       switch (event_type) {
         case "text_delta": {
+          if (compacting) break; // the summary is bookkeeping, not conversation
           const { text } = data as { text: string };
           streamingTextBuffer += text;
           bridge.emit({ type: "text_delta", text });
           break;
         }
         case "model_response_complete": {
+          if (compacting) { streamingTextBuffer = ""; void refresh.stats(); break; }
           const d = data as { text: string; reasoning_content?: string };
           if (streamingTextBuffer || d.text) {
             const finalText = d.text || streamingTextBuffer;
@@ -86,6 +93,7 @@ export function createGlorpSubscriber(
           break;
         }
         case "model_response": {
+          if (compacting) break;
           const d = data as { text: string; reasoning_content?: string };
           if (!streamingTextBuffer && d.text) {
             bridge.emit({
@@ -143,9 +151,11 @@ export function createGlorpSubscriber(
           break;
         }
         case "compaction_start":
+          compacting = true;
           bridge.emit({ type: "compaction", phase: "start" });
           break;
         case "compaction_end":
+          compacting = false;
           bridge.emit({ type: "compaction", phase: "end" });
           void refresh.stats();
           break;

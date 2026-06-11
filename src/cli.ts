@@ -9,6 +9,24 @@ import { parseCliArgs, HELP_TEXT } from "./cli-args.ts";
 import { GLORP_VERSION } from "./shared/version.ts";
 
 async function main(): Promise<void> {
+  // Hidden self-spawn subcommand for orchestrator subagents in the COMPILED
+  // binary (the continuum node-bootstrap can't read /$bunfs script paths).
+  // Handled before arg parsing — it is not a user-facing command.
+  if (process.argv[2] === "__agent-run") {
+    const role = process.argv[3] ?? "";
+    const { runAgentSubcommand } = await import("./orchestrator/compiled-runner.ts");
+    process.exit(await runAgentSubcommand(role));
+  }
+
+  // Hidden git credential helper (speaks the git-credential protocol on
+  // stdin/stdout). Installed as `credential.helper` in template-cloned repos so
+  // git fetch/push pulls a fresh token from the configured token service.
+  if (process.argv[2] === "__git-cred") {
+    const { runGitCredHelper } = await import("./garage/git-tokens.ts");
+    const stdin = await new Response(Bun.stdin.stream()).text();
+    process.exit(await runGitCredHelper(process.argv[3], stdin));
+  }
+
   const args = parseCliArgs(process.argv.slice(2));
 
   switch (args.command) {
@@ -44,14 +62,14 @@ async function main(): Promise<void> {
       return;
     }
 
-    case "station": {
-      if (args.stationKeysSub) {
+    case "garage": {
+      if (args.garageKeysSub) {
         const { runKeys } = await import("./cli-keys.ts");
         await runKeys(args);
         return;
       }
-      const { runStation } = await import("./cli-station.ts");
-      await runStation(args);
+      const { runGarage } = await import("./cli-garage.ts");
+      await runGarage(args);
       return;
     }
 

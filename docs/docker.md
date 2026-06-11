@@ -1,13 +1,13 @@
-# Running Glorp Station in Docker
+# Running Glorp Garage in Docker
 
-Yes — Station runs well in a container, and a container is the right place to
+Yes — Garage runs well in a container, and a container is the right place to
 **let agents loose**: every tool the agent runs (bash, file writes, `npm`/`bun`
 installs, `git`) happens *inside* the container against `/workspaces`, never on
 your host. You talk to it over the same API-key-secured HTTP/WS API.
 
 ```
 ┌─ your machine ──────────┐        ┌─ container (the sandbox) ─────────────┐
-│ orchestration / kit /   │  HTTP  │ glorp station  ──▶ agent ──▶ bash,    │
+│ orchestration / kit /   │  HTTP  │ glorp garage  ──▶ agent ──▶ bash,    │
 │ curl  (GLORP_API_KEY)   │ ─────▶ │   :4271 (auth)      write, git, tests │
 └─────────────────────────┘   WS   │   /data  /workspaces (volumes)        │
                                    └───────────────────────────────────────┘
@@ -56,25 +56,25 @@ Two ways to give the agent model access:
 
 ## Why it's safe to "let it do stuff"
 
-- **Filesystem isolation:** the agent only sees the container — `/app` (Station),
+- **Filesystem isolation:** the agent only sees the container — `/app` (Garage),
   `/data` (keys/sessions), `/workspaces` (its scratch space). Your host files are
   untouched unless you bind-mount them.
 - **`permissionMode: "bypass"`** is fine in here: no human-in-the-loop prompts,
   yet the hard-block guard still refuses `rm -rf /`, `sudo`, etc.
 - **Auth on by default:** the port is API-key protected (auto-minted key). Set
-  `GLORP_STATION_AUTH=off` only behind a private network/tunnel.
+  `GLORP_GARAGE_AUTH=off` only behind a private network/tunnel.
 - **Guardrails:** uncomment `mem_limit` / `cpus` / `pids_limit` in the compose
   file to cap runaway runs. Add `--network none`-style policies if the agent
   shouldn't reach the internet (note: it needs outbound for model APIs).
-- The workspace-cleanup guard means `?workspace=true` only deletes Station's own
+- The workspace-cleanup guard means `?workspace=true` only deletes Garage's own
   `/workspaces/<id>` sandboxes, never a mounted project.
 
 ## Managing keys
 
 ```bash
-docker compose exec glorp bun run src/cli.ts station keys add ci --scopes run
-docker compose exec glorp bun run src/cli.ts station keys list
-docker compose exec glorp bun run src/cli.ts station keys revoke <id>
+docker compose exec glorp bun run src/cli.ts garage keys add ci --scopes run
+docker compose exec glorp bun run src/cli.ts garage keys list
+docker compose exec glorp bun run src/cli.ts garage keys revoke <id>
 ```
 
 ## Persisting / resetting
@@ -91,11 +91,11 @@ variant, which bakes in the whole toolchain so sessions can produce real
 deliverables with zero setup:
 
 ```bash
-docker build -f docker/Dockerfile.full -t glorp-station:full .
+docker build -f docker/Dockerfile.full -t glorp-garage:full .
 docker run -d --name glorp -p 4271:4271 \
   -v glorp-data:/data -v glorp-workspaces:/workspaces \
   -v "$HOME/.glorp/credentials.json:/data/credentials.json:ro" \
-  glorp-station:full
+  glorp-garage:full
 ```
 
 What's inside (`docker/Dockerfile.full`, ~3.4 GB):
@@ -115,9 +115,75 @@ What's inside (`docker/Dockerfile.full`, ~3.4 GB):
   them later by re-running `docker/skills-install.sh` in the container (or
   rebuilding with a reachable `ANTHROPIC_SKILLS_REPO`).
 
+## All-in-one image (Garage + MCP + dashboard)
+
+The default image runs **only** the Garage API — the right call when you drive it
+from your own code or the kit. If instead you want one container that also serves
+the **MCP server** and the **web dashboard**, build the all-in-one variant
+(`docker/Dockerfile.allinone`):
+
+```bash
+docker compose -f docker-compose.allinone.yml up -d --build
+
+# grab the admin API key minted on first boot (used for REST + MCP)
+docker compose -f docker-compose.allinone.yml logs | grep -A2 "Admin API key"
+```
+
+One container, three surfaces:
+
+```
+┌─ container ───────────────────────────────────────────────┐
+│  glorp garage   ─ REST/WS API ........... :4271            │
+│      ▲   ▲                                                 │
+│      │   └─ dashboard (Next.js console) . :3270  ─▶ browser│
+│      └───── glorp-mcp (streamable HTTP) . :8787 /mcp       │
+│  /data  /workspaces (volumes)                              │
+└───────────────────────────────────────────────────────────┘
+```
+
+- **Dashboard** — open <http://localhost:3270> and sign in with
+  `GARAGE_ADMIN_USER` / `GARAGE_ADMIN_PASSWORD` (verified by Garage; **change the
+  defaults**). Set a strong `GARAGE_JWT_SECRET` in production.
+- **MCP** — point any MCP-capable agent at `http://localhost:8787/mcp` (POST /
+  streamable HTTP). Inside the container the server is auto-wired to Garage with
+  the minted admin key; set `MCP_AUTH_TOKEN` to require a Bearer token on the
+  endpoint itself.
+- **Garage API** — `http://localhost:4271`, same as the lean image.
+
+The Garage process supervises all three: if any exits, the container stops so the
+restart policy brings it back. Ports are configurable via `MCP_PORT` / `DASH_PORT`
+(remember to match the published `-p` mappings).
+
+### Plain `docker run`
+
+```bash
+docker build -f docker/Dockerfile.allinone -t glorp-allinone .
+docker run -d --name glorp \
+  -p 4271:4271 -p 3270:3270 -p 8787:8787 \
+  -e ANTHROPIC_API_KEY=sk-ant-… \
+  -e GARAGE_ADMIN_USER=admin -e GARAGE_ADMIN_PASSWORD='choose-a-password' \
+  -v glorp-data:/data -v glorp-workspaces:/workspaces \
+  glorp-allinone
+```
+
+### Browser URL & CORS (important)
+
+The dashboard talks to Garage **from your browser**, so the Garage URL is baked
+into its bundle at build time via `NEXT_PUBLIC_GARAGE_URL` (build arg
+`GARAGE_URL`, default `http://localhost:4271`). The default works for a local
+publish because Garage allows cross-origin browser requests **only when both the
+page and the API are on loopback** (`localhost` / `127.0.0.1`).
+
+For access from another host, the loopback rule no longer applies. Either:
+
+- put a **reverse proxy** in front so the dashboard and the API share one origin
+  (e.g. dashboard at `/`, Garage proxied under `/api` on the same host:port), or
+- rebuild with `--build-arg GARAGE_URL=https://garage.example.com` and serve the
+  dashboard from the **same origin** as that Garage.
+
 ## Image notes
 
-The lean image runs Station from source on the `oven/bun` base (bun is present so
+The lean image runs Garage from source on the `oven/bun` base (bun is present so
 agents can run `bun`/`bunx`; `git`, `curl`, `python3` are installed — extend the
 `apt-get` line for your stack). For a smaller runtime you can instead compile a
 single binary (`bun run build:cli` → `dist/glorp`) in a build stage and copy it

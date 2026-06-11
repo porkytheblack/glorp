@@ -12,6 +12,7 @@ import type { ContinuumSubscriber, TriggeredAgent, Run } from "glove-continuum-s
 import type { OrchestratorEvent } from "./types.ts";
 import { agentId } from "./types.ts";
 import { defineOrchestratorAgent } from "./agent-factory.ts";
+import { createCompiledRunner } from "./compiled-runner.ts";
 
 const AGENT_ROLES = ["generator", "evaluator", "researcher", "builder"] as const;
 const ENTRYPOINT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "agent-entrypoint.ts");
@@ -44,6 +45,16 @@ export interface RunnerHandle {
 
 const DEFAULT_AGENT_TIMEOUT_MS = 600_000; // 10 minutes
 
+/** True when the dev entrypoint exists as a real file — i.e. running from
+ * source. The compiled binary's paths live in bunfs and statSync fails. */
+function entrypointOnDisk(): boolean {
+  try {
+    return statSync(ENTRYPOINT).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function createOrchestratorRunner(
   config: {
     dataDir: string; workspace: string; meshDir: string;
@@ -55,8 +66,28 @@ export function createOrchestratorRunner(
   emit: (event: OrchestratorEvent) => void,
 ): RunnerHandle {
   const timeoutMs = config.agentTimeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
-  const adapter = new MemoryAdapter();
   const subscriber = buildSubscriber(emit);
+
+  // Env vars subprocess agents need — set BEFORE any spawn path, shared by
+  // both runner flavors (children inherit process.env).
+  process.env.GLORP_WORKSPACE = config.workspace;
+  process.env.GLORP_DATA_DIR = config.dataDir;
+  process.env.GLORP_MESH_DIR = config.meshDir;
+  if (config.providerId) process.env.GLORP_MODEL_PROVIDER = config.providerId;
+  if (config.modelName) process.env.GLORP_MODEL_NAME = config.modelName;
+  if (config.baseURL) process.env.GLORP_MODEL_BASE_URL = config.baseURL;
+  if (config.apiKey) process.env.GLORP_MODEL_API_KEY = config.apiKey;
+  process.env.GLORP_AGENT_TIMEOUT = String(timeoutMs);
+  if (config.workspaceContext) process.env.GLORP_WORKSPACE_CONTEXT = config.workspaceContext;
+
+  // Compiled binary: import.meta.url is a virtual /$bunfs path — the
+  // node-bootstrap spawn cannot work ("Cannot find module
+  // '/$bunfs/root/bootstrap.js'"). Spawn the binary itself instead.
+  if (!entrypointOnDisk()) {
+    return createCompiledRunner(timeoutMs, subscriber);
+  }
+
+  const adapter = new MemoryAdapter();
   const runner = new ContinuumRunner({
     adapter,
     subscribers: [subscriber],
@@ -73,17 +104,6 @@ export function createOrchestratorRunner(
     runner.registerAgent(agentDef, ENTRYPOINT);
     agents.set(role, agentDef);
   }
-
-  // Env vars that subprocess agents need for config + model construction.
-  process.env.GLORP_WORKSPACE = config.workspace;
-  process.env.GLORP_DATA_DIR = config.dataDir;
-  process.env.GLORP_MESH_DIR = config.meshDir;
-  if (config.providerId) process.env.GLORP_MODEL_PROVIDER = config.providerId;
-  if (config.modelName) process.env.GLORP_MODEL_NAME = config.modelName;
-  if (config.baseURL) process.env.GLORP_MODEL_BASE_URL = config.baseURL;
-  if (config.apiKey) process.env.GLORP_MODEL_API_KEY = config.apiKey;
-  process.env.GLORP_AGENT_TIMEOUT = String(timeoutMs);
-  if (config.workspaceContext) process.env.GLORP_WORKSPACE_CONTEXT = config.workspaceContext;
 
   return {
     async trigger(agentName, input) {

@@ -29,8 +29,9 @@ export interface LoopDeps {
   meshDir: string;
   /** Shared resource filesystem for plan/artifact persistence across agents. */
   resources?: ResourceFsAdapter;
-  /** Called when a background agent forwards a permission slot. */
-  trackForwardedSlot: (slotId: string, dm: ForwardingDisplayManager) => void;
+  /** Called when a background agent forwards a permission slot. The slot
+   * payload rides along so the tracker can replay pending slots on hydrate. */
+  trackForwardedSlot: (slotId: string, dm: ForwardingDisplayManager, slot?: { renderer: string; input: unknown }) => void;
   /** Factory for subscribers that forward agent events to the UI. */
   createSubscriber?: () => SubscriberAdapter;
   /** Abort signal from the consumer — cancels model calls and rejects pending display slots. */
@@ -171,7 +172,7 @@ function makeDisplay(
 ): ForwardingDisplayManager {
   const isForeground = (opts.foregroundRole ?? "generator") === role;
   const dm: ForwardingDisplayManager = new ForwardingDisplayManager(agentId, (slot) => {
-    deps.trackForwardedSlot(slot.slotId, dm);
+    deps.trackForwardedSlot(slot.slotId, dm, { renderer: slot.renderer, input: slot.input });
     deps.emit({ type: "slot_forwarded", ...slot });
   }, isForeground);
   if (deps.signal) deps.signal.addEventListener("abort", () => void dm.clearStack(), { once: true });

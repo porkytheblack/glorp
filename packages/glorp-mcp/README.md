@@ -1,18 +1,18 @@
 # @porkytheblack/glorp-mcp
 
 An [MCP](https://modelcontextprotocol.io) server that exposes a remote
-[Glorp](https://github.com/porkytheblack/glorp) Station — **namespaces,
+[Glorp](https://github.com/porkytheblack/glorp) Garage — **namespaces,
 workspaces, sessions, and the multi-agent roster** — as tools any MCP-capable
 agent (Claude Desktop/Code, Cursor, custom orchestrators) can call.
 
 It's a thin wrapper over [`@porkytheblack/glorp-client`](../glorp-client): the
-Station still enforces auth and tenant isolation; this just speaks MCP.
+Garage still enforces auth and tenant isolation; this just speaks MCP.
 
 ## Configure
 
 | Env | Required | Purpose |
 | --- | --- | --- |
-| `GLORP_ENDPOINT` | ✅ | Station base URL, e.g. `https://glorp.example.com` |
+| `GLORP_ENDPOINT` | ✅ | Garage base URL, e.g. `https://glorp.example.com` |
 | `GLORP_API_KEY` | – | Admin key (for orchestration) or a namespace-bound tenant key |
 | `GLORP_NAMESPACE` | – | Pin every call to this namespace (admin proxy) |
 | `MCP_AUTH_TOKEN` | – | HTTP transport only: require `Authorization: Bearer` on `/mcp` |
@@ -57,7 +57,7 @@ npx @porkytheblack/glorp-mcp --http --host 0.0.0.0 --port 8787   # POST /mcp
 `glorp_remove_agent`.
 
 Admin tools simply fail with a clear `403` if the configured key isn't admin — the
-Station enforces scope. Every workspace/session/agent tool takes an optional
+Garage enforces scope. Every workspace/session/agent tool takes an optional
 `namespace` arg so an admin key can act inside a specific tenant.
 
 ## Quick start

@@ -51,12 +51,12 @@ export ANTHROPIC_API_KEY=sk-ant-...     # or OPENAI_API_KEY / OPENROUTER_API_KEY
 ./dist/glorp --provider openai -m gpt-4.1
 ```
 
-### Glorp Station (multi-session server)
+### Glorp Garage (multi-session server)
 
-Run many agents at once over a REST + WebSocket API — leave sessions running, reconnect from a laptop/phone/CLI client, or drive them from CI. (Distinct from the `station-signal` fleet runner above; same word, different thing.)
+Run many agents at once over a REST + WebSocket API — leave sessions running, reconnect from a laptop/phone/CLI client, or drive them from CI. (Distinct from the `station-signal` fleet runner above — the rename from "Station" to "Garage" exists precisely to avoid that name collision.)
 
 ```bash
-glorp station                     # API at http://127.0.0.1:4271/
+glorp garage                     # API at http://127.0.0.1:4271/
 
 # create a session and send it a prompt
 curl -s -X POST localhost:4271/sessions -H 'content-type: application/json' \
@@ -65,7 +65,21 @@ curl -s -X POST localhost:4271/sessions/<id>/messages -H 'content-type: applicat
   -d '{"text":"add tests for the auth module","wait":true}'
 ```
 
-Full guide — CLI flags, `station.json`, the REST/WS API, setup templates, and per-session keys — in [`docs/station-usage.md`](docs/station-usage.md). No auth in v1: bind to localhost or sit behind a reverse proxy.
+Full guide — CLI flags, `garage.json`, the REST/WS API, setup templates, and per-session keys — in [`docs/garage-usage.md`](docs/garage-usage.md). Bind to localhost, sit behind a reverse proxy, or enable API-key auth on any non-loopback bind.
+
+All three Glorp servers (the Garage runtime, the single-session `src/server`, and the `glorp-mcp` HTTP transport) are served with [Hono](https://hono.dev).
+
+#### Garage dashboard
+
+A clean, ona-style web console for the orchestration layer lives in [`dashboard/`](dashboard/) (Next.js). It covers every core primitive — sessions (with a live event stream), agents, messages, namespaces, workspaces, provisioning, credentials, and API keys — and signs in with an admin identity you provision via env vars:
+
+```bash
+export GARAGE_ADMIN_USER=admin GARAGE_ADMIN_PASSWORD=change-me   # enables login
+glorp garage                                                     # API on :4271
+cd dashboard && npm install && npm run dev                       # dashboard on :3270
+```
+
+Login exchanges the admin credentials for a short-lived JWT; from the dashboard you can mint scoped API keys for the REST API and the MCP server. See [`dashboard/README.md`](dashboard/README.md).
 
 ### Inside the TUI
 
@@ -206,4 +220,4 @@ src/
 
 ## License
 
-MIT — like glove and station. Originally built as a demonstration that one agent skill can spawn an entire usable CLI in a single afternoon, and that the agent doing the building has *no ulterior motive whatsoever*.
+MIT — like glove and garage. Originally built as a demonstration that one agent skill can spawn an entire usable CLI in a single afternoon, and that the agent doing the building has *no ulterior motive whatsoever*.
