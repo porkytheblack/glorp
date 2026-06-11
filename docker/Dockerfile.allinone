@@ -26,13 +26,17 @@ ARG GARAGE_URL=http://localhost:4271
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-# App source + the three builds:
-#   • prebuild           → embedded prompts (src/.../embedded.ts)
+# App source + the four builds:
+#   • compiled binary    → dist/glorp — Garage and the companion run from THIS,
+#     not from source: process.execPath must be glorp itself so orchestrator
+#     subagents self-spawn (`__agent-run`; no node in this image for the
+#     continuum bootstrap) and template clones install a working
+#     `__git-cred` credential helper.
 #   • glorp-client build → dist/ that the MCP server imports
 #   • dashboard build    → .next production build (NEXT_PUBLIC_GARAGE_URL baked in)
-# The MCP server itself runs from source via bun, so it needs no build step.
+# The MCP server runs from source via bun — it spawns nothing, so that's safe.
 COPY . .
-RUN bun run prebuild \
+RUN bun run build \
  && (cd packages/glorp-client && bun install && bun run build) \
  && (cd packages/glorp-mcp && bun install) \
  && (cd dashboard && bun install \

@@ -1,7 +1,6 @@
 {
   "name": "@porkytheblack/garage-dashboard",
   "version": "0.1.0",
-  "private": true,
   "description": "Garage dashboard — a clean console for the Glorp orchestration layer (namespaces, workspaces, sessions, credentials, profiles, agents, messages, provisioning).",
   "type": "module",
   "scripts": {

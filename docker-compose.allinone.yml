@@ -1,4 +1,6 @@
-# All-in-one Glorp: Garage API + MCP server + dashboard in a single container.
+# All-in-one Glorp: Garage API + MCP server + dashboard + companion service
+# (git tokens + template registry) in a single container — grab a machine,
+# `up`, and you have a self-hosted Claude-Code-web:
 #   docker compose -f docker-compose.allinone.yml up -d --build
 #   docker compose -f docker-compose.allinone.yml logs | grep -A2 "Admin API key"
 # Then open the dashboard at http://localhost:3270 and sign in with
@@ -35,6 +37,21 @@ services:
       # Optional bearer token guarding the MCP endpoint itself (separate from the
       # Glorp API key its tools use). Leave empty to allow unauthenticated /mcp.
       MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"
+      # GitHub App credentials for the in-container companion service: template
+      # repos with auth:"github" clone with short-lived installation tokens, and
+      # cloned repos keep pushing via the glorp __git-cred helper. PRIVATE_KEY is
+      # PEM or base64-of-PEM; or mount a file and use _FILE. Empty = git auth off.
+      GITHUB_APP_ID: "${GITHUB_APP_ID:-}"
+      GITHUB_APP_PRIVATE_KEY: "${GITHUB_APP_PRIVATE_KEY:-}"
+      GITHUB_APP_PRIVATE_KEY_FILE: "${GITHUB_APP_PRIVATE_KEY_FILE:-}"
+      # Registry templates live in the glorp-data volume at
+      # /data/companion-templates — drop *.json templates (+ skills/ libraries)
+      # there and Garage serves them with skills resolved. To use an EXTERNAL
+      # companion service instead, set these (they override the built-in wiring):
+      GLORP_GARAGE_GIT_TOKEN_URL: "${GLORP_GARAGE_GIT_TOKEN_URL:-}"
+      GLORP_GARAGE_GIT_TOKEN_HEADERS: "${GLORP_GARAGE_GIT_TOKEN_HEADERS:-}"
+      GLORP_GARAGE_TEMPLATE_REGISTRY_URL: "${GLORP_GARAGE_TEMPLATE_REGISTRY_URL:-}"
+      GLORP_GARAGE_TEMPLATE_REGISTRY_HEADERS: "${GLORP_GARAGE_TEMPLATE_REGISTRY_HEADERS:-}"
     volumes:
       - glorp-data:/data                 # keys (+ persisted MCP key) + snapshots
       - glorp-workspaces:/workspaces     # agent working dirs, host-isolated

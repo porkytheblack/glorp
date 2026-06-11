@@ -7,7 +7,7 @@ import { GLORP_VERSION } from "./shared/version.ts";
 import type { PermissionMode } from "./agent/runtime/permission-mode.ts";
 
 export interface CliArgs {
-  command: "tui" | "serve" | "garage" | "headless" | "help" | "version" | "migrate" | "doctor" | "mesh";
+  command: "tui" | "serve" | "garage" | "headless" | "help" | "version" | "migrate" | "doctor" | "mesh" | "companion";
   workspace: string;
   sessionId: string;
   provider?: string;
@@ -26,6 +26,8 @@ export interface CliArgs {
   dataDir?: string;
   /** Garage: base directory for auto-provisioned workspaces. */
   workspaceRoot?: string;
+  /** Companion: directory of registry templates (default <dataDir>/companion-templates). */
+  templatesDir?: string;
   /** `glorp garage keys <sub>`: manage API keys (add | list | revoke). */
   garageKeysSub?: "add" | "list" | "revoke";
   /** `keys add <name>`. */
@@ -64,6 +66,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
       }
       continue;
     }
+    if (a === "companion") { args.command = "companion"; continue; }
     if (a === "migrate") { args.command = "migrate"; continue; }
     if (a === "doctor") { args.command = "doctor"; continue; }
     if (a === "mesh") {
@@ -84,6 +87,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
     if (a === "--host") { args.host = argv[++i]; continue; }
     if (a === "--data-dir") { args.dataDir = argv[++i]; continue; }
     if (a === "--workspace-root") { args.workspaceRoot = path.resolve(argv[++i] ?? "."); continue; }
+    if (a === "--templates-dir") { args.templatesDir = path.resolve(argv[++i] ?? "."); continue; }
     if (a === "--scopes") { args.scopes = (argv[++i] ?? "").split(",").map((s) => s.trim()).filter(Boolean); continue; }
     if (a === "--namespace") { args.namespace = argv[++i]; continue; }
     if (a === "-p" || a === "--print") {
@@ -108,6 +112,7 @@ USAGE
   glorp garage [options]           Start the multi-session Garage runtime
   glorp garage keys add <name>     Create an API key (printed once)
   glorp garage keys list|revoke    Manage API keys
+  glorp companion [options]         Run the companion service (git tokens + template registry)
   glorp migrate                     Upgrade stored sessions to the latest schema
   glorp doctor [--kill]             Diagnose / clean up stale glorp processes & state
   glorp mesh [agents|log]           Inspect the inter-agent mesh history

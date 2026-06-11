@@ -115,12 +115,13 @@ What's inside (`docker/Dockerfile.full`, ~3.4 GB):
   them later by re-running `docker/skills-install.sh` in the container (or
   rebuilding with a reachable `ANTHROPIC_SKILLS_REPO`).
 
-## All-in-one image (Garage + MCP + dashboard)
+## All-in-one image (Garage + MCP + dashboard + companion)
 
 The default image runs **only** the Garage API — the right call when you drive it
-from your own code or the kit. If instead you want one container that also serves
-the **MCP server** and the **web dashboard**, build the all-in-one variant
-(`docker/Dockerfile.allinone`):
+from your own code or the kit. If instead you want one container that is a
+self-hosted Claude-Code-web — the **MCP server**, the **web dashboard**, and the
+**companion service** (GitHub App git tokens + a template registry) — build the
+all-in-one variant (`docker/Dockerfile.allinone`):
 
 ```bash
 docker compose -f docker-compose.allinone.yml up -d --build
@@ -129,16 +130,17 @@ docker compose -f docker-compose.allinone.yml up -d --build
 docker compose -f docker-compose.allinone.yml logs | grep -A2 "Admin API key"
 ```
 
-One container, three surfaces:
+One container, four services (companion is loopback-internal):
 
 ```
-┌─ container ───────────────────────────────────────────────┐
-│  glorp garage   ─ REST/WS API ........... :4271            │
-│      ▲   ▲                                                 │
-│      │   └─ dashboard (Next.js console) . :3270  ─▶ browser│
-│      └───── glorp-mcp (streamable HTTP) . :8787 /mcp       │
-│  /data  /workspaces (volumes)                              │
-└───────────────────────────────────────────────────────────┘
+┌─ container ────────────────────────────────────────────────┐
+│  glorp garage    ─ REST/WS API ........... :4271            │
+│      ▲   ▲   ▲                                              │
+│      │   │   └ dashboard (Next.js console) :3270 ─▶ browser │
+│      │   └──── glorp-mcp (streamable HTTP) :8787 /mcp       │
+│      └──▶ glorp companion (tokens+registry):8788 internal   │
+│  /data  /workspaces (volumes)                               │
+└────────────────────────────────────────────────────────────┘
 ```
 
 - **Dashboard** — open <http://localhost:3270> and sign in with
@@ -149,10 +151,22 @@ One container, three surfaces:
   the minted admin key; set `MCP_AUTH_TOKEN` to require a Bearer token on the
   endpoint itself.
 - **Garage API** — `http://localhost:4271`, same as the lean image.
+- **Companion** — runs internally on `:8788`; Garage is auto-wired to it. Drop
+  Template v2 documents (and `skills/` libraries) into the `glorp-data` volume at
+  `/data/companion-templates` and they appear in the dashboard's template picker
+  with skills resolved. Provide `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` (PEM or
+  base64; or mount a file and set `GITHUB_APP_PRIVATE_KEY_FILE`) and template
+  repos with `auth: "github"` clone with short-lived installation tokens — pushes
+  keep working via the `glorp __git-cred` helper. To use an **external** companion
+  instead, set `GLORP_GARAGE_GIT_TOKEN_URL` / `GLORP_GARAGE_TEMPLATE_REGISTRY_URL`
+  (+ `_HEADERS`) — they override the built-in wiring. See
+  `docs/companion-service-spec.md`.
 
-The Garage process supervises all three: if any exits, the container stops so the
+The entrypoint supervises all four: if any exits, the container stops so the
 restart policy brings it back. Ports are configurable via `MCP_PORT` / `DASH_PORT`
-(remember to match the published `-p` mappings).
+/ `COMPANION_PORT` (remember to match the published `-p` mappings). Garage and the
+companion run from the compiled binary inside the image, so orchestrator subagents
+and the git credential helper behave exactly as on a binary install.
 
 ### Plain `docker run`
 
