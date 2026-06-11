@@ -26,6 +26,7 @@ import { resolveSessionPaths } from "./session-paths.ts";
 import { SessionErrorLog, setActiveErrorLog } from "./runtime/error-log.ts";
 import { PermissionDM } from "./runtime/permission-mode.ts";
 import { classifyModelError } from "../shared/error-classify.ts";
+import { estimateContextPressure } from "./runtime/context-pressure.ts";
 import { teardownAgentMesh } from "../orchestrator/mesh-setup.ts";
 import { agentId as toAgentId } from "../orchestrator/types.ts";
 import { discoverWorkspaceContext } from "../orchestrator/workspace-context.ts";
@@ -212,7 +213,24 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         if (buildPrompt) {
           await runOrchestratorBuild(orchestrator, bridge, opts.workspace, buildPrompt, abortController.signal);
         } else {
-          const request = buildRequest(text, images);
+          // Early compaction: when the projected request is heavy (long live
+          // window, attached images), run glove's /compact hook FIRST in the
+          // same turn — the hook force-compacts, then the message proceeds
+          // against the fresh window. Waiting for glove's own threshold has
+          // been observed to let quality collapse before it fires.
+          let outgoing = text;
+          if (!/(^|\s)\/compact(\s|$)/.test(text)) {
+            const pressure = estimateContextPressure(
+              await state.active.store.getDisplayMessages(),
+              state.contextLimit,
+              images?.length ?? 0,
+            );
+            if (pressure.pressured) {
+              outgoing = `/compact ${text}`;
+              bridge.emit({ type: "turn", turn: systemTurn("context compacted automatically before this turn") });
+            }
+          }
+          const request = buildRequest(outgoing, images);
           await state.active.agent.processRequest(request, abortController.signal);
           await continueIfIntentOnly({ agent: state.active.agent, store: state.active.store, signal: abortController.signal });
           await continueOpenTasks({ agent: state.active.agent, store: state.active.store, signal: abortController.signal });

@@ -98,3 +98,34 @@ describe("pleasantry-aware ask capture", () => {
     expect(firstUserRequest([{ sender: "user", text: "hey" }] as never)?.text).toBe("hey");
   });
 });
+
+describe("context pressure (auto-compaction trigger)", () => {
+  const { estimateContextPressure } = require("../src/agent/runtime/context-pressure.ts");
+  const text = (n: number) => ({ sender: "user", text: "x".repeat(n) });
+
+  test("light sessions are not pressured", () => {
+    const p = estimateContextPressure([text(4000)], 262144, 0);
+    expect(p.pressured).toBe(false);
+  });
+
+  test("a heavy live window trips the threshold", () => {
+    // ~150k tokens of text + 70k overhead > 60% of 262k
+    const msgs = Array.from({ length: 30 }, () => text(20000));
+    const p = estimateContextPressure(msgs as never, 262144, 0);
+    expect(p.pressured).toBe(true);
+  });
+
+  test("compaction resets the live window measurement", () => {
+    const msgs = [...Array.from({ length: 30 }, () => text(20000)), { sender: "user", text: "summary", is_compaction: true }, text(2000)];
+    const p = estimateContextPressure(msgs as never, 262144, 0);
+    expect(p.pressured).toBe(false);
+  });
+
+  test("attached images raise the estimate", () => {
+    const msgs = Array.from({ length: 10 }, () => text(20000)); // ~50k+70k = borderline under
+    const without = estimateContextPressure(msgs as never, 262144, 0);
+    const withImgs = estimateContextPressure(msgs as never, 262144, 24);
+    expect(without.pressured).toBe(false);
+    expect(withImgs.estimatedTokens).toBeGreaterThan(without.estimatedTokens);
+  });
+});
