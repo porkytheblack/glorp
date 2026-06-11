@@ -192,7 +192,24 @@ docker compose -f docker-compose.web.yml up -d --build
 
 Operator templates (`/data/templates`) still work in this flavor; only the
 companion's registry and GitHub-App git tokens are absent (point the
-`GLORP_GARAGE_*_URL` env vars at an external companion to add them back). Garage and the
+`GLORP_GARAGE_*_URL` env vars at an external companion to add them back).
+
+### Single-volume hosts (Railway, Fly, …)
+
+Some platforms allow **one volume per service**. Mount it at a parent path and
+nest both state dirs under it via env — no compose/image changes needed:
+
+```text
+volume mount path:      /glorp
+GLORP_DATA_DIR:         /glorp/data
+GLORP_WORKSPACE_ROOT:   /glorp/workspaces
+```
+
+Everything that must survive a redeploy (keys, sessions, credentials,
+templates, workspaces) then lives in the single volume. Remember the
+dashboard's Garage URL is baked at build time — on such platforms set the
+`GARAGE_URL` build arg to your public Garage URL (Railway passes service
+variables as build args) or front both ports with a same-origin proxy. Garage and the
 companion run from the compiled binary inside the image, so orchestrator subagents
 and the git credential helper behave exactly as on a binary install.
 

@@ -18,4 +18,11 @@ if [ "${1:-}" != "keys" ] \
   echo "────────────────────────────────────────────────────────────────"
 fi
 
+# GLORP_WORKSPACE_ROOT (single-volume hosts like Railway: nest both state dirs
+# under one mount) is appended AFTER the CMD args — the last flag wins in the
+# CLI parser, so the env override beats the baked default.
+if [ -n "${GLORP_WORKSPACE_ROOT:-}" ]; then
+  mkdir -p "$GLORP_WORKSPACE_ROOT"
+  exec /app/dist/glorp garage "$@" --workspace-root "$GLORP_WORKSPACE_ROOT"
+fi
 exec /app/dist/glorp garage "$@"

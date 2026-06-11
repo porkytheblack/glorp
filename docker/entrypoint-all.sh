@@ -21,6 +21,10 @@
 set -euo pipefail
 
 DATA="${GLORP_DATA_DIR:-/data}"
+# Both state dirs are env-relocatable so SINGLE-VOLUME hosts (Railway, Fly)
+# can mount one volume and nest both under it, e.g. mount at /glorp with
+# GLORP_DATA_DIR=/glorp/data GLORP_WORKSPACE_ROOT=/glorp/workspaces.
+WORKSPACE_ROOT="${GLORP_WORKSPACE_ROOT:-/workspaces}"
 GLORP_BIN=/app/dist/glorp
 GARAGE_PORT=4271                       # fixed: dashboard bundle + MCP wire to it
 MCP_PORT="${MCP_PORT:-8787}"
@@ -97,8 +101,9 @@ fi
 
 # --- 3. Garage (always on — the source of truth) ------------------------------
 # Inherits the container env (model keys, GARAGE_ADMIN_* for dashboard login).
+mkdir -p "$WORKSPACE_ROOT"
 start garage "$GLORP_BIN" garage \
-  --host 0.0.0.0 --port "$GARAGE_PORT" --workspace-root /workspaces
+  --host 0.0.0.0 --port "$GARAGE_PORT" --workspace-root "$WORKSPACE_ROOT"
 
 log "waiting for Garage on :$GARAGE_PORT…"
 for i in $(seq 1 60); do
