@@ -1,8 +1,12 @@
-# Garage design language
+# Garage design language — "sap & sunlight"
 
-Refined, product-grade dark UI. Calm confidence: deliberate hierarchy, depth
-from hairline borders + a top sheen (never heavy drop shadows on surfaces),
-one indigo accent used sparingly. The reference implementations are the Fleet
+Refined, product-grade UI in two modes: **dark "pine at dusk"** (green-black
+surfaces, luminous sap green, solar amber) and **light "warm paper"** (cream
+surfaces, pine ink, darkened sap). Calm confidence: deliberate hierarchy,
+depth from hairline borders + a top sheen (never heavy drop shadows on
+surfaces), one sap-green accent used sparingly. The two modes share ONE
+structure — only hues shift, and they shift inside globals.css, never in
+components. The reference implementations are the Fleet
 console (`app/(app)/page.tsx`, `components/fleet/*`) and the app shell
 (`components/app-sidebar.tsx`, `components/app-topbar.tsx`). When in doubt,
 imitate those files.
@@ -15,19 +19,25 @@ imitate those files.
   (dialogs/menus) sit on `bg-popover` + `shadow-elevated`.
 - **Borders**: `border-border` everywhere; `border-border-strong` only for
   emphasis/hover. Dividers inside lists: `divide-border/60`.
-- **Brand**: `brand` (indigo) for primary actions, active nav, focus, live
-  accents; `brand-strong` for hover/links. Brand should touch few pixels.
+- **Brand**: `brand` (sap green) for primary actions, active nav, focus,
+  live accents; `brand-strong` for hover/links. Brand should touch few
+  pixels. Green/amber/teal values are darker in light mode for contrast on
+  cream — always use the token, never a literal, and it stays legible.
 - **Quiet scale** (3 weights of gray text): `text-foreground` (content) →
   `text-muted-foreground` (secondary) → `text-faint` (hints, icons, meta).
   Decorative icons default to `text-faint`.
-- **Semantic**: `success` (running/live), `warning` (provisioning/caution),
-  `destructive` (errors/dangerous actions). Tint surfaces with `/10`–`/[0.07]`
-  alphas and `/25`–`/30` borders, as in `ErrorState`.
+- **Semantic**: `success` (running/live), `warning` (solar amber —
+  provisioning/working/caution), `destructive` (red clay — errors/dangerous
+  actions). Tint surfaces with `/10`–`/[0.07]` alphas and `/25`–`/30`
+  borders, as in `ErrorState`.
 
 ## Utilities & shadows
 
 - `.surface` = card + border + `shadow-card` (the standard container).
-- `shadow-sheen` inner top highlight for small chips/buttons on dark.
+- `shadow-sheen` inner top highlight for small chips/buttons.
+- Shadows + sheen + `.skeleton` shimmer are CSS variables (`--shadow-card`,
+  `--shadow-elevated`, `--sheen`, `--shimmer`) tuned per mode in globals.css
+  — never write a literal box-shadow with a baked-in tint.
 - `shadow-elevated` for overlays only. `shadow-glow` for hero focus moments
   (one per screen, e.g. the launch composer's `focus-within`).
 - `.text-display` for hero headings; `.tnum` on every numeric column;
@@ -68,7 +78,12 @@ plus the shadcn primitives in `components/ui/`.
 
 ## Hard rules
 
-- Dark-only; no new color literals — tokens only.
+- Two modes, one structure: every screen must hold up in light AND dark.
+  No new color literals — tokens only. Mode-specific styling means a token
+  (or `--var`) tuned in globals.css, not a `dark:` utility in a component.
+- Theme plumbing: boot script in `app/layout.tsx`, `useTheme` in
+  `lib/theme.ts`, `ThemeToggle` in the topbar. localStorage `garage.theme`,
+  absent = follow OS.
 - Keep every file under 200 lines; split before exceeding.
 - Don't restyle by overriding primitives with long `className` chains — if a
   pattern repeats three times, it belongs in a shared component.

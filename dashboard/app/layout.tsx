@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { AuthProvider } from "@/lib/auth";
+import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
@@ -15,7 +16,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={cn("dark", GeistSans.variable, GeistMono.variable)} suppressHydrationWarning>
+    <html lang="en" className={cn(GeistSans.variable, GeistMono.variable)} suppressHydrationWarning>
+      <head>
+        {/* Sets the `dark` class before first paint — localStorage, then OS. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <AuthProvider>
           <TooltipProvider delayDuration={250}>{children}</TooltipProvider>

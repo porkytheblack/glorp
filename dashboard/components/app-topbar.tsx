@@ -7,6 +7,7 @@ import { getNamespace, setNamespace } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { NamespaceDto, SessionDto } from "@/lib/types";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const DEFAULT = "__default__";
 
@@ -67,6 +68,8 @@ export function AppTopbar({ title }: { title: string }) {
             ))}
           </SelectContent>
         </Select>
+        <span className="mx-1 h-3.5 w-px bg-border" />
+        <ThemeToggle />
       </div>
     </header>
   );

@@ -1,12 +1,14 @@
 "use client";
 
 import { Toaster as Sonner, type ToasterProps } from "sonner";
+import { useTheme } from "@/lib/theme";
 
-/** App-wide toast surface, themed to graphite. Use `toast()` from sonner. */
+/** App-wide toast surface, themed via tokens. Use `toast()` from sonner. */
 export function Toaster(props: ToasterProps) {
+  const { resolved } = useTheme();
   return (
     <Sonner
-      theme="dark"
+      theme={resolved}
       position="bottom-right"
       toastOptions={{
         classNames: {

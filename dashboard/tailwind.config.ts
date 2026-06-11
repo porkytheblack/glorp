@@ -2,13 +2,13 @@ import type { Config } from "tailwindcss";
 import animate from "tailwindcss-animate";
 
 /**
- * Garage design language — a refined, product-grade dark theme.
+ * Garage design language — "sap & sunlight", light + dark.
  *
- * Cool near-neutral surfaces arranged in a deliberate elevation ladder
- * (background → card → surface-2 → elevated), a single indigo brand accent,
- * and a depth model built from hairline borders + a top "sheen" highlight
- * rather than heavy shadows. Every value is wired through the HSL CSS
- * variables in globals.css so the whole system retunes from one place.
+ * Warm near-neutral surfaces arranged in a deliberate elevation ladder
+ * (background → card → surface-2 → elevated), a single sap-green brand
+ * accent, and a depth model built from hairline borders + a top "sheen"
+ * highlight rather than heavy shadows. Every value is wired through the HSL
+ * CSS variables in globals.css so each mode retunes from one place.
  */
 const config: Config = {
   darkMode: "class",
@@ -57,10 +57,10 @@ const config: Config = {
         sm: "calc(var(--radius) - 6px)",
       },
       boxShadow: {
-        sheen: "inset 0 1px 0 0 hsl(0 0% 100% / 0.04)",
-        card: "0 1px 2px 0 hsl(240 10% 2% / 0.5), inset 0 1px 0 0 hsl(0 0% 100% / 0.03)",
-        elevated:
-          "0 16px 40px -12px hsl(240 12% 1% / 0.75), 0 4px 12px -4px hsl(240 12% 1% / 0.55), inset 0 1px 0 0 hsl(0 0% 100% / 0.05)",
+        // Depth recipe lives in globals.css so each mode tunes its own tint.
+        sheen: "inset 0 1px 0 0 hsl(var(--sheen))",
+        card: "var(--shadow-card)",
+        elevated: "var(--shadow-elevated)",
         glow: "0 0 0 1px hsl(var(--brand) / 0.45), 0 0 28px -6px hsl(var(--brand) / 0.5)",
       },
       keyframes: {
