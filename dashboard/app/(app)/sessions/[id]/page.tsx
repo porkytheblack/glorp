@@ -164,6 +164,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 agents={live.agents}
                 activeAgentId={live.activeAgentId}
                 mode={mode}
+                busyRefresh={live.busy}
                 onMode={live.setMode}
                 onSwitchAgent={live.switchAgent}
                 onAddAgent={live.addAgent}

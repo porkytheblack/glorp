@@ -9,6 +9,7 @@ import { TaskList } from "@/components/chat/task-list";
 import { AgentRoster } from "@/components/session/agent-roster";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import type { SessionDto, SessionStats, TaskItem, AgentInfo } from "@/lib/types";
+import { FilesPanel } from "./files-panel";
 
 const MODE_LABEL: Record<string, string> = {
   normal: "Normal — prompt for risky tools",
@@ -74,6 +75,7 @@ export function Inspector({
   agents,
   activeAgentId,
   mode,
+  busyRefresh,
   onMode,
   onSwitchAgent,
   onAddAgent,
@@ -85,6 +87,9 @@ export function Inspector({
   agents: AgentInfo[];
   activeAgentId: string | null;
   mode: string;
+  /** Toggles when the agent's busy state flips — the files panel refetches on
+   * it so agent-written deliverables appear as each turn completes. */
+  busyRefresh?: boolean;
   onMode: (m: string) => void;
   onSwitchAgent: (id: string) => void;
   onAddAgent: (role: string) => void;
@@ -137,6 +142,7 @@ export function Inspector({
           <CopyButton value={session.id} />
         </div>
       </Section>
+      <FilesPanel sessionId={session.id} refresh={busyRefresh} />
     </div>
   );
 }
