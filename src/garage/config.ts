@@ -57,6 +57,15 @@ export interface GarageConfig {
   gitTokenUrl?: string;
   /** Headers sent to the token service (e.g. its own auth). `GLORP_GARAGE_GIT_TOKEN_HEADERS` (JSON). */
   gitTokenHeaders?: Record<string, string>;
+  /**
+   * Companion-service template registry base URL (e.g.
+   * `https://svc/v1/templates`) — remote templates merge with the disk
+   * library, disk winning on name collision. See
+   * docs/companion-service-spec.md §3. `GLORP_GARAGE_TEMPLATE_REGISTRY_URL`.
+   */
+  templateRegistryUrl?: string;
+  /** Headers for the registry. `GLORP_GARAGE_TEMPLATE_REGISTRY_HEADERS` (JSON). */
+  templateRegistryHeaders?: Record<string, string>;
 }
 
 /** Default idle-session TTL: 30 minutes. */
@@ -89,6 +98,8 @@ interface GarageFileConfig {
   auth?: { enabled?: boolean };
   gitTokenUrl?: string;
   gitTokenHeaders?: Record<string, string>;
+  templateRegistryUrl?: string;
+  templateRegistryHeaders?: Record<string, string>;
 }
 
 /**
@@ -190,5 +201,8 @@ export function loadGarageConfig(overrides: GarageConfigOverrides = {}): GarageC
     },
     gitTokenUrl: process.env.GLORP_GARAGE_GIT_TOKEN_URL ?? file.gitTokenUrl,
     gitTokenHeaders: parseHeaderEnv(process.env.GLORP_GARAGE_GIT_TOKEN_HEADERS) ?? file.gitTokenHeaders,
+    templateRegistryUrl: process.env.GLORP_GARAGE_TEMPLATE_REGISTRY_URL ?? file.templateRegistryUrl,
+    templateRegistryHeaders:
+      parseHeaderEnv(process.env.GLORP_GARAGE_TEMPLATE_REGISTRY_HEADERS) ?? file.templateRegistryHeaders,
   };
 }

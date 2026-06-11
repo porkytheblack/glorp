@@ -14,6 +14,8 @@ import { createGarageRouter } from "./router.ts";
 import { CredentialsStore } from "../agent/credentials.ts";
 import { credentialStorageFromEnv } from "../agent/credential-storage.ts";
 import { TemplateStore } from "./templates/store.ts";
+import { RemoteTemplateRegistry } from "./templates/remote.ts";
+import { compositeTemplateSource } from "./templates/source.ts";
 import { NamespaceStore, DEFAULT_NAMESPACE_ID } from "./namespace-store.ts";
 import { NamespaceRegistry } from "./namespace-registry.ts";
 import { StorageConfigStore } from "./storage/config-store.ts";
@@ -34,7 +36,11 @@ export interface GarageHandle {
 
 export async function startGarage(config: GarageConfig): Promise<GarageHandle> {
   const garageCredentials = new CredentialsStore(credentialStorageFromEnv(config.dataDir));
-  const templates = new TemplateStore(config.templatesDir);
+  // Disk library + (optional) companion-service registry; disk wins on collision.
+  const remoteTemplates = config.templateRegistryUrl
+    ? new RemoteTemplateRegistry({ url: config.templateRegistryUrl, headers: config.templateRegistryHeaders })
+    : null;
+  const templates = compositeTemplateSource(new TemplateStore(config.templatesDir), remoteTemplates);
   const namespaceStore = new NamespaceStore(config.dataDir, config.workspaceRoot);
   const storageConfig = new StorageConfigStore(config.dataDir);
   // The uploads mirror is garage-global; the per-session manifest path is taken

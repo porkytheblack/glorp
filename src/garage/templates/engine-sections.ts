@@ -25,7 +25,33 @@ export function provisionSkills(
   const skillsRoot = path.join(workspace, ".claude", "skills");
   for (const skill of template.skills ?? []) {
     if ("from" in skill) installFromSkill(skill, skillsRoot, ctx);
+    else if ("files" in skill) installResolvedSkill(skill, skillsRoot, interp);
     else installInlineSkill(skill, skillsRoot, interp);
+  }
+}
+
+/**
+ * A registry-resolved multi-file skill (companion-service spec §3.3): the
+ * source inlined every file, so this is pure materialisation — confined to the
+ * skill folder, and a SKILL.md must be among the files or the loader would
+ * never discover the result.
+ */
+function installResolvedSkill(
+  skill: Extract<TemplateSkill, { files: unknown }>,
+  skillsRoot: string,
+  interp: Interpolator,
+): void {
+  if (!skill.files.some((f) => f.path === "SKILL.md")) {
+    throw new TemplateError(`skill '${skill.name}' has no SKILL.md among its files`);
+  }
+  const dir = path.join(skillsRoot, skill.name);
+  for (const file of skill.files) {
+    const abs = path.resolve(dir, file.path);
+    if (!isWithin(dir, abs)) {
+      throw new TemplateError(`skill '${skill.name}' file '${file.path}' escapes the skill folder`);
+    }
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, interp(file.content));
   }
 }
 

@@ -12,12 +12,13 @@ import { WorkspaceStore } from "./workspace-store.ts";
 import { NamespaceCredentialsStore } from "./credentials.ts";
 import { buildRouteGroups, type RouteGroups } from "./route-groups.ts";
 import { provision, type ProvisionContext } from "./templates/engine.ts";
+import { TemplateError } from "./templates/types.ts";
 import { selectNamespaceId } from "./auth/middleware.ts";
 import { gitTokenSourceFor } from "./git-tokens.ts";
 import { addProvider, listToolsViaMcp } from "../mcpgen/index.ts";
 import type { NamespaceStore } from "./namespace-store.ts";
 import type { GarageConfig } from "./config.ts";
-import type { TemplateStore } from "./templates/store.ts";
+import type { TemplateSource } from "./templates/source.ts";
 import type { CredentialsStore } from "../agent/credentials.ts";
 import type { UploadsSync } from "./storage/types.ts";
 import type { Namespace, ProvisionMcpInput } from "./types.ts";
@@ -48,7 +49,7 @@ export class NamespaceRegistry {
   constructor(
     private readonly store: NamespaceStore,
     private readonly config: GarageConfig,
-    private readonly templates: TemplateStore,
+    private readonly templates: TemplateSource,
     /** Garage-default credentials, shared as the fallback for every namespace. */
     private readonly garageCredentials: CredentialsStore,
     /** Remote uploads mirror (R2); undefined when unconfigured. */
@@ -124,8 +125,12 @@ export class NamespaceRegistry {
       confineWorkspaces: !this.store.isDefault(ns.id),
       templates: {
         has: (name) => this.templates.has(name),
-        provision: (name, params, workspace) =>
-          provision(this.templates.get(name)!, params, workspace, this.provisionCtx),
+        provision: async (name, params, workspace) => {
+          const template = await this.templates.get(name);
+          // has() raced a registry change — surface it as a template error.
+          if (!template) throw new TemplateError(`Unknown template: ${name}`);
+          return provision(template, params, workspace, this.provisionCtx);
+        },
       },
     });
     return {

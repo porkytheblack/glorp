@@ -65,7 +65,24 @@ export interface TemplateSkillInline {
   content: string;
 }
 
-export type TemplateSkill = TemplateSkillFrom | TemplateSkillInline;
+/** One file of a registry-resolved skill. */
+export interface TemplateSkillFile {
+  /** Relative path inside the skill folder (must include a SKILL.md). */
+  path: string;
+  content: string;
+}
+
+/**
+ * A multi-file skill RESOLVED by the template's source — the form the
+ * companion-service registry emits (it inlines its own skill library
+ * server-side, so Garage never fetches assets; spec §3.3).
+ */
+export interface TemplateSkillResolved {
+  name: string;
+  files: TemplateSkillFile[];
+}
+
+export type TemplateSkill = TemplateSkillFrom | TemplateSkillInline | TemplateSkillResolved;
 
 /** An MCP provider provisioned into the workspace (mirrors ProvisionMcpInput). */
 export interface TemplateMcpProvider {

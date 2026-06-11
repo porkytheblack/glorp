@@ -16,7 +16,8 @@ import type { CreateSessionInput, CreateWorkspaceInput, SessionDto, Workspace, W
 
 /** Provisions a fresh workspace from a named setup template. */
 export interface TemplateProvisioner {
-  has(name: string): boolean;
+  /** May be async — registry-backed sources check the network. */
+  has(name: string): boolean | Promise<boolean>;
   provision(name: string, params: Record<string, string>, workspace: string): Promise<void>;
 }
 
@@ -92,7 +93,7 @@ export class SessionManager {
     createdByUs: boolean,
   ): Promise<void> {
     const provisioner = this.config.templates;
-    if (!provisioner || !provisioner.has(template)) {
+    if (!provisioner || !(await provisioner.has(template))) {
       throw new WorkspaceError(`Unknown template: ${template}`);
     }
     try {

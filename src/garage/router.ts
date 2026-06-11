@@ -11,7 +11,7 @@ import { keyRoutes } from "./routes/keys.ts";
 import { storageRoutes } from "./routes/storage.ts";
 import type { StorageConfigStore } from "./storage/config-store.ts";
 import type { KeyStore } from "./auth/key-store.ts";
-import type { TemplateStore } from "./templates/store.ts";
+import type { TemplateSource } from "./templates/source.ts";
 import type { NamespaceControlRoutes } from "./routes/namespaces.ts";
 import type { NamespaceBundle } from "./namespace-registry.ts";
 import type { RouteGroups } from "./route-groups.ts";
@@ -35,7 +35,7 @@ export interface GarageRouter {
 }
 
 export function createGarageRouter(
-  templates: TemplateStore,
+  templates: TemplateSource,
   keyStore: KeyStore,
   namespaceCtl: NamespaceControlRoutes,
   storageConfig?: StorageConfigStore,

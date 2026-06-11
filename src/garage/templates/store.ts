@@ -7,6 +7,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Template } from "./types.ts";
+import { normalizeTemplate } from "./normalize.ts";
 
 export class TemplateStore {
   constructor(private readonly dir: string) {}
@@ -35,25 +36,7 @@ export class TemplateStore {
 
   private read(file: string, fallbackName: string): Template | undefined {
     try {
-      const raw = JSON.parse(fs.readFileSync(file, "utf-8")) as Partial<Template>;
-      // A template must provision SOMETHING — any v1 or v2 section qualifies.
-      const hasContent =
-        Array.isArray(raw.steps) ||
-        Array.isArray(raw.repos) ||
-        Array.isArray(raw.skills) ||
-        Array.isArray(raw.mcp) ||
-        typeof raw.system_prompt === "string";
-      if (!hasContent) return undefined;
-      return {
-        name: raw.name ?? fallbackName,
-        description: raw.description,
-        steps: Array.isArray(raw.steps) ? raw.steps : undefined,
-        repos: Array.isArray(raw.repos) ? raw.repos : undefined,
-        skills: Array.isArray(raw.skills) ? raw.skills : undefined,
-        system_prompt: typeof raw.system_prompt === "string" ? raw.system_prompt : undefined,
-        mcp: Array.isArray(raw.mcp) ? raw.mcp : undefined,
-        params: Array.isArray(raw.params) ? raw.params : undefined,
-      };
+      return normalizeTemplate(JSON.parse(fs.readFileSync(file, "utf-8")) as Partial<Template>, fallbackName);
     } catch {
       return undefined;
     }
