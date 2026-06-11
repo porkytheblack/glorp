@@ -81,15 +81,18 @@ export const KNOWN_PROVIDERS: KnownProviderMeta[] = [
     ],
     needsApiKey: true,
     reasoningCapableModelMatchers: [
-      /\/gpt-5/,
-      /\/o[3-9]/,
-      /\/deepseek-r1/,
-      /\/deepseek-chat-v4/,
-      /\/qwen.*thinking/,
-      /\/glm-/,
-      /\/kimi-/,
-      /\/minimax/,
-      /\/mimo/,
+      // Both routed ("z-ai/glm-5.1") and bare ("glm-5.1") ids — OpenRouter
+      // accepts either, and a slash-anchored matcher silently disabled
+      // reasoning (capture, echo, AND the composer knob) for bare names.
+      /(^|\/)gpt-5/,
+      /(^|\/)o[3-9]/,
+      /(^|\/)deepseek-r1/,
+      /(^|\/)deepseek-chat-v4/,
+      /(^|\/)qwen.*thinking/,
+      /(^|\/)glm-/,
+      /(^|\/)kimi-/,
+      /(^|\/)minimax/,
+      /(^|\/)mimo/,
     ],
   },
   {
