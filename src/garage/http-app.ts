@@ -172,9 +172,13 @@ export function buildGarageApp(deps: GarageAppDeps) {
 
     let bundle: NamespaceBundle;
     try {
+      // Namespace comes from the header, or — like the WS path — the `ns`
+      // query param: plain <a href> downloads are top-level navigations that
+      // cannot set headers. bundleForKey enforces key↔namespace authorization
+      // either way when auth is on.
       bundle = isAdminRoute(routePath)
         ? registry.resolve(DEFAULT_NAMESPACE_ID)
-        : registry.bundleForKey(key, c.req.header("x-glorp-namespace") ?? null);
+        : registry.bundleForKey(key, c.req.header("x-glorp-namespace") ?? url.searchParams.get("ns") ?? null);
     } catch (err) {
       return namespaceError(err);
     }
