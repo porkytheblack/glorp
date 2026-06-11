@@ -1,9 +1,13 @@
 name: docker
 
-# Build the Glorp Station image. On pull requests it just validates the build;
-# on pushes to main/preview it publishes to GitHub Container Registry so you can
-# `docker pull ghcr.io/<owner>/glorp/station:<branch>`. Pushes to the default
-# branch also move a `:latest` tag, so deploys can track it without bumping SHAs.
+# Build the Glorp Garage images. On pull requests it just validates the builds;
+# on pushes to main/preview it publishes to GitHub Container Registry:
+#   ghcr.io/<owner>/glorp/garage           lean Garage API
+#   ghcr.io/<owner>/glorp/garage-full      + media/document toolchain
+#   ghcr.io/<owner>/glorp/garage-allinone  Garage + dashboard + MCP + companion
+# Pushes to the default branch also move a `:latest` tag, so deploys can track
+# it without bumping SHAs. (These replaced the pre-rename `station`/`station-full`
+# names — old pulls won't see new pushes.)
 on:
   push:
     branches: [main, preview]
@@ -43,7 +47,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/station
+          images: ghcr.io/${{ github.repository }}/garage
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -86,7 +90,7 @@ jobs:
         id: meta-full
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/station-full
+          images: ghcr.io/${{ github.repository }}/garage-full
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -101,5 +105,54 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-full.outputs.tags }}
           labels: ${{ steps.meta-full.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  image-allinone:
+    name: build + publish all-in-one image
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata (all-in-one)
+        id: meta-allinone
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/garage-allinone
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # NOTE: the dashboard bakes NEXT_PUBLIC_GARAGE_URL at build time (GARAGE_URL
+      # build arg). The published image carries the default http://localhost:4271,
+      # which suits local `-p 4271:4271` runs. For a remote/public Garage URL,
+      # rebuild from source with --build-arg GARAGE_URL=… or front both ports with
+      # a same-origin reverse proxy (see docs/docker.md).
+      - name: Build all-in-one (and push on non-PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.allinone
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-allinone.outputs.tags }}
+          labels: ${{ steps.meta-allinone.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

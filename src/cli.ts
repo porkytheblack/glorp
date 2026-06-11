@@ -44,6 +44,12 @@ async function main(): Promise<void> {
       return;
     }
 
+    case "companion": {
+      const { runCompanion } = await import("./cli-companion.ts");
+      await runCompanion(args);
+      return;
+    }
+
     case "migrate": {
       const { runMigrate } = await import("./cli-migrate.ts");
       await runMigrate(args);

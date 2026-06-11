@@ -13,9 +13,9 @@ if [ "${1:-}" != "keys" ] \
   && [ ! -f "$DATA/glorp-keys.json" ]; then
   echo "────────────────────────────────────────────────────────────────"
   echo "[glorp] First boot — minting an admin API key (GLORP_AUTO_KEY=0 to skip):"
-  bun run src/cli.ts garage keys add docker --scopes admin --data-dir "$DATA"
+  /app/dist/glorp garage keys add docker --scopes admin --data-dir "$DATA"
   echo "[glorp] Use it as:  Authorization: Bearer <the glsk_… key above>"
   echo "────────────────────────────────────────────────────────────────"
 fi
 
-exec bun run src/cli.ts garage "$@"
+exec /app/dist/glorp garage "$@"

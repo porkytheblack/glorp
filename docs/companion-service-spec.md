@@ -242,10 +242,15 @@ material, or stack traces in either.
 
 ## 5. Conformance
 
-A reference conformance stub lives at `tests/companion-stub.ts` in the Garage
-repo — your implementation should be drop-in indistinguishable from it as far
-as the client tests (`tests/garage-remote-templates.test.ts`,
-`tests/garage-storage.test.ts` patterns) are concerned. Smoke transcript:
+**A full reference implementation ships in this repo: `glorp companion`**
+(`src/companion/`). It implements both capabilities — GitHub App minting
+(§2.4, given `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY[_FILE]`) and the
+template registry with server-side skill resolution (§3) — and runs as the
+fourth service inside the all-in-one Docker image, where Garage is wired to
+it automatically. A hosted implementation should be drop-in
+indistinguishable from it; its test suite (`tests/companion-service.test.ts`,
+which verifies down to the JWT signature) doubles as your acceptance bar,
+alongside the lighter stub at `tests/companion-stub.ts`. Smoke transcript:
 
 ```bash
 # token, repo-scoped

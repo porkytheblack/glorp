@@ -6,6 +6,7 @@
  * touching argv (process listings) or `.git/config` (on-disk).
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { TemplateError, type Template, type TemplateRepo } from "./types.ts";
 import { isWithin, type Interpolator, type SectionSpawn } from "./engine-shared.ts";
@@ -96,6 +97,29 @@ async function githubAuthEnv(url: string, ctx: ProvisionContext, secrets: Set<st
  * path are never re-quoted by an intermediate shell.
  */
 async function installCredHelper(repoDir: string, spawn: SectionSpawn): Promise<void> {
-  const helper = `!${process.execPath} __git-cred`;
-  await spawn(["git", "config", "credential.helper", helper], repoDir, "configure credential helper");
+  await spawn(["git", "config", "credential.helper", gitCredHelperCommand()], repoDir, "configure credential helper");
+}
+
+/**
+ * The credential-helper invocation, correct for BOTH runtimes. In the compiled
+ * binary, execPath IS glorp and dispatches `__git-cred` itself. Running from
+ * source (`bun src/cli.ts garage` — dev hosts, the Docker source mode),
+ * execPath is bun, which must be handed the CLI script first or it would try
+ * to execute a file literally named `__git-cred`. Source mode is detected the
+ * same way the orchestrator runner does it: the script path exists as a real
+ * file on disk — a compiled binary's argv[1] is a virtual /$bunfs path that
+ * stat() rejects. Paths are quoted because git runs `!`-helpers through sh.
+ */
+export function gitCredHelperCommand(
+  execPath = process.execPath,
+  script: string | undefined = process.argv[1],
+): string {
+  const fromSource = (() => {
+    try {
+      return script !== undefined && fs.statSync(script).isFile();
+    } catch {
+      return false;
+    }
+  })();
+  return fromSource ? `!"${execPath}" "${script}" __git-cred` : `!"${execPath}" __git-cred`;
 }

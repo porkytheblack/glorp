@@ -15,9 +15,12 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-# App source + embedded prompts (prebuild generates src/.../embedded.ts).
+# App source + the compiled binary. Garage runs from dist/glorp — not from
+# source — so process.execPath is glorp itself: orchestrator subagents
+# self-spawn (no node in this image) and template clones install a working
+# `__git-cred` credential helper.
 COPY . .
-RUN bun run prebuild
+RUN bun run build
 
 # /data  → Garage state (API keys + session snapshots, persisted)
 # /workspaces → agent working directories (persisted, isolated from /app)

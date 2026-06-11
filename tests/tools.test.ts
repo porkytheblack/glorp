@@ -613,35 +613,43 @@ describe("bashTool", () => {
     expect(r.message).toMatch(reasonRegex);
   });
 
-  test("workspace-local installs still pass through (npm install without -g)", async () => {
-    // We can't actually run npm in this test (no package.json, no network).
-    // Instead verify it's NOT classified as a confirm-required command —
-    // a pure misclassification would be the `npm install` being refused
-    // with the global-install message. We catch the error message to
-    // confirm only "command exited with code" type failures, not "declined".
-    const tool = bashTool(workspace);
-    const r = await tool.do(
-      { command: "npm install some-nonexistent-pkg-xyz", description: "local install" },
-      display,
-      glove,
-    );
-    // It may error from the missing package, but NOT from our guard.
-    if (r.status === "error") {
-      expect(r.message ?? "").not.toMatch(/declined/i);
-    }
-  });
+  test(
+    "workspace-local installs still pass through (npm install without -g)",
+    async () => {
+      // Only the GUARD classification is under test — a misclassification
+      // would refuse `npm install` with the global-install message. The
+      // command itself must fail FAST and OFFLINE (--offline forces
+      // cache-only), because a real registry hit flakes on cold CI runners.
+      const tool = bashTool(workspace);
+      const r = await tool.do(
+        { command: "npm install some-nonexistent-pkg-xyz --offline --no-audit --no-fund", description: "local install" },
+        display,
+        glove,
+      );
+      // It may error from the missing package, but NOT from our guard.
+      if (r.status === "error") {
+        expect(r.message ?? "").not.toMatch(/declined/i);
+      }
+    },
+    20_000,
+  );
 
-  test("workspace-local pip install (no --user) is not refused by the guard", async () => {
-    const tool = bashTool(workspace);
-    const r = await tool.do(
-      { command: "pip install requests==999.999.999", description: "pip in venv" },
-      display,
-      glove,
-    );
-    if (r.status === "error") {
-      expect(r.message ?? "").not.toMatch(/declined/i);
-    }
-  });
+  test(
+    "workspace-local pip install (no --user) is not refused by the guard",
+    async () => {
+      // --no-index keeps pip off the network — same fast-and-offline rationale.
+      const tool = bashTool(workspace);
+      const r = await tool.do(
+        { command: "pip install requests==999.999.999 --no-index", description: "pip in venv" },
+        display,
+        glove,
+      );
+      if (r.status === "error") {
+        expect(r.message ?? "").not.toMatch(/declined/i);
+      }
+    },
+    20_000,
+  );
 
   test("git config (non-global) is not refused", async () => {
     const tool = bashTool(workspace);

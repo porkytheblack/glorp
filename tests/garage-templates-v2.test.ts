@@ -373,3 +373,16 @@ describe("Template v2 — GET /templates wire shape", () => {
     }
   });
 });
+
+describe("gitCredHelperCommand", () => {
+  it("source mode: hands bun the CLI script before the subcommand", () => {
+    const { gitCredHelperCommand } = require("../src/garage/templates/engine-repos.ts");
+    const script = path.resolve("src/cli.ts"); // a real file on disk
+    expect(gitCredHelperCommand("/usr/local/bin/bun", script)).toBe(`!"/usr/local/bin/bun" "${script}" __git-cred`);
+  });
+
+  it("compiled mode: virtual /$bunfs argv[1] is not a real file — execPath dispatches itself", () => {
+    const { gitCredHelperCommand } = require("../src/garage/templates/engine-repos.ts");
+    expect(gitCredHelperCommand("/usr/local/bin/glorp", "/$bunfs/root/cli.js")).toBe('!"/usr/local/bin/glorp" __git-cred');
+  });
+});
