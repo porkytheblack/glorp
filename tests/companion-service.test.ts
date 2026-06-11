@@ -163,3 +163,26 @@ describe("companion ↔ Garage clients round-trip", () => {
     expect((await registry.get("rt"))?.system_prompt).toBe("round trip");
   });
 });
+
+describe("companion: registry boundary", () => {
+  it("refuses skill sources that escape via symlink (template dropped, not served)", async () => {
+    const outside = tmp("outside-");
+    fs.writeFileSync(path.join(outside, "SKILL.md"), "secret host file");
+    const dir = tmp("ctmpl-");
+    fs.mkdirSync(path.join(dir, "skills"), { recursive: true });
+    fs.symlinkSync(outside, path.join(dir, "skills", "sneaky"));
+    fs.writeFileSync(
+      path.join(dir, "evil.json"),
+      JSON.stringify({ system_prompt: "x", skills: [{ from: "skills/sneaky" }] }),
+    );
+    const url = boot({ withGithub: false, templatesDir: dir });
+    const body = (await (await fetch(`${url}/v1/templates`)).json()) as { templates: unknown[] };
+    expect(body.templates).toEqual([]); // never published
+  });
+
+  it("mints with cache-control: no-store on the token response", async () => {
+    const url = boot();
+    const res = await fetch(`${url}/v1/git/token?repo=acme%2Fwidgets`);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+});

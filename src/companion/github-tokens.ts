@@ -98,16 +98,27 @@ export class GitHubAppMinter {
     return id;
   }
 
-  private gh(path: string, init: RequestInit = {}): Promise<Response> {
-    return fetch(`${this.api}${path}`, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${this.appJwt()}`,
-        accept: "application/vnd.github+json",
-        "user-agent": "glorp-companion",
-        ...(init.body ? { "content-type": "application/json" } : {}),
-      },
-    });
+  private async gh(path: string, init: RequestInit = {}): Promise<Response> {
+    try {
+      return await fetch(`${this.api}${path}`, {
+        ...init,
+        // These calls sit on the /v1/git/token request path — a stalled GitHub
+        // must fail fast (spec: "put a timeout in front of GitHub"), not pile
+        // up hung companion requests.
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          authorization: `Bearer ${this.appJwt()}`,
+          accept: "application/vnd.github+json",
+          "user-agent": "glorp-companion",
+          ...(init.body ? { "content-type": "application/json" } : {}),
+        },
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        throw new GitHubTokenError(502, "github_timeout", "GitHub did not respond within 10s");
+      }
+      throw err;
+    }
   }
 
   /** RS256 app JWT, cached until ~1 min before its 10-minute expiry. */

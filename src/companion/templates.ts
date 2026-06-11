@@ -40,8 +40,20 @@ function resolveTemplate(t: Template, dir: string): Template | undefined {
 }
 
 function resolveSkill(skill: Extract<TemplateSkill, { from: string }>, dir: string): TemplateSkill {
-  const source = path.resolve(dir, skill.from);
-  const rel = path.relative(path.resolve(dir), source);
+  // The lexical check alone isn't enough: this payload goes OVER THE WIRE, so
+  // a symlink inside the templates dir pointing elsewhere would publish
+  // arbitrary container-readable files. Resolve symlinks, re-check containment
+  // against the REAL root, and refuse symlinked entries during the walk.
+  const lexical = path.resolve(dir, skill.from);
+  let source: string;
+  let root: string;
+  try {
+    source = fs.realpathSync(lexical);
+    root = fs.realpathSync(path.resolve(dir));
+  } catch {
+    throw new Error(`skill source '${skill.from}' does not exist`);
+  }
+  const rel = path.relative(root, source);
   if (rel.startsWith("..") || path.isAbsolute(rel)) {
     throw new Error(`skill source '${skill.from}' escapes the templates directory`);
   }
@@ -56,7 +68,11 @@ function walk(dir: string, root: string): TemplateSkillFile[] {
   const out: TemplateSkillFile[] = [];
   for (const name of fs.readdirSync(dir)) {
     const abs = path.join(dir, name);
-    if (fs.statSync(abs).isDirectory()) out.push(...walk(abs, root));
+    const st = fs.lstatSync(abs);
+    if (st.isSymbolicLink()) {
+      throw new Error(`skill source contains a symlink ('${path.relative(root, abs)}') — not allowed`);
+    }
+    if (st.isDirectory()) out.push(...walk(abs, root));
     else out.push({ path: path.relative(root, abs).split(path.sep).join("/"), content: fs.readFileSync(abs, "utf-8") });
   }
   return out;

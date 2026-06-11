@@ -148,7 +148,7 @@ docker compose -f docker-compose.allinone.yml logs | grep -A2 "Admin API key"
 
 One container, four services (companion is loopback-internal):
 
-```
+```text
 ┌─ container ────────────────────────────────────────────────┐
 │  glorp garage    ─ REST/WS API ........... :4271            │
 │      ▲   ▲   ▲                                              │

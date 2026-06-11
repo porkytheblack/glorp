@@ -138,6 +138,11 @@ GARAGE OPTIONS
       --scopes <a,b>       Scopes for 'keys add' (default: admin)
       --namespace <id>     Bind a 'keys add' key to a tenant namespace
 
+COMPANION OPTIONS (also: --host, --port [8788], --data-dir)
+      --templates-dir <d>  Registry templates (default: <data-dir>/companion-templates)
+      env: GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY[_FILE] enable git-token minting;
+           COMPANION_KEY sets the bearer key (required on non-loopback binds)
+
 ENV
   ANTHROPIC_API_KEY        Default provider if set
   GLORP_PORT               Override server port

@@ -54,7 +54,10 @@ export function startCompanion(config: CompanionConfig): CompanionHandle {
           return err("not_configured", "Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY to mint git tokens", 404);
         }
         try {
-          return Response.json(await minter.tokenFor(url.searchParams.get("repo") || null));
+          // A bearer credential over GET — forbid every cache along the way.
+          return Response.json(await minter.tokenFor(url.searchParams.get("repo") || null), {
+            headers: { "cache-control": "no-store" },
+          });
         } catch (e) {
           if (e instanceof GitHubTokenError) return err(e.slug, e.message, e.status);
           return err("github_error", "Token minting failed", 502);

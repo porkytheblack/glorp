@@ -79,7 +79,12 @@ start companion "$GLORP_BIN" companion \
 # Wire Garage at the in-container companion unless the operator pointed it at
 # an external service explicitly.
 export GLORP_GARAGE_TEMPLATE_REGISTRY_URL="${GLORP_GARAGE_TEMPLATE_REGISTRY_URL:-http://127.0.0.1:$COMPANION_PORT/v1/templates}"
-if [ -n "${GITHUB_APP_ID:-}" ] && [ -z "${GLORP_GARAGE_GIT_TOKEN_URL:-}" ]; then
+# Wire git tokens only when companion minting can actually work (id AND key) —
+# with half a credential, leaving Garage unwired gives the clearer error
+# ("no git token service configured") instead of per-clone not_configured 404s.
+if [ -n "${GITHUB_APP_ID:-}" ] \
+  && { [ -n "${GITHUB_APP_PRIVATE_KEY:-}" ] || [ -n "${GITHUB_APP_PRIVATE_KEY_FILE:-}" ]; } \
+  && [ -z "${GLORP_GARAGE_GIT_TOKEN_URL:-}" ]; then
   export GLORP_GARAGE_GIT_TOKEN_URL="http://127.0.0.1:$COMPANION_PORT/v1/git/token?repo={repo}"
 fi
 start garage "$GLORP_BIN" garage \
