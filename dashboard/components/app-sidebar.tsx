@@ -10,6 +10,7 @@ import {
   Rocket,
   Cpu,
   KeyRound,
+  Cloud,
   LogOut,
   ChevronsUpDown,
   type LucideIcon,
@@ -44,6 +45,7 @@ const CONFIGURE: NavLink[] = [
   { href: "/namespaces", label: "Namespaces", icon: Boxes },
   { href: "/provisioning", label: "Provisioning", icon: Rocket },
   { href: "/credentials", label: "Models", icon: Cpu },
+  { href: "/storage", label: "Storage", icon: Cloud },
   { href: "/keys", label: "API Keys", icon: KeyRound },
 ];
 

@@ -17,6 +17,7 @@ import { TemplateStore } from "./templates/store.ts";
 import { NamespaceStore, DEFAULT_NAMESPACE_ID } from "./namespace-store.ts";
 import { NamespaceRegistry } from "./namespace-registry.ts";
 import { StorageConfigStore } from "./storage/config-store.ts";
+import { createUploadsSync, setActiveUploadsSync } from "./storage/r2-sync.ts";
 import { namespaceControlRoutes } from "./routes/namespaces.ts";
 import { KeyStore } from "./auth/key-store.ts";
 import { adminAuthConfigured } from "./auth/admin.ts";
@@ -36,7 +37,12 @@ export async function startGarage(config: GarageConfig): Promise<GarageHandle> {
   const templates = new TemplateStore(config.templatesDir);
   const namespaceStore = new NamespaceStore(config.dataDir, config.workspaceRoot);
   const storageConfig = new StorageConfigStore(config.dataDir);
-  const registry = new NamespaceRegistry(namespaceStore, config, templates, garageCredentials);
+  // The uploads mirror is garage-global; the per-session manifest path is taken
+  // from each scope's own dataDir (set by the file routes / session push), so a
+  // tenant namespace's manifest sits under that namespace's subtree.
+  const uploadsSync = createUploadsSync(storageConfig, config.dataDir);
+  setActiveUploadsSync({ engine: uploadsSync, uploadsDir: config.filesDir ?? "uploads" });
+  const registry = new NamespaceRegistry(namespaceStore, config, templates, garageCredentials, uploadsSync);
   const startedAt = Date.now();
   const keyStore = new KeyStore(config.auth?.keyStorage ?? path.join(config.dataDir, "glorp-keys.json"));
   const authOn = authRequired(config);
@@ -85,6 +91,9 @@ export async function startGarage(config: GarageConfig): Promise<GarageHandle> {
     manager: registry.resolve(DEFAULT_NAMESPACE_ID).manager,
     async stop() {
       stopGc();
+      // Drop the module-level mirror reference so a later server in the same
+      // process (tests spin several up) doesn't push through this one's config.
+      setActiveUploadsSync(null);
       for (const bundle of registry.liveBundles()) await bundle.manager.shutdownAll();
       await keyStore.close().catch(() => {});
       server.stop();

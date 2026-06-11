@@ -7,10 +7,10 @@ import { Page, PageHeader, Loading, EmptyState, ErrorState } from "@/components/
 import { SectionHeading } from "@/components/primitives";
 import { plural } from "@/lib/format";
 import { ProvisionDialog } from "@/components/provisioning/provision-dialog";
-import type { TemplateDto } from "@/lib/types";
+import type { TemplateSummaryDto } from "@/lib/types";
 
 /** One template, dense but legible — click anywhere to review & provision. */
-function TemplateRow({ t, onLaunch }: { t: TemplateDto; onLaunch: () => void }) {
+function TemplateRow({ t, onLaunch }: { t: TemplateSummaryDto; onLaunch: () => void }) {
   return (
     <button
       type="button"
@@ -31,8 +31,8 @@ function TemplateRow({ t, onLaunch }: { t: TemplateDto; onLaunch: () => void }) 
 }
 
 export default function ProvisioningPage() {
-  const { data, loading, error } = useQuery<{ templates: TemplateDto[] }>("/templates");
-  const [launch, setLaunch] = useState<TemplateDto | null>(null);
+  const { data, loading, error } = useQuery<{ templates: TemplateSummaryDto[] }>("/templates");
+  const [launch, setLaunch] = useState<TemplateSummaryDto | null>(null);
 
   const templates = data?.templates ?? [];
 

@@ -13,6 +13,7 @@ import { EventStream } from "./event-stream.ts";
 import { SessionCredentialsStore } from "./credentials.ts";
 import { SessionStats } from "./session-stats.ts";
 import { buildSessionDto } from "./session-dto.ts";
+import { getActiveUploadsSync, type UploadsScopeWithData } from "./storage/r2-sync.ts";
 import type { GarageSessionInit } from "./session-init.ts";
 import type { SessionLifecycle, SessionDto, SessionCredential } from "./types.ts";
 
@@ -96,6 +97,16 @@ export class GarageSession {
   /** The permission mode requested at creation (DTO fallback before build). */
   get defaultPermissionMode() {
     return this.init.permissionMode;
+  }
+
+  /** The namespace this session lives in (scopes remote-storage keys). */
+  get nsId(): string {
+    return this.init.nsId ?? "default";
+  }
+
+  /** The session's data dir — where its snapshot and uploads manifest live. */
+  get dataDir(): string {
+    return this.init.dataDir;
   }
 
   /** True once the underlying GlorpHandle is live in memory. */
@@ -286,7 +297,25 @@ export class GarageSession {
     }
     if (ev.type === "busy" && this.state !== "destroyed" && this.state !== "error") {
       this.state = ev.busy ? "busy" : "idle";
+      // A turn just finished — mirror anything the agent dropped in uploads/ to
+      // the bucket (debounced, fire-and-forget; no-op when unconfigured).
+      if (!ev.busy) this.pushUploads();
     }
     this.stream.broadcast(ev);
+  }
+
+  /**
+   * Schedule a remote-mirror push of this session's uploads folder. Uses the
+   * module-level engine (see r2-sync.ts) because the session is built by the
+   * frozen manager and can't be handed the engine through its init. Best-effort
+   * and silent: a missing folder or unconfigured mirror is simply skipped.
+   */
+  private pushUploads(): void {
+    const active = getActiveUploadsSync();
+    if (!active) return;
+    const root = path.join(this.workspace, active.uploadsDir);
+    if (!fs.existsSync(root)) return;
+    const scope: UploadsScopeWithData = { nsId: this.nsId, sessionId: this.id, root, dataDir: this.init.dataDir };
+    active.engine.scheduleSync(scope);
   }
 }

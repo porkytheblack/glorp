@@ -59,6 +59,51 @@ export interface WorkspaceDto {
 export interface CreateWorkspaceInput {
   name?: string;
   path?: string;
+  /** Provision the (new or adopted) workspace from a named template. */
+  template?: string;
+  /** Values for the template's declared `{param:NAME}` placeholders. */
+  params?: Record<string, string>;
+}
+
+/** One declared template parameter, for client-side form rendering. */
+export interface TemplateParamDto {
+  name: string;
+  description: string | null;
+  required: boolean;
+  default: string | null;
+  secret: boolean;
+}
+
+/** Summary of a setup template returned by `GET /templates`. */
+export interface TemplateSummaryDto {
+  name: string;
+  description: string | null;
+  step_count: number;
+  repo_count: number;
+  skill_count: number;
+  mcp_count: number;
+  has_system_prompt: boolean;
+  params: TemplateParamDto[];
+}
+
+/** Secret-free remote-storage settings returned by `GET /storage`. */
+export interface StorageConfigDto {
+  enabled: boolean;
+  endpoint: string | null;
+  bucket: string | null;
+  prefix: string | null;
+  access_key_id: string | null;
+  has_secret: boolean;
+}
+
+/** Body accepted by `PUT /storage` (secret is write-only; omit to keep it). */
+export interface UpdateStorageConfigInput {
+  enabled?: boolean;
+  endpoint?: string | null;
+  bucket?: string | null;
+  prefix?: string | null;
+  access_key_id?: string | null;
+  secret_access_key?: string | null;
 }
 
 /** Body accepted by `POST /sessions` and `POST /workspaces/:id/sessions`. */
@@ -103,9 +148,18 @@ export interface FileEntry {
   modified_at: string;
 }
 
+/** Remote-mirror sync state for a session's uploads folder. */
+export interface FilesRemoteStatus {
+  enabled: boolean;
+  last_sync_at: string | null;
+  error: string | null;
+}
+
 /** Returned by `GET /sessions/:id/files` and `POST /sessions/:id/files`. */
 export interface FileListResponse {
   files: FileEntry[];
+  /** Present when a remote uploads mirror (R2) is configured. */
+  remote?: FilesRemoteStatus;
 }
 
 /**

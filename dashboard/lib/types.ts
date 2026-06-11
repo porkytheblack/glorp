@@ -146,6 +146,27 @@ export interface TemplateFull {
   steps: TemplateStep[];
 }
 
+/** One declared template parameter (GET /templates), for form rendering. */
+export interface TemplateParamDto {
+  name: string;
+  description: string | null;
+  required: boolean;
+  default: string | null;
+  secret: boolean;
+}
+
+/** Summary of a setup template from GET /templates (counts + declared params). */
+export interface TemplateSummaryDto {
+  name: string;
+  description: string | null;
+  step_count: number;
+  repo_count: number;
+  skill_count: number;
+  mcp_count: number;
+  has_system_prompt: boolean;
+  params: TemplateParamDto[];
+}
+
 export interface TemplateDto {
   name: string;
   description?: string;
@@ -209,4 +230,33 @@ export interface DisplaySlot {
   input: unknown;
   createdAt: number;
   isPermissionRequest: boolean;
+}
+
+/* ── Remote uploads mirror (R2/S3) — src/garage/contract.ts ─────────────── */
+
+/** Secret-free remote-storage settings (GET /storage). */
+export interface StorageConfigDto {
+  enabled: boolean;
+  endpoint: string | null;
+  bucket: string | null;
+  prefix: string | null;
+  access_key_id: string | null;
+  has_secret: boolean;
+}
+
+/** Body for PUT /storage — secret is write-only (omit to keep the stored one). */
+export interface UpdateStorageConfigInput {
+  enabled?: boolean;
+  endpoint?: string | null;
+  bucket?: string | null;
+  prefix?: string | null;
+  access_key_id?: string | null;
+  secret_access_key?: string | null;
+}
+
+/** Per-session remote-mirror sync state, present in the files list response. */
+export interface FilesRemoteStatus {
+  enabled: boolean;
+  last_sync_at: string | null;
+  error: string | null;
 }

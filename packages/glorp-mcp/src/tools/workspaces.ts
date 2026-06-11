@@ -22,14 +22,33 @@ export function registerWorkspaceTools(server: McpServer, ctx: McpContext): void
     "glorp_create_workspace",
     {
       title: "Create workspace",
-      description: "Register a workspace folder on the Garage host (tenants are confined to their namespace root).",
+      description:
+        "Create a workspace folder on the Garage host. Omit `path` to mint a managed folder under the " +
+        "namespace's workspace root (the usual MCP flow). Pass `template` to provision the folder from a " +
+        "named setup recipe (clone repos, install skills, set a system prompt, wire MCP providers) before " +
+        "it's registered; fill its declared placeholders via `params` (see glorp_list_templates).",
       inputSchema: {
-        path: z.string().describe("Absolute path on the Garage host"),
+        path: z.string().optional().describe("Absolute path on the Garage host; omit to mint a managed folder"),
         name: z.string().optional(),
+        template: z.string().optional().describe("Name of a setup template to provision the workspace from"),
+        params: z.record(z.string()).optional().describe("Values for the template's declared {param:NAME} placeholders"),
         namespace: ns,
       },
     },
-    ({ path, name, namespace }) => guard(() => ctx.clientFor(namespace).workspaces.create(path, name)),
+    ({ path, name, template, params, namespace }) =>
+      guard(() => ctx.clientFor(namespace).workspaces.create(path, name, { template, params })),
+  );
+
+  server.registerTool(
+    "glorp_list_templates",
+    {
+      title: "List templates",
+      description:
+        "List the setup templates available for provisioning a workspace, with their section counts and the " +
+        "parameters each declares (name, required, default, secret) so you can fill them for glorp_create_workspace.",
+      inputSchema: { namespace: ns },
+    },
+    ({ namespace }) => guard(() => ctx.clientFor(namespace).templates.list()),
   );
 
   server.registerTool(

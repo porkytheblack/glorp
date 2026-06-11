@@ -7,11 +7,18 @@ import { api, API_BASE, getNamespace, getToken } from "@/lib/api";
 import { useQuery } from "@/lib/hooks";
 import { compact, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { FilesRemote } from "./files-remote";
+import type { FilesRemoteStatus } from "@/lib/types";
 
 interface FileEntry {
   path: string;
   size: number;
   modified_at: string;
+}
+
+interface FileListResponse {
+  files: FileEntry[];
+  remote?: FilesRemoteStatus;
 }
 
 /** Authenticated direct-download URL (bearer rides as a query param). */
@@ -30,10 +37,24 @@ function downloadUrl(sessionId: string, rel: string): string {
  * there as deliverables. Refreshes when a turn completes.
  */
 export function FilesPanel({ sessionId, refresh }: { sessionId: string; refresh?: boolean }) {
-  const files = useQuery<{ files: FileEntry[] }>(`/sessions/${sessionId}/files`, [refresh]);
+  const files = useQuery<FileListResponse>(`/sessions/${sessionId}/files`, [refresh]);
   const [dragging, setDragging] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [pulling, setPulling] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
+
+  // Force a remote rehydrate, then refresh the list with the pulled files.
+  const pull = async () => {
+    setPulling(true);
+    try {
+      await api(`/sessions/${sessionId}/files?pull=1`);
+      files.reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Pull failed");
+    } finally {
+      setPulling(false);
+    }
+  };
 
   const upload = async (list: Iterable<File>) => {
     const form = new FormData();
@@ -106,6 +127,8 @@ export function FilesPanel({ sessionId, refresh }: { sessionId: string; refresh?
           }}
         />
       </div>
+
+      {files.data?.remote && <FilesRemote remote={files.data.remote} pulling={pulling} onPull={() => void pull()} />}
 
       {list.length === 0 ? (
         <p className="rounded-md border border-dashed border-border/70 px-3 py-2.5 text-[11.5px] leading-relaxed text-faint">

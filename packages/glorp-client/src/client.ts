@@ -14,11 +14,13 @@ import type {
   ApiKeyPublic,
   BridgeEvent,
   CreateSessionInput,
+  CreateWorkspaceInput,
   FileListResponse,
   NamespaceDto,
   PermissionGrant,
   SessionDto,
   SessionResult,
+  TemplateSummaryDto,
   WorkspaceDto,
 } from "./contract.js";
 
@@ -41,10 +43,25 @@ function buildClient(cfg: GlorpConfig) {
 
     workspaces: {
       list: () => req<{ workspaces: WorkspaceDto[]; total: number }>("GET", "/workspaces"),
-      create: (path: string, name?: string) => req<WorkspaceDto>("POST", "/workspaces", { path, name }),
+      /**
+       * Register (or template-provision) a workspace. The positional `path`/`name`
+       * form is preserved; pass `opts` to provision from a template — `template`
+       * names a setup recipe and `params` fills its declared `{param:NAME}` slots.
+       * Omitting `path` mints a managed folder under the namespace's workspace root.
+       */
+      create: (
+        path?: string,
+        name?: string,
+        opts: Pick<CreateWorkspaceInput, "template" | "params"> = {},
+      ) => req<WorkspaceDto>("POST", "/workspaces", { path, name, ...opts }),
       get: (id: string) => req<WorkspaceDto & { sessions: SessionDto[] }>("GET", `/workspaces/${id}`),
       delete: (id: string, cascadeSessions = false) =>
         req<void>("DELETE", `/workspaces/${id}${cascadeSessions ? "?sessions=true" : ""}`),
+    },
+
+    templates: {
+      list: () => req<{ templates: TemplateSummaryDto[] }>("GET", "/templates"),
+      get: (name: string) => req<{ template: unknown }>("GET", `/templates/${encodeURIComponent(name)}`),
     },
 
     sessions: {

@@ -184,7 +184,7 @@ function routeSubpath(req: Request, m: RegExpMatchArray, g: RouteGroups): Promis
       if (method === "DELETE") return g.creds.clear(id);
       break;
     case "files":
-      if (method === "GET" && !rest) return g.files.list(id);
+      if (method === "GET" && !rest) return g.files.list(id, req);
       if (method === "POST" && !rest) return g.files.upload(id, req);
       if (method === "GET" && rest) return g.files.download(id, rest);
       if (method === "DELETE" && rest) return g.files.remove(id, rest);
