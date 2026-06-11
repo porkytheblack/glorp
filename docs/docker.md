@@ -180,7 +180,19 @@ One container, four services (companion is loopback-internal):
 
 The entrypoint supervises all four: if any exits, the container stops so the
 restart policy brings it back. Ports are configurable via `MCP_PORT` / `DASH_PORT`
-/ `COMPANION_PORT` (remember to match the published `-p` mappings). Garage and the
+/ `COMPANION_PORT` (remember to match the published `-p` mappings).
+
+**Pick your service set with `GLORP_SERVICES`** (comma-separated; Garage is
+always on). `garage,dashboard` gives you just the web console + API — no
+companion, no MCP — and `docker-compose.web.yml` ships exactly that flavor:
+
+```bash
+docker compose -f docker-compose.web.yml up -d --build
+```
+
+Operator templates (`/data/templates`) still work in this flavor; only the
+companion's registry and GitHub-App git tokens are absent (point the
+`GLORP_GARAGE_*_URL` env vars at an external companion to add them back). Garage and the
 companion run from the compiled binary inside the image, so orchestrator subagents
 and the git credential helper behave exactly as on a binary install.
 
