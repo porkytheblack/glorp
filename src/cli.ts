@@ -9,6 +9,15 @@ import { parseCliArgs, HELP_TEXT } from "./cli-args.ts";
 import { GLORP_VERSION } from "./shared/version.ts";
 
 async function main(): Promise<void> {
+  // Hidden self-spawn subcommand for orchestrator subagents in the COMPILED
+  // binary (the continuum node-bootstrap can't read /$bunfs script paths).
+  // Handled before arg parsing — it is not a user-facing command.
+  if (process.argv[2] === "__agent-run") {
+    const role = process.argv[3] ?? "";
+    const { runAgentSubcommand } = await import("./orchestrator/compiled-runner.ts");
+    process.exit(await runAgentSubcommand(role));
+  }
+
   const args = parseCliArgs(process.argv.slice(2));
 
   switch (args.command) {
