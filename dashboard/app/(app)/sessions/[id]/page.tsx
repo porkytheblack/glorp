@@ -41,6 +41,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const state = live.busy ? "busy" : live.connected ? "idle" : session?.state ?? "idle";
   const mode = live.mode ?? session?.permission_mode ?? "normal";
   const currentModel = pickedModel ?? session?.model_label ?? null;
+  const currentProfile = (profiles.data?.profiles ?? []).find((p) => p.label === currentModel) ?? null;
+  // false = catalog says text-only; null = unknown model — don't block.
+  const imageSupport = currentProfile?.input_modalities ? currentProfile.input_modalities.includes("image") : null;
   const permSlots = live.slots.filter((s) => s.isPermissionRequest);
   const userInitial = (identity?.user ?? "U").slice(0, 1).toUpperCase();
 
@@ -139,6 +142,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               onSend={live.send}
               onStop={live.abort}
               commands={commands}
+              imageSupport={imageSupport}
               controls={
                 <>
                   <ModelSwitcher profiles={profiles.data?.profiles ?? []} current={currentModel} onSwap={swap} />

@@ -5,7 +5,7 @@
  * UI offers — instead of a red stack trace and a shrug.
  */
 
-export type ErrorKind = "config" | "auth" | "rate_limit" | "quota" | "network" | "upstream" | "internal";
+export type ErrorKind = "config" | "auth" | "modality" | "rate_limit" | "quota" | "network" | "upstream" | "internal";
 
 export interface ClassifiedError {
   kind: ErrorKind;
@@ -31,6 +31,14 @@ export function classifyModelError(err: unknown): ClassifiedError {
       kind: "config",
       title: "No model is configured yet",
       hint: "Add a provider and a model under Models, then send the message again.",
+    };
+  }
+
+  if (/no endpoints found that support image|does not support image|image input is not supported|unsupported image|multimodal.*not support/.test(lower)) {
+    return {
+      kind: "modality",
+      title: "The model can't see images",
+      hint: "Remove the attachment, or switch to a vision-capable model — look for the eye badge in the model picker.",
     };
   }
 

@@ -1,13 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronsUpDown, CloudOff, CornerDownLeft, Sparkles } from "lucide-react";
+import { Check, ChevronsUpDown, CloudOff, CornerDownLeft, Eye, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 
-type Fetched = { status: "loading" | "ok" | "error"; models: string[]; error?: string };
+type Fetched = { status: "loading" | "ok" | "error"; models: string[]; modalities?: Record<string, string[]>; error?: string };
 
 /** Session-lived cache of live model lists, keyed by provider id. */
 const liveCache = new Map<string, Fetched>();
@@ -44,9 +44,9 @@ export function ModelCombobox({
     const loading: Fetched = { status: "loading", models: [] };
     liveCache.set(providerId, loading);
     setLive(loading);
-    api<{ models: string[] }>(`/models/providers/${providerId}/models`)
+    api<{ models: string[]; modalities?: Record<string, string[]> }>(`/models/providers/${providerId}/models`)
       .then((r) => {
-        const ok: Fetched = { status: "ok", models: r.models ?? [] };
+        const ok: Fetched = { status: "ok", models: r.models ?? [], modalities: r.modalities };
         liveCache.set(providerId, ok);
         setLive(ok);
       })
@@ -114,6 +114,7 @@ export function ModelCombobox({
                   <CommandItem key={m} value={m} onSelect={pick} className="animate-slide-up font-mono text-[12.5px]" style={{ animationDelay: `${Math.min(i, 12) * 18}ms`, animationFillMode: "backwards" }}>
                     <Sparkles className="size-3.5 text-brand/70" />
                     <span className="flex-1 truncate">{m}</span>
+                    {live?.modalities?.[m]?.includes("image") && <Eye className="size-3 text-faint" aria-label="vision-capable" />}
                     <Check className={cn("size-3.5 text-brand transition-opacity", value === m ? "opacity-100" : "opacity-0")} />
                   </CommandItem>
                 ))}

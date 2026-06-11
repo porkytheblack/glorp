@@ -52,3 +52,13 @@ describe("formatDuration", () => {
     expect(formatDuration(7200)).toBe("2.0 h");
   });
 });
+
+describe("modality errors", () => {
+  test("OpenRouter's no-vision-endpoint 404 classifies as modality", () => {
+    const { classifyModelError } = require("../src/shared/error-classify.ts");
+    const c = classifyModelError(new Error("404 No endpoints found that support image input"));
+    expect(c.kind).toBe("modality");
+    expect(c.title).toContain("can't see images");
+    expect(c.hint).toContain("vision-capable");
+  });
+});

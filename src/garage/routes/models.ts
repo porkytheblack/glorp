@@ -77,7 +77,19 @@ export function modelRoutes(credentials: CredentialsStore, catalog?: ModelCatalo
     const effective = effectiveProviderId(p.providerId, provider, p.model);
     return catalog?.getContextLimit(effective, p.model) ?? null;
   };
-  const dto = (p: ModelProfile) => ({ ...profileDto(p), context_limit: resolveContext(p) });
+  /** Input modalities from the catalog (resolves custom providers by model
+   * name) — lets UIs know up front whether a model can see images instead of
+   * discovering it when the model silently ignores one. */
+  const resolveModalities = (p: ModelProfile): string[] | null => {
+    const provider = credentials.getProvider(p.providerId);
+    const effective = effectiveProviderId(p.providerId, provider, p.model);
+    return catalog?.getModelInfo(effective, p.model)?.modalities?.input ?? null;
+  };
+  const dto = (p: ModelProfile) => ({
+    ...profileDto(p),
+    context_limit: resolveContext(p),
+    input_modalities: resolveModalities(p),
+  });
   return {
     providers(): Response {
       return json({ providers: credentials.listProviders().map(providerDto) });
@@ -267,7 +279,24 @@ export function modelRoutes(credentials: CredentialsStore, catalog?: ModelCatalo
               .filter((x: unknown): x is string => typeof x === "string" && x.length > 0),
           ),
         ];
-        return json({ models });
+        // OpenRouter (and compatible routers) annotate each model with its
+        // architecture — surface input modalities when present so pickers can
+        // badge vision-capable models. Other providers omit this; the catalog
+        // covers known models by name as the fallback.
+        const modalities: Record<string, string[]> = {};
+        for (const row of rows) {
+          const id = (row as any)?.id;
+          const arch = (row as any)?.architecture;
+          const input = Array.isArray(arch?.input_modalities)
+            ? arch.input_modalities
+            : typeof arch?.modality === "string"
+              ? arch.modality.split("->")[0]?.split("+")
+              : null;
+          if (typeof id === "string" && Array.isArray(input) && input.length) {
+            modalities[id] = input.filter((x: unknown): x is string => typeof x === "string");
+          }
+        }
+        return json({ models, ...(Object.keys(modalities).length ? { modalities } : {}) });
       } catch (e) {
         const detail = e instanceof Error ? e.message : String(e);
         return errorJson("upstream_unreachable", `Could not reach ${baseURL}/models — ${detail}`, 502);

@@ -1,6 +1,6 @@
 "use client";
 
-import { Cpu, Trash2 } from "lucide-react";
+import { Eye, Cpu, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
@@ -98,6 +98,9 @@ export default function CredentialsPage() {
                   </div>
                   {p.reasoning_label && p.reasoning_label !== "off" && (
                     <Badge variant="outline" className="shrink-0">{p.reasoning_label}</Badge>
+                  )}
+                  {p.input_modalities?.includes("image") && (
+                    <Eye className="hidden size-3.5 shrink-0 text-faint md:block" aria-label="vision-capable" />
                   )}
                   {p.context_limit != null && (
                     <span className="tnum hidden shrink-0 text-[12px] text-faint md:block">{compact(p.context_limit)} ctx</span>

@@ -2,15 +2,16 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronRight, KeyRound, Gauge, WifiOff, ServerCrash, AlertTriangle, ArrowRight, type LucideIcon } from "lucide-react";
+import { ChevronRight, KeyRound, Gauge, WifiOff, ServerCrash, AlertTriangle, ArrowRight, Eye, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatTurn } from "@/lib/types";
 
-type Kind = "config" | "auth" | "rate_limit" | "quota" | "network" | "upstream" | "internal";
+type Kind = "config" | "auth" | "modality" | "rate_limit" | "quota" | "network" | "upstream" | "internal";
 
 const KIND: Record<Kind, { icon: LucideIcon; label: string }> = {
   config: { icon: KeyRound, label: "Setup" },
   auth: { icon: KeyRound, label: "Authentication" },
+  modality: { icon: Eye, label: "Modality" },
   rate_limit: { icon: Gauge, label: "Rate limit" },
   quota: { icon: Gauge, label: "Quota" },
   network: { icon: WifiOff, label: "Network" },
@@ -34,7 +35,7 @@ export function ErrorCard({ turn }: { turn: ChatTurn }) {
   const kind: Kind = meta.kind && meta.kind in KIND ? meta.kind : "internal";
   const { icon: Icon, label } = KIND[kind];
   const needsKey = kind === "auth" || kind === "config";
-  const needsModel = kind === "quota" || kind === "rate_limit";
+  const needsModel = kind === "quota" || kind === "rate_limit" || kind === "modality";
 
   return (
     <div className="mx-auto w-full max-w-xl rounded-lg border border-destructive/25 bg-destructive/[0.06] px-4 py-3 shadow-sheen">

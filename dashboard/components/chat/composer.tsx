@@ -15,6 +15,7 @@ export function Composer({
   onStop,
   controls,
   commands = [],
+  imageSupport,
 }: {
   busy: boolean;
   disabled?: boolean;
@@ -22,6 +23,8 @@ export function Composer({
   onStop: () => void;
   controls?: React.ReactNode;
   commands?: SlashCommand[];
+  /** false = the current model cannot see images (attach disabled); null/undefined = unknown (allowed). */
+  imageSupport?: boolean | null;
 }) {
   const [text, setText] = React.useState("");
   const [caret, setCaret] = React.useState(0);
@@ -126,6 +129,7 @@ export function Composer({
             const files = [...e.clipboardData.items].filter((it) => it.kind === "file").map((it) => it.getAsFile()).filter((f): f is File => Boolean(f));
             if (files.length) {
               e.preventDefault();
+              if (imageSupport === false) return; // text-only model — ignore the paste
               addImageFiles(files);
             }
           }}
@@ -149,9 +153,9 @@ export function Composer({
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              disabled={disabled}
-              className="grid size-8 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
-              title="Attach image (or paste one)"
+              disabled={disabled || imageSupport === false}
+              className="grid size-8 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
+              title={imageSupport === false ? "The current model can't see images" : "Attach image (or paste one)"}
             >
               <ImagePlus className="size-4" />
             </button>

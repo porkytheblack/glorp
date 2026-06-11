@@ -98,6 +98,8 @@ export interface ProfileWire {
   reasoning?: unknown;
   reasoning_label?: string;
   context_limit?: number | null;
+  /** Input modalities from the catalog ("text", "image", …); null = unknown. */
+  input_modalities?: string[] | null;
   last_used_at: string | null;
 }
 

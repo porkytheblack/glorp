@@ -146,7 +146,7 @@ export type BridgeEvent =
       detail?: string;
       /** Classification so UIs can render a human headline + recovery action
        * instead of a raw stack trace (see shared/error-classify.ts). */
-      kind?: "config" | "auth" | "rate_limit" | "quota" | "network" | "upstream" | "internal";
+      kind?: "config" | "auth" | "modality" | "rate_limit" | "quota" | "network" | "upstream" | "internal";
       hint?: string;
       retryAfterSec?: number;
     }
