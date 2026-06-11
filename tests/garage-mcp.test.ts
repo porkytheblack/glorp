@@ -49,9 +49,9 @@ function addBody(): Request {
 }
 
 describe("SessionManager.createWorkspace minting", () => {
-  it("mints a managed folder under workspaceRoot when no path is given", () => {
+  it("mints a managed folder under workspaceRoot when no path is given", async () => {
     const m = mgr();
-    const ws = m.createWorkspace({ name: "Acme MCP" });
+    const ws = await m.createWorkspace({ name: "Acme MCP" });
     expect(ws.path).toContain(`${path.sep}ws${path.sep}`);
     expect(fs.existsSync(ws.path)).toBe(true);
     expect(ws.id).toMatch(/^ws_/);
@@ -61,7 +61,7 @@ describe("SessionManager.createWorkspace minting", () => {
 describe("MCP provisioning routes", () => {
   async function provisioned() {
     const m = mgr();
-    const ws = m.createWorkspace({ name: "mcpws" });
+    const ws = await m.createWorkspace({ name: "mcpws" });
     const routes = mcpRoutes(m, lister);
     const res = await routes.add(ws.id, addBody());
     return { m, ws, routes, res };
@@ -117,7 +117,7 @@ describe("MCP provisioning routes", () => {
   it("404s for an unknown workspace and 400s for an invalid spec", async () => {
     const m = mgr();
     expect((await mcpRoutes(m, lister).add("ws_nope", addBody())).status).toBe(404);
-    const ws = m.createWorkspace({ name: "x" });
+    const ws = await m.createWorkspace({ name: "x" });
     const bad = new Request("http://x", {
       method: "POST",
       body: JSON.stringify({ provider: "linear", url: "ftp://nope", identities: [{ name: "a", token: "t" }] }),

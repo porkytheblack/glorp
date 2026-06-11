@@ -31,7 +31,7 @@ export function workspaceRoutes(manager: SessionManager, config: GarageConfig): 
         return errorJson("bad_request", "Invalid JSON body", 400);
       }
       try {
-        return json(manager.createWorkspace(body), 201);
+        return json(await manager.createWorkspace(body), 201);
       } catch (err) {
         if (err instanceof WorkspaceError) return errorJson("workspace_error", err.message, 400);
         const msg = err instanceof Error ? err.message : String(err);

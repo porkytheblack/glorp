@@ -9,6 +9,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { PermissionMode } from "../agent/runtime/permission-mode.ts";
 import type { ApiKeyStorageAdapter } from "./auth/types.ts";
+import { parseHeaderEnv } from "./git-tokens.ts";
 
 /** Distinct from the single-session server's 3271 so both can run side by side. */
 export const GARAGE_DEFAULT_PORT = 4271;
@@ -46,6 +47,16 @@ export interface GarageConfig {
   /** How often the idle-session GC sweeps. Default 60s. `GLORP_GARAGE_GC_INTERVAL_MS`. */
   gcIntervalMs: number;
   auth?: GarageAuthConfig;
+  /**
+   * Pull-model git auth: the URL of an EXTERNAL service that mints GitHub App
+   * installation tokens (it owns the private key — Garage never sees it). May
+   * contain `{repo}` for per-repo scoping. With this set, template repos with
+   * `auth: "github"` clone authenticated and cloned repos get the
+   * `glorp __git-cred` credential helper. `GLORP_GARAGE_GIT_TOKEN_URL`.
+   */
+  gitTokenUrl?: string;
+  /** Headers sent to the token service (e.g. its own auth). `GLORP_GARAGE_GIT_TOKEN_HEADERS` (JSON). */
+  gitTokenHeaders?: Record<string, string>;
 }
 
 /** Default idle-session TTL: 30 minutes. */
@@ -76,6 +87,8 @@ interface GarageFileConfig {
   idleSessionTtlMs?: number;
   gcIntervalMs?: number;
   auth?: { enabled?: boolean };
+  gitTokenUrl?: string;
+  gitTokenHeaders?: Record<string, string>;
 }
 
 /**
@@ -175,5 +188,7 @@ export function loadGarageConfig(overrides: GarageConfigOverrides = {}): GarageC
       enabled: overrides.auth?.enabled ?? envAuthEnabled() ?? file.auth?.enabled,
       keyStorage: overrides.auth?.keyStorage,
     },
+    gitTokenUrl: process.env.GLORP_GARAGE_GIT_TOKEN_URL ?? file.gitTokenUrl,
+    gitTokenHeaders: parseHeaderEnv(process.env.GLORP_GARAGE_GIT_TOKEN_HEADERS) ?? file.gitTokenHeaders,
   };
 }

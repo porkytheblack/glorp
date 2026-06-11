@@ -30,7 +30,8 @@ function isAdminRoute(routePath: string): boolean {
     routePath === "/keys" ||
     routePath.startsWith("/keys/") ||
     routePath === "/namespaces" ||
-    routePath.startsWith("/namespaces/")
+    routePath.startsWith("/namespaces/") ||
+    routePath === "/storage"
   );
 }
 

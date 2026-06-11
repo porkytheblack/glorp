@@ -56,7 +56,7 @@ describe("SessionManager workspaces", () => {
     const dataDir = tmp();
     const repo = tmp("repo-");
     const m = mgr(dataDir);
-    const ws = m.createWorkspace({ path: repo });
+    const ws = await m.createWorkspace({ path: repo });
     const s = await m.create({ workspaceId: ws.id });
     expect(s.workspaceId).toBe(ws.id);
     expect(s.workspace).toBe(path.resolve(repo)); // all sessions share the workspace folder
@@ -95,7 +95,7 @@ describe("SessionManager workspaces", () => {
     const dataDir = tmp();
     const repo = tmp("repo-");
     const m = mgr(dataDir);
-    const ws = m.createWorkspace({ path: repo });
+    const ws = await m.createWorkspace({ path: repo });
     await m.create({ sessionId: "to-delete", workspaceId: ws.id });
     expect(await m.deleteWorkspace(ws.id, { sessions: true })).toBe(true);
     expect(m.getWorkspace(ws.id)).toBeUndefined();

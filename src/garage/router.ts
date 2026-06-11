@@ -8,6 +8,8 @@
 
 import { templateRoutes } from "./routes/templates.ts";
 import { keyRoutes } from "./routes/keys.ts";
+import { storageRoutes } from "./routes/storage.ts";
+import type { StorageConfigStore } from "./storage/config-store.ts";
 import type { KeyStore } from "./auth/key-store.ts";
 import type { TemplateStore } from "./templates/store.ts";
 import type { NamespaceControlRoutes } from "./routes/namespaces.ts";
@@ -36,9 +38,11 @@ export function createGarageRouter(
   templates: TemplateStore,
   keyStore: KeyStore,
   namespaceCtl: NamespaceControlRoutes,
+  storageConfig?: StorageConfigStore,
 ): GarageRouter {
   const tmpl = templateRoutes(templates);
   const keys = keyRoutes(keyStore);
+  const storage = storageConfig ? storageRoutes(storageConfig) : null;
 
   return {
     async route(req, pathname, bundle): Promise<Response> {
@@ -92,6 +96,13 @@ export function createGarageRouter(
       if (pathname === "/templates" && m === "GET") return tmpl.list();
       const tm = pathname.match(TEMPLATE);
       if (tm && m === "GET") return tmpl.get(tm[1]!);
+
+      // --- Remote storage settings (global, admin-gated upstream) ---
+      if (storage && pathname === "/storage") {
+        if (m === "GET") return storage.get();
+        if (m === "PUT") return storage.update(req);
+        return methodNotAllowed();
+      }
 
       // --- Workspaces + MCP provisioning (per-namespace) ---
       const ws = matchWorkspaceRoute(req, pathname, g);

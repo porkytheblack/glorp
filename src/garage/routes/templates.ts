@@ -14,7 +14,7 @@ export function templateRoutes(store: TemplateStore): TemplateRoutes {
       const templates = store.list().map((t) => ({
         name: t.name,
         description: t.description ?? null,
-        step_count: t.steps.length,
+        step_count: t.steps?.length ?? 0,
       }));
       return json({ templates });
     },

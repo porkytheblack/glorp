@@ -18,6 +18,15 @@ async function main(): Promise<void> {
     process.exit(await runAgentSubcommand(role));
   }
 
+  // Hidden git credential helper (speaks the git-credential protocol on
+  // stdin/stdout). Installed as `credential.helper` in template-cloned repos so
+  // git fetch/push pulls a fresh token from the configured token service.
+  if (process.argv[2] === "__git-cred") {
+    const { runGitCredHelper } = await import("./garage/git-tokens.ts");
+    const stdin = await new Response(Bun.stdin.stream()).text();
+    process.exit(await runGitCredHelper(process.argv[3], stdin));
+  }
+
   const args = parseCliArgs(process.argv.slice(2));
 
   switch (args.command) {

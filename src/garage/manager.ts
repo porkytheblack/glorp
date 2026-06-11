@@ -23,6 +23,8 @@ export interface TemplateProvisioner {
 export interface GarageManagerConfig {
   dataDir: string;
   workspaceRoot: string;
+  /** Namespace this manager serves (scopes remote-storage keys). Default "default". */
+  nsId?: string;
   defaultProvider?: string;
   defaultModel?: string;
   permissionMode: PermissionMode;
@@ -76,24 +78,25 @@ export class SessionManager {
     // delete a caller-supplied directory that predated this session.
     const preExisted = fs.existsSync(workspace);
     this.validateWorkspace(workspace);
-    if (input.template) await this.provisionTemplate(input, workspace, !preExisted);
+    if (input.template) await this.provisionInto(input.template, input.params ?? {}, workspace, !preExisted);
     // Associate the session with a first-class workspace (get-or-create by path).
     const ws = input.workspaceId ? this.workspaces.get(input.workspaceId)! : this.workspaces.ensureForPath(workspace);
     return this.register(id, workspace, ws.id, input);
   }
 
-  /** Run a template's steps in the workspace; tear it down on any failure. */
-  private async provisionTemplate(
-    input: CreateSessionInput,
+  /** Run a template in the workspace; tear the workspace down on any failure. */
+  private async provisionInto(
+    template: string,
+    params: Record<string, string>,
     workspace: string,
     createdByUs: boolean,
   ): Promise<void> {
     const provisioner = this.config.templates;
-    if (!provisioner || !provisioner.has(input.template!)) {
-      throw new WorkspaceError(`Unknown template: ${input.template}`);
+    if (!provisioner || !provisioner.has(template)) {
+      throw new WorkspaceError(`Unknown template: ${template}`);
     }
     try {
-      await provisioner.provision(input.template!, input.params ?? {}, workspace);
+      await provisioner.provision(template, params, workspace);
     } catch (err) {
       // Only remove a workspace we created — never a pre-existing caller dir.
       if (createdByUs) {
@@ -118,6 +121,7 @@ export class SessionManager {
       id,
       workspace,
       workspaceId,
+      nsId: this.config.nsId,
       dataDir: this.config.dataDir,
       fallbackDataDir: this.config.fallbackDataDir,
       provider: input.provider ?? this.config.defaultProvider,
@@ -186,14 +190,18 @@ export class SessionManager {
   /**
    * Register a workspace. With a `path`, adopts that folder; without one, mints
    * a fresh managed folder under `workspaceRoot` (used by API-driven provisioning
-   * where the caller doesn't know — or shouldn't pick — a host path).
+   * where the caller doesn't know — or shouldn't pick — a host path). With a
+   * `template`, provisions the folder from it before registering — this is the
+   * path that makes template-built workspaces available to MCP-driven creation.
    */
-  createWorkspace(input: CreateWorkspaceInput): WorkspaceDto {
+  async createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceDto> {
     const resolved = input.path
       ? path.resolve(input.path)
       : path.join(this.config.workspaceRoot, this.mintSlug(input.name));
     this.assertConfined(resolved);
+    const preExisted = fs.existsSync(resolved);
     this.validateWorkspace(resolved);
+    if (input.template) await this.provisionInto(input.template, input.params ?? {}, resolved, !preExisted);
     return workspaceDto(this.workspaces.create({ path: resolved, name: input.name }), 0);
   }
 

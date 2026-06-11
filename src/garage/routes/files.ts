@@ -23,7 +23,14 @@ export interface FileRoutes {
   remove(id: string, rel: string): Promise<Response>;
 }
 
-export function fileRoutes(manager: SessionManager, config: GarageConfig): FileRoutes {
+export function fileRoutes(
+  manager: SessionManager,
+  config: GarageConfig,
+  nsId = "default",
+  uploadsSync?: import("../storage/types.ts").UploadsSync,
+): FileRoutes {
+  void nsId;
+  void uploadsSync; // remote-mirror hooks land with the sync engine
   /** Absolute path to the session's exchange folder, created on first use. */
   function rootFor(id: string): string | null {
     const session = manager.getOrRehydrate(id);

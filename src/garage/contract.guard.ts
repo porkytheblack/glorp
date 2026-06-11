@@ -30,6 +30,10 @@ const _assertions: [
   Equal<C.ProvisionMcpInput, T.ProvisionMcpInput>,
   Equal<C.McpSyncDiff, T.McpSyncDiff>,
   Equal<C.McpProviderDto, T.McpProviderDto>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Equal<C.TemplateParamDto, T.TemplateParamDto>,
+  Equal<C.TemplateSummaryDto, T.TemplateSummaryDto>,
+  Equal<C.StorageConfigDto, T.StorageConfigDto>,
+  Equal<C.UpdateStorageConfigInput, T.UpdateStorageConfigInput>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
 
 void _assertions;

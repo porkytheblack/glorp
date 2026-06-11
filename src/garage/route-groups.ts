@@ -8,6 +8,7 @@
 import type { SessionManager } from "./manager.ts";
 import type { GarageConfig } from "./config.ts";
 import type { CredentialsStore } from "../agent/credentials.ts";
+import type { UploadsSync } from "./storage/types.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
 import { workspaceRoutes } from "./routes/workspaces.ts";
 import { mcpRoutes } from "./routes/mcp.ts";
@@ -34,6 +35,8 @@ export function buildRouteGroups(
   manager: SessionManager,
   config: GarageConfig,
   credentials: CredentialsStore,
+  nsId: string,
+  uploadsSync?: UploadsSync,
 ): RouteGroups {
   return {
     sessions: sessionRoutes(manager, config),
@@ -43,6 +46,6 @@ export function buildRouteGroups(
     control: controlRoutes(manager),
     models: modelRoutes(credentials, new ModelCatalog(config.dataDir)),
     creds: credentialRoutes(manager),
-    files: fileRoutes(manager, config),
+    files: fileRoutes(manager, config, nsId, uploadsSync),
   };
 }

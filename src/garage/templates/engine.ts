@@ -7,7 +7,20 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { TemplateError, type Template, type TemplateStep } from "./types.ts";
+import { TemplateError, type Template, type TemplateStep, type TemplateMcpProvider } from "./types.ts";
+import type { GitTokenSource } from "../git-tokens.ts";
+
+/**
+ * Everything a v2 provision needs beyond the workspace itself: the template
+ * library dir (skill `from` sources resolve under it), the pull-model git
+ * token source (repos with `auth: "github"`), and the MCP provisioning
+ * callback (wired to mcpgen by the namespace registry).
+ */
+export interface ProvisionContext {
+  templatesDir: string;
+  gitTokens?: GitTokenSource | null;
+  provisionMcp?: (workspace: string, input: TemplateMcpProvider) => Promise<void>;
+}
 
 const TOKEN = /\{(param|env):([^}]+)\}/g;
 
@@ -27,16 +40,18 @@ export function interpolate(
   });
 }
 
-/** Run every step in order. Throws TemplateError on the first failure. */
+/** Run every section in order. Throws TemplateError on the first failure. */
 export async function provision(
   template: Template,
   params: Record<string, string>,
   workspace: string,
+  ctx: ProvisionContext,
 ): Promise<void> {
   // Values substituted from {param:}/{env:} — scrubbed from any error text.
   const secrets = new Set<string>();
-  for (let i = 0; i < template.steps.length; i++) {
-    const step = template.steps[i]!;
+  const steps = template.steps ?? [];
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]!;
     try {
       await runStep(step, params, workspace, secrets);
     } catch (err) {
@@ -44,6 +59,7 @@ export async function provision(
       throw new TemplateError(redact(raw, secrets));
     }
   }
+  void ctx; // v2 sections (repos/skills/system_prompt/mcp) land with the engine rework
 }
 
 async function runStep(

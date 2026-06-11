@@ -11,13 +11,16 @@ import { SessionManager } from "./manager.ts";
 import { WorkspaceStore } from "./workspace-store.ts";
 import { NamespaceCredentialsStore } from "./credentials.ts";
 import { buildRouteGroups, type RouteGroups } from "./route-groups.ts";
-import { provision } from "./templates/engine.ts";
+import { provision, type ProvisionContext } from "./templates/engine.ts";
 import { selectNamespaceId } from "./auth/middleware.ts";
+import { gitTokenSourceFor } from "./git-tokens.ts";
+import { addProvider, listToolsViaMcp } from "../mcpgen/index.ts";
 import type { NamespaceStore } from "./namespace-store.ts";
 import type { GarageConfig } from "./config.ts";
 import type { TemplateStore } from "./templates/store.ts";
 import type { CredentialsStore } from "../agent/credentials.ts";
-import type { Namespace } from "./types.ts";
+import type { UploadsSync } from "./storage/types.ts";
+import type { Namespace, ProvisionMcpInput } from "./types.ts";
 import type { ApiKey } from "./auth/types.ts";
 
 export class NamespaceNotFoundError extends Error {
@@ -39,13 +42,26 @@ export class NamespaceRegistry {
   /** Ids being deprovisioned — resolve() refuses to (re)build a bundle for these. */
   private readonly deleting = new Set<string>();
 
+  /** Shared by every namespace — templates and uploads sync are garage-global. */
+  private readonly provisionCtx: ProvisionContext;
+
   constructor(
     private readonly store: NamespaceStore,
     private readonly config: GarageConfig,
     private readonly templates: TemplateStore,
     /** Garage-default credentials, shared as the fallback for every namespace. */
     private readonly garageCredentials: CredentialsStore,
-  ) {}
+    /** Remote uploads mirror (R2); undefined when unconfigured. */
+    private readonly uploadsSync?: UploadsSync,
+  ) {
+    this.provisionCtx = {
+      templatesDir: config.templatesDir,
+      gitTokens: gitTokenSourceFor(config),
+      provisionMcp: async (workspace, input) => {
+        await addProvider(workspace, { identities: [], ...input } as ProvisionMcpInput, listToolsViaMcp);
+      },
+    };
+  }
 
   /** Build-once + cache the bundle for a namespace id. Throws if it's unknown. */
   resolve(nsId: string): NamespaceBundle {
@@ -97,6 +113,7 @@ export class NamespaceRegistry {
     const manager = new SessionManager({
       dataDir: ns.dataDir,
       workspaceRoot: ns.workspaceRoot,
+      nsId: ns.id,
       defaultProvider: this.config.defaultProvider,
       defaultModel: this.config.defaultModel,
       permissionMode: this.config.permissionMode,
@@ -107,9 +124,16 @@ export class NamespaceRegistry {
       confineWorkspaces: !this.store.isDefault(ns.id),
       templates: {
         has: (name) => this.templates.has(name),
-        provision: (name, params, workspace) => provision(this.templates.get(name)!, params, workspace),
+        provision: (name, params, workspace) =>
+          provision(this.templates.get(name)!, params, workspace, this.provisionCtx),
       },
     });
-    return { ns, manager, workspaces, credentials, routes: buildRouteGroups(manager, this.config, credentials) };
+    return {
+      ns,
+      manager,
+      workspaces,
+      credentials,
+      routes: buildRouteGroups(manager, this.config, credentials, ns.id, this.uploadsSync),
+    };
   }
 }
