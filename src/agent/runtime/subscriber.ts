@@ -39,6 +39,11 @@ export function createGlorpSubscriber(
     streamingTextBuffer = "";
   };
 
+  // Hoisted closure state for dispatch (which is declared below the return —
+  // function declarations hoist, `let` initializers do NOT, so this must sit
+  // before the return or every dispatch call dies in the temporal dead zone).
+  let compacting = false;
+
   return {
     async record(event_type, data) {
       // glove-core's loop fires this for every tool result. Some call sites
@@ -57,7 +62,6 @@ export function createGlorpSubscriber(
     },
   };
 
-  let compacting = false;
   async function dispatch(event_type: any, data: any): Promise<void> {
       switch (event_type) {
         case "text_delta": {
