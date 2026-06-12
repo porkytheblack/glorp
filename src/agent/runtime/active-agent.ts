@@ -50,6 +50,8 @@ export interface ActivationDeps {
   /** Shared session resources (also used by the orchestrator); reused by the main agent. */
   sessionResources: ResourceFsAdapter;
   titleTimeoutMs: number;
+  /** Per-session env injected into bash spawns (e.g. GLORP_SESSION_ID). */
+  sessionEnv?: Record<string, string>;
 }
 
 export interface ActiveAgent {
@@ -103,6 +105,7 @@ export async function activateAgent(
     store, resources, orchestrator: deps.orchestrator, bridge: deps.bridge,
     displayManager: deps.displayManager, diskExtensions: deps.diskExtensions,
     refresh, ctxRef, inboxContext, verification, systemPrompt, meshName: spec.id,
+    sessionEnv: deps.sessionEnv,
   });
   return {
     spec, store, agent: assembled.agent, meshAdapter: assembled.meshAdapter,
