@@ -6,9 +6,16 @@ FROM oven/bun:1.3
 
 # Toolchain for the agent sandbox (extend the apt line for your stack). tini is
 # a tiny PID 1 so the multi-process entrypoint reaps children and forwards
-# signals (Ctrl-C / docker stop) cleanly.
+# signals (Ctrl-C / docker stop) cleanly. Node 22 + npm ship alongside bun
+# (corepack provides pnpm/yarn) — agent workspaces routinely need real node
+# (Next.js, remotion, npm lifecycle scripts) even though glorp runs on bun.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git ca-certificates curl python3 tini \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && corepack enable \
+    && corepack prepare pnpm@latest --activate \
+    && corepack prepare yarn@stable --activate \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -29,9 +36,8 @@ RUN bun install --frozen-lockfile
 # App source + the four builds:
 #   • compiled binary    → dist/glorp — Garage and the companion run from THIS,
 #     not from source: process.execPath must be glorp itself so orchestrator
-#     subagents self-spawn (`__agent-run`; no node in this image for the
-#     continuum bootstrap) and template clones install a working
-#     `__git-cred` credential helper.
+#     subagents self-spawn (`__agent-run`) and template clones install a
+#     working `__git-cred` credential helper.
 #   • glorp-client build → dist/ that the MCP server imports
 #   • dashboard build    → .next production build (NEXT_PUBLIC_GARAGE_URL baked in)
 # The MCP server runs from source via bun — it spawns nothing, so that's safe.

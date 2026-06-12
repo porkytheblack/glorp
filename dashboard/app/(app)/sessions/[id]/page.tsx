@@ -12,6 +12,7 @@ import { SessionStatus, Loading, ErrorState } from "@/components/shared";
 import { Conversation } from "@/components/chat/conversation";
 import { Composer } from "@/components/chat/composer";
 import { PermissionPrompt } from "@/components/chat/permission-prompt";
+import { SlotPrompt } from "@/components/chat/slot-prompt";
 import { Inspector } from "@/components/session/inspector";
 import { ModelSwitcher } from "@/components/session/model-switcher";
 import { SessionSwitcher } from "@/components/session/session-switcher";
@@ -46,6 +47,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   // false = catalog says text-only; null = unknown model — don't block.
   const imageSupport = currentProfile?.input_modalities ? currentProfile.input_modalities.includes("image") : null;
   const permSlots = live.slots.filter((s) => s.isPermissionRequest);
+  const askSlots = live.slots.filter((s) => !s.isPermissionRequest);
   const userInitial = (identity?.user ?? "U").slice(0, 1).toUpperCase();
 
   const swap = (profileId: string, label: string) => {
@@ -128,11 +130,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
             <Conversation items={live.items} streaming={live.streaming} busy={live.busy} userInitial={userInitial} className="flex-1" />
-            {permSlots.length > 0 && (
+            {(permSlots.length > 0 || askSlots.length > 0) && (
               <div className="px-6 md:px-8">
                 <div className="w-full space-y-2 pb-1">
                   {permSlots.map((s) => (
                     <PermissionPrompt key={s.slotId} slot={s} onResolve={live.resolvePermission} />
+                  ))}
+                  {askSlots.map((s) => (
+                    <SlotPrompt key={s.slotId} slot={s} onResolve={live.resolveSlot} onReject={live.rejectSlot} />
                   ))}
                 </div>
               </div>
