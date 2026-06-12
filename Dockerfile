@@ -5,8 +5,16 @@ FROM oven/bun:1.3
 
 # Tools the agent may reach for inside its sandbox. Add your stack's toolchain
 # here (build-essential, ripgrep, a JDK, go, etc.) so agents can build & test.
+# Node 22 + npm ship alongside bun (corepack provides pnpm/yarn) — agent
+# workspaces routinely need real node (Next.js, remotion, npm lifecycle
+# scripts) even though glorp itself runs on bun.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git ca-certificates curl python3 \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && corepack enable \
+    && corepack prepare pnpm@latest --activate \
+    && corepack prepare yarn@stable --activate \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -17,8 +25,8 @@ RUN bun install --frozen-lockfile
 
 # App source + the compiled binary. Garage runs from dist/glorp — not from
 # source — so process.execPath is glorp itself: orchestrator subagents
-# self-spawn (no node in this image) and template clones install a working
-# `__git-cred` credential helper.
+# self-spawn and template clones install a working `__git-cred`
+# credential helper.
 COPY . .
 RUN bun run build
 

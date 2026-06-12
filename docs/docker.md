@@ -267,9 +267,11 @@ those origins.
 
 ## Image notes
 
-The lean image runs Garage from source on the `oven/bun` base (bun is present so
-agents can run `bun`/`bunx`; `git`, `curl`, `python3` are installed — extend the
-`apt-get` line for your stack). For a smaller runtime you can instead compile a
+The lean image runs Garage from source on the `oven/bun` base. Agent
+workspaces get a full JS toolchain: `bun`/`bunx` plus **Node 22 with `npm`,
+`npx`, and corepack-managed `pnpm`/`yarn`** — so stacks that expect real node
+(Next.js, remotion, npm lifecycle scripts) work out of the box. `git`, `curl`,
+`python3` are installed too; extend the `apt-get` line for anything else. For a smaller runtime you can instead compile a
 single binary (`bun run build:cli` → `dist/glorp`) in a build stage and copy it
 into an `oven/bun` runtime image; keep `bun` + `git` in the runtime so the agent
 can still build and test.
