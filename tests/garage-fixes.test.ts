@@ -61,6 +61,23 @@ describe("Garage browser origin checks", () => {
     expect(isAllowedBrowserOrigin("https://example.com", garageUrl)).toBe(false);
   });
 
+  it("honors the configured allowlist for split-host deploys", async () => {
+    const { configureAllowedOrigins } = await import("../src/garage/cors.ts");
+    const garageUrl = new URL("https://garage.example.com/sessions");
+    try {
+      configureAllowedOrigins(["https://dash.example.com"]);
+      expect(isAllowedBrowserOrigin("https://dash.example.com", garageUrl)).toBe(true);
+      expect(isAllowedBrowserOrigin("https://DASH.example.com", garageUrl)).toBe(true); // case-normalized
+      expect(isAllowedBrowserOrigin("https://evil.example.com", garageUrl)).toBe(false);
+
+      configureAllowedOrigins(["*"]);
+      expect(isAllowedBrowserOrigin("https://anywhere.example.com", garageUrl)).toBe(true);
+    } finally {
+      configureAllowedOrigins([]); // never leak into other tests
+    }
+    expect(isAllowedBrowserOrigin("https://dash.example.com", garageUrl)).toBe(false);
+  });
+
   it("rejects cross-site REST requests before routing", async () => {
     const dataDir = tmp();
     const garage = await startGarage(loadGarageConfig({ dataDir, port: await freePort(), hostname: "127.0.0.1" }));

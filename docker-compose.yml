@@ -17,6 +17,9 @@ services:
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       GLORP_GARAGE_AUTH: "required"   # set to "off" only on a trusted private network
+      # Browser origins allowed beyond same-origin/loopback — set when the
+      # dashboard is served from a DIFFERENT host than Garage (comma-separated).
+      GLORP_GARAGE_ALLOWED_ORIGINS: "${GLORP_GARAGE_ALLOWED_ORIGINS:-}"
       GLORP_AUTO_KEY: "1"
       # Point Garage at a companion service (git tokens + template registry) —
       # see docs/companion-service-spec.md. The lean image doesn't run one;

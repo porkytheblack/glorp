@@ -26,6 +26,7 @@ import { adminAuthConfigured } from "./auth/admin.ts";
 import { authRequired, type GarageConfig } from "./config.ts";
 import { startIdleGc } from "./gc.ts";
 import { buildGarageApp } from "./http-app.ts";
+import { configureAllowedOrigins } from "./cors.ts";
 export { isAllowedBrowserOrigin } from "./cors.ts";
 
 export interface GarageHandle {
@@ -35,6 +36,10 @@ export interface GarageHandle {
 }
 
 export async function startGarage(config: GarageConfig): Promise<GarageHandle> {
+  configureAllowedOrigins(config.allowedOrigins ?? []);
+  if (config.allowedOrigins?.length) {
+    console.log(`[glorp-garage] extra browser origins allowed: ${config.allowedOrigins.join(", ")}`);
+  }
   const garageCredentials = new CredentialsStore(credentialStorageFromEnv(config.dataDir));
   // Disk library + (optional) companion-service registry; disk wins on collision.
   const remoteTemplates = config.templateRegistryUrl

@@ -29,6 +29,9 @@ services:
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       GLORP_GARAGE_AUTH: "required"      # set "off" only on a trusted private net
+      # Browser origins allowed beyond same-origin/loopback — set when the
+      # dashboard is served from a DIFFERENT host than Garage (comma-separated).
+      GLORP_GARAGE_ALLOWED_ORIGINS: "${GLORP_GARAGE_ALLOWED_ORIGINS:-}"
       GLORP_AUTO_KEY: "1"
       # Dashboard admin login (verified by Garage). CHANGE THESE.
       GARAGE_ADMIN_USER: "${GARAGE_ADMIN_USER:-admin}"

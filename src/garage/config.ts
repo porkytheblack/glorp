@@ -66,6 +66,12 @@ export interface GarageConfig {
   templateRegistryUrl?: string;
   /** Headers for the registry. `GLORP_GARAGE_TEMPLATE_REGISTRY_HEADERS` (JSON). */
   templateRegistryHeaders?: Record<string, string>;
+  /**
+   * Browser origins allowed beyond same-origin/loopback — REQUIRED for
+   * split-host deploys (dashboard on a different host than Garage). "*"
+   * allows any origin. `GLORP_GARAGE_ALLOWED_ORIGINS` (comma-separated).
+   */
+  allowedOrigins?: string[];
 }
 
 /** Default idle-session TTL: 30 minutes. */
@@ -100,6 +106,7 @@ interface GarageFileConfig {
   gitTokenHeaders?: Record<string, string>;
   templateRegistryUrl?: string;
   templateRegistryHeaders?: Record<string, string>;
+  allowedOrigins?: string[];
 }
 
 /**
@@ -204,5 +211,11 @@ export function loadGarageConfig(overrides: GarageConfigOverrides = {}): GarageC
     templateRegistryUrl: process.env.GLORP_GARAGE_TEMPLATE_REGISTRY_URL ?? file.templateRegistryUrl,
     templateRegistryHeaders:
       parseHeaderEnv(process.env.GLORP_GARAGE_TEMPLATE_REGISTRY_HEADERS) ?? file.templateRegistryHeaders,
+    allowedOrigins:
+      process.env.GLORP_GARAGE_ALLOWED_ORIGINS
+        ?.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean) ??
+      (Array.isArray(file.allowedOrigins) ? file.allowedOrigins : undefined),
   };
 }

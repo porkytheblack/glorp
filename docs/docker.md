@@ -206,7 +206,22 @@ GLORP_WORKSPACE_ROOT:   /glorp/workspaces
 ```
 
 Everything that must survive a redeploy (keys, sessions, credentials,
-templates, workspaces) then lives in the single volume. Remember the
+templates, workspaces) then lives in the single volume.
+
+### Dashboard and Garage on different hosts
+
+The dashboard is a pure browser client of Garage — your browser calls Garage
+directly (REST + WebSocket), so a split deploy needs two things:
+
+1. **Bake the public Garage URL into the dashboard** (`GARAGE_URL` build arg →
+   `NEXT_PUBLIC_GARAGE_URL`), e.g. `https://garage.example.com`.
+2. **Allow the dashboard's origin on Garage**:
+   `GLORP_GARAGE_ALLOWED_ORIGINS=https://dash.example.com` (comma-separate
+   several; `*` allows any origin — auth still applies, but prefer explicit).
+   Without this, Garage 403s every cross-origin browser request by design.
+
+Serve both over HTTPS — an https dashboard cannot call an http Garage (mixed
+content), and the event stream needs wss://. Remember the
 dashboard's Garage URL is baked at build time — on such platforms set the
 `GARAGE_URL` build arg to your public Garage URL (Railway passes service
 variables as build args) or front both ports with a same-origin proxy. Garage and the
