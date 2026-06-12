@@ -187,6 +187,9 @@ describe("Template v2 — repos", () => {
     await provision({ name: "t", repos: [{ url: fixture, dest: "repo", auth: "github" }] }, {}, ws, ctx({ gitTokens }));
     const gitConfig = fs.readFileSync(path.join(ws, "repo", ".git", "config"), "utf-8");
     expect(gitConfig).toContain("__git-cred");
+    // useHttpPath makes git pass the repo path to the helper — without it the
+    // helper can't scope tokens and strict token services refuse the mint.
+    expect(gitConfig.replace(/\s/g, "")).toContain("useHttpPath=true");
     // The token never lands in .git/config (it rides http.extraHeader env only).
     expect(gitConfig).not.toContain("ghs_FAKE_TOKEN");
   });

@@ -172,7 +172,13 @@ export function useSession(id: string) {
     };
   }, [id]);
 
-  const raw = useCallback((msg: Record<string, unknown>) => wsRef.current?.send(JSON.stringify(msg)), []);
+  const raw = useCallback((msg: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    // Click handlers (slot resolves, abort…) survive a dropped socket: send()
+    // on a non-OPEN socket throws. Open slots replay on reconnect anyway.
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(msg));
+  }, []);
   const send = useCallback(
     (text: string, images?: Array<{ data: string; media_type: string }>) =>
       (text.trim() || images?.length) &&
