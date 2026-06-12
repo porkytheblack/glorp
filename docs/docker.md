@@ -267,7 +267,8 @@ those origins.
 
 ## Image notes
 
-The lean image runs Garage from source on the `oven/bun` base. Agent
+The lean image runs Garage from the compiled `dist/glorp` binary on the
+`oven/bun` base. Agent
 workspaces get a full JS toolchain: `bun`/`bunx` plus **Node 22 with `npm`,
 `npx`, and corepack-managed `pnpm`/`yarn`** — so stacks that expect real node
 (Next.js, remotion, npm lifecycle scripts) work out of the box. `git`, `curl`,
