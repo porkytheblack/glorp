@@ -211,21 +211,24 @@ templates, workspaces) then lives in the single volume.
 ### Dashboard and Garage on different hosts
 
 The dashboard is a pure browser client of Garage — your browser calls Garage
-directly (REST + WebSocket), so a split deploy needs two things:
+directly (REST + WebSocket). Nothing has to be hardcoded on either side:
 
-1. **Point the dashboard at the public Garage URL** — set the `GARAGE_URL`
-   env on the dashboard container (runtime; no rebuild needed), e.g.
-   `https://garage.example.com`.
-2. **Allow the dashboard's origin on Garage**:
-   `GLORP_GARAGE_ALLOWED_ORIGINS=https://dash.example.com` (comma-separate
-   several; `*` allows any origin — auth still applies, but prefer explicit).
-   Without this, Garage 403s every cross-origin browser request by design.
+- **Garage URL** — the sign-in screen shows where the dashboard is pointing
+  ("Garage at … · Change") and saves a per-browser override, so one deployed
+  dashboard reaches any Garage. To pre-fill it for everyone, set the
+  `GARAGE_URL` env on the dashboard container (runtime — no rebuild), e.g.
+  `https://garage.example.com`.
+- **CORS** — when API-key auth is required (the default on a non-loopback
+  bind), Garage accepts browsers from **any** origin: every data route demands
+  a Bearer key, and unlike cookies a key never rides along from a foreign
+  page, so the key is the gate. Set
+  `GLORP_GARAGE_ALLOWED_ORIGINS=https://dash.example.com` only to restrict
+  origins anyway. With `GLORP_GARAGE_AUTH=off` the strict
+  same-origin/loopback rule stays, and the allowlist is **required** for a
+  remote dashboard.
 
 Serve both over HTTPS — an https dashboard cannot call an http Garage (mixed
-content), and the event stream needs wss://. Remember the
-dashboard's Garage URL is baked at build time — on such platforms set the
-`GARAGE_URL` build arg to your public Garage URL (Railway passes service
-variables as build args) or front both ports with a same-origin proxy. Garage and the
+content), and the event stream needs wss://. Garage and the
 companion run from the compiled binary inside the image, so orchestrator subagents
 and the git credential helper behave exactly as on a binary install.
 
@@ -241,20 +244,26 @@ docker run -d --name glorp \
   glorp-allinone
 ```
 
-### Browser URL & CORS (important)
+### Browser URL & CORS
 
-The dashboard talks to Garage **from your browser**, so the Garage URL is baked
-into its bundle at build time via `NEXT_PUBLIC_GARAGE_URL` (build arg
-`GARAGE_URL`, default `http://localhost:4271`). The default works for a local
-publish because Garage allows cross-origin browser requests **only when both the
-page and the API are on loopback** (`localhost` / `127.0.0.1`).
+The dashboard talks to Garage **from your browser**. The URL it calls resolves
+per request — first match wins:
 
-For access from another host, the loopback rule no longer applies. Either:
+1. the per-browser override saved from the sign-in screen,
+2. the `GARAGE_URL` **env** on the container (runtime — the entrypoint writes
+   it to `/runtime-config.js` at startup, so the published image needs no
+   rebuild),
+3. the `NEXT_PUBLIC_GARAGE_URL` baked at build time (build arg `GARAGE_URL`),
+4. the dashboard page's **own hostname on port 4271** — exactly where the
+   all-in-one publishes Garage, so opening the dashboard from another machine
+   works with zero configuration.
 
-- put a **reverse proxy** in front so the dashboard and the API share one origin
-  (e.g. dashboard at `/`, Garage proxied under `/api` on the same host:port), or
-- rebuild with `--build-arg GARAGE_URL=https://garage.example.com` and serve the
-  dashboard from the **same origin** as that Garage.
+Cross-origin browser requests are accepted whenever API-key auth is required
+(Bearer keys don't ride cross-site the way cookies do — the key is the gate).
+With auth **off**, only same-origin and loopback browsers are accepted;
+extend that with `GLORP_GARAGE_ALLOWED_ORIGINS` (comma-separated; `*` for
+any). Setting an explicit allowlist also restricts an auth-on Garage to just
+those origins.
 
 ## Image notes
 

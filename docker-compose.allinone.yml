@@ -13,10 +13,9 @@ services:
       context: .
       dockerfile: docker/Dockerfile.allinone
       args:
-        # Browser-facing Garage URL baked into the dashboard. Keep it in sync
-        # with the published 4271 port. For remote access, point it at your
-        # public Garage URL (and front both with a same-origin proxy — see
-        # docs/docker.md), then rebuild.
+        # Build-baked default for the browser-facing Garage URL. Rarely needed:
+        # the runtime GARAGE_URL env below overrides it, and unset entirely the
+        # dashboard targets its own hostname on :4271 (right for this compose).
         GARAGE_URL: "${GARAGE_URL:-http://localhost:4271}"
     image: glorp-allinone
     ports:
@@ -24,16 +23,18 @@ services:
       - "3270:3270"   # dashboard (web console)
       - "8787:8787"   # MCP streamable-HTTP (POST /mcp)
     environment:
-      # Browser-facing Garage URL — RUNTIME setting now (overrides the value
-      # baked at build), so the published image points anywhere without a rebuild.
+      # Browser-facing Garage URL — optional RUNTIME pre-fill. Unset, the
+      # dashboard targets the hostname in your address bar on :4271 (works from
+      # any machine), and the sign-in screen can point anywhere (per-browser).
       GARAGE_URL: "${GARAGE_URL:-}"
       # Model providers (standard keys). Mount credentials.json for custom ones.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       GLORP_GARAGE_AUTH: "required"      # set "off" only on a trusted private net
-      # Browser origins allowed beyond same-origin/loopback — set when the
-      # dashboard is served from a DIFFERENT host than Garage (comma-separated).
+      # Optional origin RESTRICTION. With auth required (above), Garage accepts
+      # any browser origin — Bearer keys are the gate. Set this to pin specific
+      # origins instead; with auth off it's REQUIRED for non-loopback browsers.
       GLORP_GARAGE_ALLOWED_ORIGINS: "${GLORP_GARAGE_ALLOWED_ORIGINS:-}"
       GLORP_AUTO_KEY: "1"
       # Dashboard admin login (verified by Garage). CHANGE THESE.

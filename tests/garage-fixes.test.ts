@@ -53,7 +53,9 @@ describe("Garage snapshot rehydration", () => {
 });
 
 describe("Garage browser origin checks", () => {
-  it("allows same-origin, loopback dev, and non-browser clients only", () => {
+  it("allows same-origin, loopback dev, and non-browser clients only", async () => {
+    const { configureAllowedOrigins } = await import("../src/garage/cors.ts");
+    configureAllowedOrigins([]); // pin the strict default — earlier suites may have booted an auth-on garage
     const garageUrl = new URL("http://127.0.0.1:4271/sessions");
     expect(isAllowedBrowserOrigin(null, garageUrl)).toBe(true);
     expect(isAllowedBrowserOrigin("http://127.0.0.1:4271", garageUrl)).toBe(true);
@@ -78,6 +80,22 @@ describe("Garage browser origin checks", () => {
     expect(isAllowedBrowserOrigin("https://dash.example.com", garageUrl)).toBe(false);
   });
 
+  it("opens CORS when auth is the gate and no allowlist is set", async () => {
+    const { configureAllowedOrigins } = await import("../src/garage/cors.ts");
+    const garageUrl = new URL("https://garage.example.com/sessions");
+    try {
+      configureAllowedOrigins([], { openWhenUnset: true });
+      expect(isAllowedBrowserOrigin("https://anywhere.example.com", garageUrl)).toBe(true);
+
+      // An explicit allowlist narrows it back even with auth on.
+      configureAllowedOrigins(["https://dash.example.com"], { openWhenUnset: true });
+      expect(isAllowedBrowserOrigin("https://dash.example.com", garageUrl)).toBe(true);
+      expect(isAllowedBrowserOrigin("https://evil.example.com", garageUrl)).toBe(false);
+    } finally {
+      configureAllowedOrigins([]);
+    }
+  });
+
   it("rejects cross-site REST requests before routing", async () => {
     const dataDir = tmp();
     const garage = await startGarage(loadGarageConfig({ dataDir, port: await freePort(), hostname: "127.0.0.1" }));
@@ -89,6 +107,31 @@ describe("Garage browser origin checks", () => {
       expect(response.headers.get("access-control-allow-origin")).toBeNull();
     } finally {
       await garage.stop();
+    }
+  });
+
+  it("serves any browser origin when auth is required (Bearer is the gate)", async () => {
+    const { configureAllowedOrigins } = await import("../src/garage/cors.ts");
+    const dataDir = tmp();
+    const garage = await startGarage(
+      loadGarageConfig({ dataDir, port: await freePort(), hostname: "127.0.0.1", auth: { enabled: true } }),
+    );
+    try {
+      // Unauthenticated route: reachable cross-origin, CORS header reflected.
+      const health = await fetch(`http://127.0.0.1:${garage.port}/api/v1/health`, {
+        headers: { origin: "https://dash.anywhere.example" },
+      });
+      expect(health.status).toBe(200);
+      expect(health.headers.get("access-control-allow-origin")).toBe("https://dash.anywhere.example");
+
+      // Data routes still demand a key — auth rejects, not the origin gate.
+      const sessions = await fetch(`http://127.0.0.1:${garage.port}/api/v1/sessions`, {
+        headers: { origin: "https://dash.anywhere.example" },
+      });
+      expect(sessions.status).toBe(401);
+    } finally {
+      await garage.stop();
+      configureAllowedOrigins([]); // reset module state for later tests
     }
   });
 });

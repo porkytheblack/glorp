@@ -16,8 +16,16 @@ const CORS_BASE: Record<string, string> = {
 let EXTRA_ORIGINS = new Set<string>();
 let ALLOW_ANY = false;
 
-export function configureAllowedOrigins(origins: string[]): void {
-  ALLOW_ANY = origins.includes("*");
+/**
+ * `openWhenUnset` opens CORS to every origin when the operator set no
+ * allowlist. Safe ONLY when API-key auth is required: nothing here rides on
+ * cookies or ambient credentials, so a foreign page can never present a
+ * victim's Bearer token — the same posture as api.github.com. An explicit
+ * allowlist always narrows it back; auth-off deployments keep the strict
+ * same-origin/loopback rule regardless.
+ */
+export function configureAllowedOrigins(origins: string[], opts: { openWhenUnset?: boolean } = {}): void {
+  ALLOW_ANY = origins.includes("*") || (origins.length === 0 && opts.openWhenUnset === true);
   EXTRA_ORIGINS = new Set(
     origins
       .filter((o) => o !== "*")

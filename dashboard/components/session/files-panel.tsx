@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Download, FileUp, Paperclip, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, API_BASE, getNamespace, getToken } from "@/lib/api";
+import { api, apiBase, getNamespace, getToken } from "@/lib/api";
 import { useQuery } from "@/lib/hooks";
 import { compact, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -23,7 +23,7 @@ interface FileListResponse {
 
 /** Authenticated direct-download URL (bearer rides as a query param). */
 function downloadUrl(sessionId: string, rel: string): string {
-  const u = new URL(`${API_BASE}/sessions/${sessionId}/files/${rel.split("/").map(encodeURIComponent).join("/")}`);
+  const u = new URL(`${apiBase()}/sessions/${sessionId}/files/${rel.split("/").map(encodeURIComponent).join("/")}`);
   const token = getToken();
   if (token) u.searchParams.set("api_key", token);
   const ns = getNamespace();
@@ -70,7 +70,7 @@ export function FilesPanel({ sessionId, refresh }: { sessionId: string; refresh?
       if (token) headers.authorization = `Bearer ${token}`;
       const ns = getNamespace();
       if (ns) headers["x-glorp-namespace"] = ns;
-      const res = await fetch(`${API_BASE}/sessions/${sessionId}/files`, { method: "POST", headers, body: form });
+      const res = await fetch(`${apiBase()}/sessions/${sessionId}/files`, { method: "POST", headers, body: form });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? `Upload failed (${res.status})`);
       toast.success(n === 1 ? "File uploaded" : `${n} files uploaded`);
       files.reload();
