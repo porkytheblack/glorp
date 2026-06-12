@@ -26,6 +26,7 @@ import { adminAuthConfigured } from "./auth/admin.ts";
 import { authRequired, type GarageConfig } from "./config.ts";
 import { startIdleGc } from "./gc.ts";
 import { buildGarageApp } from "./http-app.ts";
+import { configureAllowedOrigins } from "./cors.ts";
 export { isAllowedBrowserOrigin } from "./cors.ts";
 
 export interface GarageHandle {
@@ -35,6 +36,16 @@ export interface GarageHandle {
 }
 
 export async function startGarage(config: GarageConfig): Promise<GarageHandle> {
+  const authOn = authRequired(config);
+  // With auth required, Bearer keys are the gate (no cookies to ride), so an
+  // unset allowlist means "any origin" — split-host dashboards work with zero
+  // CORS config. Auth-off deployments keep the strict same-origin/loopback rule.
+  configureAllowedOrigins(config.allowedOrigins ?? [], { openWhenUnset: authOn });
+  if (config.allowedOrigins?.length) {
+    console.log(`[glorp-garage] extra browser origins allowed: ${config.allowedOrigins.join(", ")}`);
+  } else if (authOn) {
+    console.log(`[glorp-garage] browser origins: any (auth gates every request; set GLORP_GARAGE_ALLOWED_ORIGINS to restrict)`);
+  }
   const garageCredentials = new CredentialsStore(credentialStorageFromEnv(config.dataDir));
   // Disk library + (optional) companion-service registry; disk wins on collision.
   const remoteTemplates = config.templateRegistryUrl
@@ -51,7 +62,6 @@ export async function startGarage(config: GarageConfig): Promise<GarageHandle> {
   const registry = new NamespaceRegistry(namespaceStore, config, templates, garageCredentials, uploadsSync);
   const startedAt = Date.now();
   const keyStore = new KeyStore(config.auth?.keyStorage ?? path.join(config.dataDir, "glorp-keys.json"));
-  const authOn = authRequired(config);
   const namespaceCtl = namespaceControlRoutes(namespaceStore, registry, keyStore, config);
   const router = createGarageRouter(templates, keyStore, namespaceCtl, storageConfig);
 

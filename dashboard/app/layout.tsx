@@ -18,6 +18,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={cn(GeistSans.variable, GeistMono.variable)} suppressHydrationWarning>
       <head>
+        {/* Runtime Garage URL — the container entrypoint writes it from env;
+            blocking load guarantees it's set before the first API call. */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script src="/runtime-config.js" />
         {/* Sets the `dark` class before first paint — localStorage, then OS. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>

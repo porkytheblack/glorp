@@ -7,6 +7,39 @@ const CORS_BASE: Record<string, string> = {
   "access-control-allow-headers": "authorization, content-type, x-glorp-namespace",
 };
 
+/**
+ * Operator-configured extra origins (split-host deploys: dashboard on one
+ * host, Garage on another). Set once at startup from
+ * `GLORP_GARAGE_ALLOWED_ORIGINS` / garage.json `allowedOrigins`. "*" allows
+ * every origin — auth still applies, but prefer explicit origins.
+ */
+let EXTRA_ORIGINS = new Set<string>();
+let ALLOW_ANY = false;
+
+/**
+ * `openWhenUnset` opens CORS to every origin when the operator set no
+ * allowlist. Safe ONLY when API-key auth is required: nothing here rides on
+ * cookies or ambient credentials, so a foreign page can never present a
+ * victim's Bearer token — the same posture as api.github.com. An explicit
+ * allowlist always narrows it back; auth-off deployments keep the strict
+ * same-origin/loopback rule regardless.
+ */
+export function configureAllowedOrigins(origins: string[], opts: { openWhenUnset?: boolean } = {}): void {
+  ALLOW_ANY = origins.includes("*") || (origins.length === 0 && opts.openWhenUnset === true);
+  EXTRA_ORIGINS = new Set(
+    origins
+      .filter((o) => o !== "*")
+      .map((o) => {
+        try {
+          return new URL(o).origin.toLowerCase();
+        } catch {
+          return "";
+        }
+      })
+      .filter(Boolean),
+  );
+}
+
 export function withCors(req: Request, url: URL, resp: Response): Response {
   const origin = req.headers.get("origin");
   if (origin && isAllowedBrowserOrigin(origin, url)) {
@@ -19,6 +52,7 @@ export function withCors(req: Request, url: URL, resp: Response): Response {
 
 export function isAllowedBrowserOrigin(origin: string | null, requestUrl: URL): boolean {
   if (!origin) return true;
+  if (ALLOW_ANY) return true;
   let parsed: URL;
   try {
     parsed = new URL(origin);
@@ -26,6 +60,7 @@ export function isAllowedBrowserOrigin(origin: string | null, requestUrl: URL): 
     return false;
   }
   if (parsed.origin === requestUrl.origin) return true;
+  if (EXTRA_ORIGINS.has(parsed.origin.toLowerCase())) return true;
   return isLoopback(parsed.hostname) && isLoopback(requestUrl.hostname);
 }
 

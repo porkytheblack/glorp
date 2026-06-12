@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# All-in-one Glorp image: four services in one container, supervised here —
+# All-in-one Glorp image: up to four services in one container, supervised here —
 #   • Companion  git tokens + template registry  :8788  (loopback only)
 #   • Garage     orchestration REST/WS API       :4271
 #   • MCP        streamable-HTTP MCP server      :8787  (POST /mcp)
 #   • Dashboard  Next.js web console             :3270
-# Garage is the source of truth; the MCP server and dashboard are clients of it
-# over loopback inside the container, and Garage is itself a client of the
-# companion (installation tokens for template clones, registry templates from
-# /data/companion-templates). On first boot we mint an admin API key
-# (persisted to /data) and hand it to the MCP server so its tools can drive the
-# Garage. If any service exits, we tear the rest down so Docker can restart us.
+# GLORP_SERVICES picks the set (comma-separated; default all four). Garage is
+# always on — it is the source of truth the others are clients of. e.g.
+#   GLORP_SERVICES=garage,dashboard      → just the web console + API
+#   GLORP_SERVICES=garage,mcp            → headless, MCP-driven
+# The MCP server and dashboard talk to Garage over loopback inside the
+# container; Garage is itself a client of the companion (installation tokens
+# for template clones, registry templates from /data/companion-templates). On
+# first boot we mint an admin API key (persisted to /data) and hand it to the
+# MCP server so its tools can drive the Garage. If any service exits, we tear
+# the rest down so Docker can restart us.
 #
 # Garage and the companion run from the COMPILED binary (dist/glorp) — not from
 # source — so orchestrator subagents can self-spawn and template clones get a
@@ -17,18 +21,25 @@
 set -euo pipefail
 
 DATA="${GLORP_DATA_DIR:-/data}"
+# Both state dirs are env-relocatable so SINGLE-VOLUME hosts (Railway, Fly)
+# can mount one volume and nest both under it, e.g. mount at /glorp with
+# GLORP_DATA_DIR=/glorp/data GLORP_WORKSPACE_ROOT=/glorp/workspaces.
+WORKSPACE_ROOT="${GLORP_WORKSPACE_ROOT:-/workspaces}"
 GLORP_BIN=/app/dist/glorp
 GARAGE_PORT=4271                       # fixed: dashboard bundle + MCP wire to it
 MCP_PORT="${MCP_PORT:-8787}"
 DASH_PORT="${DASH_PORT:-3270}"
 COMPANION_PORT="${COMPANION_PORT:-8788}"
 AUTH="${GLORP_GARAGE_AUTH:-required}"
+SERVICES="${GLORP_SERVICES:-garage,companion,mcp,dashboard}"
 
 log() { echo "[allinone] $*"; }
+want() { case ",$SERVICES," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 
 # --- 1. API key for the MCP server -------------------------------------------
 # Prefer an explicit GLORP_API_KEY; else reuse a persisted one; else (unless auth
-# is off) mint an admin key once and persist it so restarts stay wired up.
+# is off) mint an admin key once and persist it so restarts stay wired up. The
+# key is the REST admin key too, so it's minted regardless of the service set.
 MCP_KEY="${GLORP_API_KEY:-}"
 KEY_FILE="$DATA/mcp-key"
 if [ -z "$MCP_KEY" ] && [ "$AUTH" != "off" ]; then
@@ -70,25 +81,29 @@ start() {  # start <name> <cmd...>
 # Templates dropped in /data/companion-templates (the /data volume) are served
 # to Garage with `from`-skills resolved server-side. Git-token minting turns on
 # when GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY[_FILE] are provided.
-mkdir -p "$DATA/companion-templates"
-start companion "$GLORP_BIN" companion \
-  --host 127.0.0.1 --port "$COMPANION_PORT" --data-dir "$DATA"
+if want companion; then
+  mkdir -p "$DATA/companion-templates"
+  start companion "$GLORP_BIN" companion \
+    --host 127.0.0.1 --port "$COMPANION_PORT" --data-dir "$DATA"
 
-# --- 3. Garage ----------------------------------------------------------------
-# Inherits the container env (model keys, GARAGE_ADMIN_* for dashboard login).
-# Wire Garage at the in-container companion unless the operator pointed it at
-# an external service explicitly.
-export GLORP_GARAGE_TEMPLATE_REGISTRY_URL="${GLORP_GARAGE_TEMPLATE_REGISTRY_URL:-http://127.0.0.1:$COMPANION_PORT/v1/templates}"
-# Wire git tokens only when companion minting can actually work (id AND key) —
-# with half a credential, leaving Garage unwired gives the clearer error
-# ("no git token service configured") instead of per-clone not_configured 404s.
-if [ -n "${GITHUB_APP_ID:-}" ] \
-  && { [ -n "${GITHUB_APP_PRIVATE_KEY:-}" ] || [ -n "${GITHUB_APP_PRIVATE_KEY_FILE:-}" ]; } \
-  && [ -z "${GLORP_GARAGE_GIT_TOKEN_URL:-}" ]; then
-  export GLORP_GARAGE_GIT_TOKEN_URL="http://127.0.0.1:$COMPANION_PORT/v1/git/token?repo={repo}"
+  # Wire Garage at the in-container companion unless the operator pointed it
+  # at an external service explicitly.
+  export GLORP_GARAGE_TEMPLATE_REGISTRY_URL="${GLORP_GARAGE_TEMPLATE_REGISTRY_URL:-http://127.0.0.1:$COMPANION_PORT/v1/templates}"
+  # Wire git tokens only when companion minting can actually work (id AND key) —
+  # with half a credential, leaving Garage unwired gives the clearer error
+  # ("no git token service configured") instead of per-clone not_configured 404s.
+  if [ -n "${GITHUB_APP_ID:-}" ] \
+    && { [ -n "${GITHUB_APP_PRIVATE_KEY:-}" ] || [ -n "${GITHUB_APP_PRIVATE_KEY_FILE:-}" ]; } \
+    && [ -z "${GLORP_GARAGE_GIT_TOKEN_URL:-}" ]; then
+    export GLORP_GARAGE_GIT_TOKEN_URL="http://127.0.0.1:$COMPANION_PORT/v1/git/token?repo={repo}"
+  fi
 fi
+
+# --- 3. Garage (always on — the source of truth) ------------------------------
+# Inherits the container env (model keys, GARAGE_ADMIN_* for dashboard login).
+mkdir -p "$WORKSPACE_ROOT"
 start garage "$GLORP_BIN" garage \
-  --host 0.0.0.0 --port "$GARAGE_PORT" --workspace-root /workspaces
+  --host 0.0.0.0 --port "$GARAGE_PORT" --workspace-root "$WORKSPACE_ROOT"
 
 log "waiting for Garage on :$GARAGE_PORT…"
 for i in $(seq 1 60); do
@@ -100,15 +115,35 @@ for i in $(seq 1 60); do
 done
 
 # --- 4. MCP server (streamable HTTP) -----------------------------------------
-start mcp env \
-  GLORP_ENDPOINT="http://127.0.0.1:$GARAGE_PORT" \
-  GLORP_API_KEY="$MCP_KEY" \
-  bun packages/glorp-mcp/src/index.ts --http --host 0.0.0.0 --port "$MCP_PORT"
+if want mcp; then
+  start mcp env \
+    GLORP_ENDPOINT="http://127.0.0.1:$GARAGE_PORT" \
+    GLORP_API_KEY="$MCP_KEY" \
+    bun packages/glorp-mcp/src/index.ts --http --host 0.0.0.0 --port "$MCP_PORT"
+fi
 
 # --- 5. Dashboard (Next.js) --------------------------------------------------
-start dashboard bash -c "cd /app/dashboard && exec bunx next start -p $DASH_PORT"
+if want dashboard; then
+  # Runtime Garage URL (optional pre-fill): the browser bundle reads
+  # window.__GARAGE_URL__ before the build-baked NEXT_PUBLIC_GARAGE_URL.
+  # Unset, the dashboard targets its own hostname on :4271, and the sign-in
+  # screen lets users point anywhere (saved per-browser).
+  if [ -n "${GARAGE_URL:-}" ]; then
+    # JS-string-escape in pure bash (no python3 dependency, no unescaped
+    # fallback): strip CR/LF, then escape backslashes BEFORE quotes.
+    esc="${GARAGE_URL//$'\n'/}"; esc="${esc//$'\r'/}"
+    esc="${esc//\\/\\\\}"; esc="${esc//\"/\\\"}"
+    printf 'window.__GARAGE_URL__ = "%s";\n' "$esc" > /app/dashboard/public/runtime-config.js
+    log "dashboard → Garage at $GARAGE_URL (runtime)"
+  fi
+  start dashboard bash -c "cd /app/dashboard && exec bunx next start -p $DASH_PORT"
+fi
 
-log "all services up — Garage :$GARAGE_PORT · MCP :$MCP_PORT/mcp · dashboard :$DASH_PORT · companion :$COMPANION_PORT (internal)"
+up="Garage :$GARAGE_PORT"
+want dashboard && up="$up · dashboard :$DASH_PORT"
+want mcp && up="$up · MCP :$MCP_PORT/mcp"
+want companion && up="$up · companion :$COMPANION_PORT (internal)"
+log "services up — $up"
 
 # Block until any one service exits, then stop the rest with its exit code so the
 # container's restart policy can bring us back cleanly.

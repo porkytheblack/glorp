@@ -1,14 +1,70 @@
 /**
  * Typed client for the Garage REST API. All requests are made from the browser
  * with the admin JWT (or an API key) as a Bearer token and an optional
- * X-Glorp-Namespace header. The base URL comes from NEXT_PUBLIC_GARAGE_URL.
+ * X-Glorp-Namespace header. The base URL resolves PER REQUEST, so nothing is
+ * hardcoded anywhere: a user override saved from the sign-in screen
+ * (localStorage) wins, then the operator's runtime-config.js
+ * (window.__GARAGE_URL__, written by the container entrypoint from the
+ * GARAGE_URL env), then the build-baked NEXT_PUBLIC_GARAGE_URL, and finally
+ * the dashboard's own hostname on Garage's port — which is exactly where the
+ * all-in-one container serves Garage, from any machine, with zero config.
  */
 
-export const GARAGE_URL = (process.env.NEXT_PUBLIC_GARAGE_URL ?? "http://127.0.0.1:4271").replace(/\/$/, "");
-export const API_BASE = `${GARAGE_URL}/api/v1`;
+declare global {
+  interface Window {
+    __GARAGE_URL__?: string;
+  }
+}
 
 const TOKEN_KEY = "garage.token";
 const NS_KEY = "garage.namespace";
+const URL_KEY = "garage.url";
+
+/** Operator-provided URL: runtime-config.js (container env) → build-baked env. */
+export function deploymentGarageUrl(): string | null {
+  const runtime = typeof window === "undefined" ? undefined : window.__GARAGE_URL__;
+  return runtime || process.env.NEXT_PUBLIC_GARAGE_URL || null;
+}
+
+/** Per-browser override saved from the sign-in screen. */
+export function getStoredGarageUrl(): string | null {
+  return typeof window === "undefined" ? null : localStorage.getItem(URL_KEY);
+}
+export function setStoredGarageUrl(url: string | null): void {
+  if (typeof window === "undefined") return;
+  if (url) localStorage.setItem(URL_KEY, url);
+  else localStorage.removeItem(URL_KEY);
+}
+
+/**
+ * Reject anything that can't serve as a fetch/WebSocket base (corrupted
+ * localStorage, malformed env) so `new URL(...)` downstream never throws —
+ * garbage falls through to the next candidate instead. Path prefixes are
+ * preserved for reverse-proxied Garages.
+ */
+function sanitizeBaseUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Effective Garage URL — resolved at call time so a sign-in-screen change applies without a reload. */
+export function garageUrl(): string {
+  const chosen = sanitizeBaseUrl(getStoredGarageUrl()) ?? sanitizeBaseUrl(deploymentGarageUrl());
+  if (chosen) return chosen;
+  if (typeof window !== "undefined") return `${location.protocol}//${location.hostname}:4271`;
+  return "http://127.0.0.1:4271";
+}
+
+export function apiBase(): string {
+  return `${garageUrl()}/api/v1`;
+}
 
 export function getToken(): string | null {
   return typeof window === "undefined" ? null : localStorage.getItem(TOKEN_KEY);
@@ -50,7 +106,7 @@ export async function api<T>(path: string, opts: Opts = {}): Promise<T> {
   const ns = opts.namespace ?? getNamespace();
   if (ns) headers["x-glorp-namespace"] = ns;
 
-  const res = await fetch(API_BASE + path, {
+  const res = await fetch(apiBase() + path, {
     method: opts.method ?? "GET",
     headers,
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
@@ -75,7 +131,7 @@ function safeParse(text: string): any {
 
 /** WebSocket URL for a session's event stream (token + ns ride as query params). */
 export function sessionWsUrl(id: string): string {
-  const u = new URL(`${API_BASE}/sessions/${id}/events`);
+  const u = new URL(`${apiBase()}/sessions/${id}/events`);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
   const token = getToken();
   if (token) u.searchParams.set("api_key", token);

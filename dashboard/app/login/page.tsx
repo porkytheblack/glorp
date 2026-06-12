@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "@/lib/auth";
+import { deploymentGarageUrl, garageUrl, getStoredGarageUrl, setStoredGarageUrl } from "@/lib/api";
 import { BrandLockup } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,14 +16,43 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Garage server — resolved client-side only (localStorage + window), so it
+  // is loaded after mount to keep the prerendered markup stable.
+  const [serverOpen, setServerOpen] = useState(false);
+  const [serverUrl, setServerUrl] = useState("");
+  const [effectiveUrl, setEffectiveUrl] = useState("");
+  const [defaultUrl, setDefaultUrl] = useState("");
+
+  useEffect(() => {
+    setServerUrl(getStoredGarageUrl() ?? "");
+    setEffectiveUrl(garageUrl());
+    setDefaultUrl(deploymentGarageUrl() ?? `${location.protocol}//${location.hostname}:4271`);
+  }, []);
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    const trimmed = serverUrl.trim().replace(/\/+$/, "");
+    if (trimmed && !/^https?:\/\//i.test(trimmed)) {
+      setServerOpen(true);
+      setError("The server address must start with http:// or https://");
+      return;
+    }
+    setStoredGarageUrl(trimmed || null); // api() resolves per request — applies immediately
+    setEffectiveUrl(garageUrl());
+
     setBusy(true);
     try {
       await login(username, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      if (err instanceof TypeError) {
+        // fetch network failure — the URL is the likely culprit, surface it.
+        setServerOpen(true);
+        setError(`Can't reach Garage at ${garageUrl()} — check the server address.`);
+      } else {
+        setError(err instanceof Error ? err.message : "Login failed");
+      }
     } finally {
       setBusy(false);
     }
@@ -48,6 +78,33 @@ export default function LoginPage() {
               <Label>Password</Label>
               <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
+
+            {serverOpen ? (
+              <div className="space-y-1.5">
+                <Label>Garage server</Label>
+                <Input
+                  value={serverUrl}
+                  placeholder={defaultUrl}
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  inputMode="url"
+                  onChange={(e) => setServerUrl(e.target.value)}
+                />
+                <p className="text-[11px] leading-relaxed text-faint">Saved in this browser. Leave blank to use the deployment default.</p>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setServerOpen(true)}
+                className="group flex w-full items-baseline gap-1.5 text-left text-[12px] text-faint transition-colors hover:text-muted-foreground"
+              >
+                <span className="shrink-0">Garage at</span>
+                <span className="truncate font-mono">{effectiveUrl || "…"}</span>
+                <span className="ml-auto shrink-0 underline-offset-2 group-hover:underline">Change</span>
+              </button>
+            )}
+
             {error && <ErrorState message={error} />}
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? <Spinner /> : null} Sign in
