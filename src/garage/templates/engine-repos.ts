@@ -98,6 +98,11 @@ async function githubAuthEnv(url: string, ctx: ProvisionContext, secrets: Set<st
  */
 async function installCredHelper(repoDir: string, spawn: SectionSpawn): Promise<void> {
   await spawn(["git", "config", "credential.helper", gitCredHelperCommand()], repoDir, "configure credential helper");
+  // Git hands `path` to credential helpers ONLY with useHttpPath — and the
+  // helper scopes its token request to that owner/repo. Without it every
+  // post-clone fetch/push asks the token service for an unscoped token,
+  // which strict services (no default owner) refuse.
+  await spawn(["git", "config", "credential.useHttpPath", "true"], repoDir, "configure credential path scoping");
 }
 
 /**
