@@ -72,6 +72,8 @@ export type ToolName =
 
 export interface ToolRegistryDeps {
   workspace: string;
+  /** Per-session env injected into bash spawns (e.g. GLORP_SESSION_ID). */
+  sessionEnv?: Record<string, string>;
   dataDir?: string;
   store?: GlorpStore;
   resources?: ResourceFsAdapter;
@@ -93,7 +95,7 @@ export function createToolRegistry(deps: ToolRegistryDeps): Record<ToolName, Too
     edit: () => editTool(deps.workspace),
     apply_patch: () => applyPatchTool(deps.workspace),
     glorp_update_plan: () => planTool(requireDep(deps.store, "store"), deps.resources),
-    bash: () => bashTool(deps.workspace),
+    bash: () => bashTool(deps.workspace, deps.sessionEnv),
     glob: () => globTool(deps.workspace),
     grep: () => grepTool(deps.workspace),
     ls: () => lsTool(deps.workspace),

@@ -516,6 +516,13 @@ describe("bashTool", () => {
     expect(r.message).toMatch(/exited with code 7/);
   });
 
+  test("extraEnv rides each spawn (per-session identity)", async () => {
+    const tool = bashTool(workspace, { GLORP_SESSION_ID: "sess-42" });
+    const r = await tool.do({ command: "echo id=$GLORP_SESSION_ID", description: "env" }, display, glove);
+    expect(r.status).toBe("success");
+    expect(r.data as string).toContain("id=sess-42");
+  });
+
   test("timeout hit reports timed-out message", async () => {
     const tool = bashTool(workspace);
     const r = await tool.do(

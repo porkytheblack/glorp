@@ -49,6 +49,8 @@ export interface AssembleArgs {
   systemPrompt?: string;
   /** Mesh identity name for this agent (defaults to "main"). */
   meshName?: string;
+  /** Per-session env injected into bash spawns (e.g. GLORP_SESSION_ID). */
+  sessionEnv?: Record<string, string>;
 }
 
 export interface AssembleResult {
@@ -80,6 +82,7 @@ export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult>
     builder,
     createToolRegistry({
       workspace: args.workspace,
+      sessionEnv: args.sessionEnv,
       dataDir: args.dataDir,
       store: args.store,
       resources: args.resources,

@@ -57,7 +57,7 @@ function summaryArgs(input: { command: string; description: string }, result: {
   };
 }
 
-export function bashTool(workspace: string): SummaryTool<{
+export function bashTool(workspace: string, extraEnv?: Record<string, string>): SummaryTool<{
   command: string; description: string; timeout_ms?: number;
 }, BashSummaryArgs> {
   return {
@@ -82,7 +82,7 @@ export function bashTool(workspace: string): SummaryTool<{
         const ok = await askDestructiveConfirm(display, input.command, guard.reason);
         if (!ok) return { status: "error", data: null, message: `User declined (${guard.reason}).` };
       }
-      const result = await runBash(input.command, workspace, input.timeout_ms ?? 120_000, signal);
+      const result = await runBash(input.command, workspace, input.timeout_ms ?? 120_000, signal, extraEnv);
       const combined = [
         result.stdout && `stdout:\n${result.stdout}`,
         result.stderr && `stderr:\n${result.stderr}`,
@@ -118,10 +118,13 @@ export function bashTool(workspace: string): SummaryTool<{
   };
 }
 
-function runBash(cmd: string, cwd: string, timeout: number, signal?: AbortSignal) {
+function runBash(cmd: string, cwd: string, timeout: number, signal?: AbortSignal, extraEnv?: Record<string, string>) {
   return new Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }>((resolve) => {
     const start = Date.now();
-    const child = spawn("bash", ["-c", cmd], { cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    // extraEnv carries per-session identity (GLORP_SESSION_ID…) — sessions
+    // share this process, so per-session values must ride per-spawn env.
+    const env = extraEnv ? { ...process.env, ...extraEnv } : process.env;
+    const child = spawn("bash", ["-c", cmd], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const out = makeStreamCapture("stdout");
     const err = makeStreamCapture("stderr");
     child.stdout.on("data", (b: Buffer) => out.push(b));

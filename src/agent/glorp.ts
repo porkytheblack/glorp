@@ -75,6 +75,9 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     workspace: opts.workspace, dataDir, paths,
     bridge, orchestrator, displayManager: permissionDM, diskExtensions,
     sessionResources, titleTimeoutMs: TITLE_MODEL_TIMEOUT_MS,
+    // Workspace processes can self-identify (PR markers, event callbacks):
+    // a GitHub webhook carrying this id routes straight back to this session.
+    sessionEnv: { GLORP_SESSION_ID: opts.sessionId, GLORP_WORKSPACE: opts.workspace },
   };
 
   const roster = loadRoster(paths.rosterFile, opts.sessionId);
