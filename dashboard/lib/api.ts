@@ -1,10 +1,20 @@
 /**
  * Typed client for the Garage REST API. All requests are made from the browser
  * with the admin JWT (or an API key) as a Bearer token and an optional
- * X-Glorp-Namespace header. The base URL comes from NEXT_PUBLIC_GARAGE_URL.
+ * X-Glorp-Namespace header. The base URL resolves at RUNTIME first —
+ * /runtime-config.js sets window.__GARAGE_URL__ (written by the container
+ * entrypoint from the GARAGE_URL env), so one published image serves any
+ * deployment — falling back to the build-baked NEXT_PUBLIC_GARAGE_URL.
  */
 
-export const GARAGE_URL = (process.env.NEXT_PUBLIC_GARAGE_URL ?? "http://127.0.0.1:4271").replace(/\/$/, "");
+declare global {
+  interface Window {
+    __GARAGE_URL__?: string;
+  }
+}
+
+const runtimeUrl = typeof window !== "undefined" ? window.__GARAGE_URL__ : undefined;
+export const GARAGE_URL = (runtimeUrl || process.env.NEXT_PUBLIC_GARAGE_URL || "http://127.0.0.1:4271").replace(/\/$/, "");
 export const API_BASE = `${GARAGE_URL}/api/v1`;
 
 const TOKEN_KEY = "garage.token";

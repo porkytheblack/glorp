@@ -124,6 +124,14 @@ fi
 
 # --- 5. Dashboard (Next.js) --------------------------------------------------
 if want dashboard; then
+  # Runtime Garage URL: lets the PUBLISHED image point at any Garage without a
+  # rebuild — the browser bundle reads window.__GARAGE_URL__ before falling
+  # back to the build-baked NEXT_PUBLIC_GARAGE_URL.
+  if [ -n "${GARAGE_URL:-}" ]; then
+    printf 'window.__GARAGE_URL__ = %s;\n' "$(printf '%s' "$GARAGE_URL" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo "\"$GARAGE_URL\"")" \
+      > /app/dashboard/public/runtime-config.js
+    log "dashboard → Garage at $GARAGE_URL (runtime)"
+  fi
   start dashboard bash -c "cd /app/dashboard && exec bunx next start -p $DASH_PORT"
 fi
 

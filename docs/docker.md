@@ -24,10 +24,10 @@ docker pull ghcr.io/porkytheblack/glorp/garage-allinone:latest  # Garage + dashb
 ```
 
 (The pre-rename `station`/`station-full` names are frozen — new pushes land on
-the `garage*` names only.) The all-in-one image bakes the dashboard's Garage URL
-as `http://localhost:4271`, which suits local published-port runs; for a remote
-URL, build from source with `--build-arg GARAGE_URL=…` or use a same-origin
-reverse proxy.
+the `garage*` names only.) The dashboard's Garage URL is a **runtime** setting:
+set the `GARAGE_URL` env on the container and the published image points at any
+Garage without a rebuild (defaults to `http://localhost:4271` for local
+published-port runs).
 
 ## Quick start
 
@@ -213,8 +213,9 @@ templates, workspaces) then lives in the single volume.
 The dashboard is a pure browser client of Garage — your browser calls Garage
 directly (REST + WebSocket), so a split deploy needs two things:
 
-1. **Bake the public Garage URL into the dashboard** (`GARAGE_URL` build arg →
-   `NEXT_PUBLIC_GARAGE_URL`), e.g. `https://garage.example.com`.
+1. **Point the dashboard at the public Garage URL** — set the `GARAGE_URL`
+   env on the dashboard container (runtime; no rebuild needed), e.g.
+   `https://garage.example.com`.
 2. **Allow the dashboard's origin on Garage**:
    `GLORP_GARAGE_ALLOWED_ORIGINS=https://dash.example.com` (comma-separate
    several; `*` allows any origin — auth still applies, but prefer explicit).

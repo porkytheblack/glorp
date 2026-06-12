@@ -21,6 +21,9 @@ services:
       - "4271:4271"   # Garage REST/WS API
       - "3270:3270"   # dashboard (web console)
     environment:
+      # Browser-facing Garage URL — RUNTIME setting now (overrides the value
+      # baked at build), so the published image points anywhere without a rebuild.
+      GARAGE_URL: "${GARAGE_URL:-}"
       GLORP_SERVICES: "garage,dashboard"
       # Model providers (standard keys). Mount credentials.json for custom ones.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
