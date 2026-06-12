@@ -216,6 +216,8 @@ export function loadGarageConfig(overrides: GarageConfigOverrides = {}): GarageC
         ?.split(",")
         .map((s) => s.trim())
         .filter(Boolean) ??
-      (Array.isArray(file.allowedOrigins) ? file.allowedOrigins : undefined),
+      (Array.isArray(file.allowedOrigins)
+        ? file.allowedOrigins.filter((o): o is string => typeof o === "string" && o.trim() !== "").map((o) => o.trim())
+        : undefined),
   };
 }

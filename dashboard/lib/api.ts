@@ -36,10 +36,28 @@ export function setStoredGarageUrl(url: string | null): void {
   else localStorage.removeItem(URL_KEY);
 }
 
+/**
+ * Reject anything that can't serve as a fetch/WebSocket base (corrupted
+ * localStorage, malformed env) so `new URL(...)` downstream never throws —
+ * garbage falls through to the next candidate instead. Path prefixes are
+ * preserved for reverse-proxied Garages.
+ */
+function sanitizeBaseUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Effective Garage URL — resolved at call time so a sign-in-screen change applies without a reload. */
 export function garageUrl(): string {
-  const chosen = getStoredGarageUrl() || deploymentGarageUrl();
-  if (chosen) return chosen.replace(/\/+$/, "");
+  const chosen = sanitizeBaseUrl(getStoredGarageUrl()) ?? sanitizeBaseUrl(deploymentGarageUrl());
+  if (chosen) return chosen;
   if (typeof window !== "undefined") return `${location.protocol}//${location.hostname}:4271`;
   return "http://127.0.0.1:4271";
 }

@@ -129,8 +129,11 @@ if want dashboard; then
   # Unset, the dashboard targets its own hostname on :4271, and the sign-in
   # screen lets users point anywhere (saved per-browser).
   if [ -n "${GARAGE_URL:-}" ]; then
-    printf 'window.__GARAGE_URL__ = %s;\n' "$(printf '%s' "$GARAGE_URL" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo "\"$GARAGE_URL\"")" \
-      > /app/dashboard/public/runtime-config.js
+    # JS-string-escape in pure bash (no python3 dependency, no unescaped
+    # fallback): strip CR/LF, then escape backslashes BEFORE quotes.
+    esc="${GARAGE_URL//$'\n'/}"; esc="${esc//$'\r'/}"
+    esc="${esc//\\/\\\\}"; esc="${esc//\"/\\\"}"
+    printf 'window.__GARAGE_URL__ = "%s";\n' "$esc" > /app/dashboard/public/runtime-config.js
     log "dashboard → Garage at $GARAGE_URL (runtime)"
   fi
   start dashboard bash -c "cd /app/dashboard && exec bunx next start -p $DASH_PORT"
