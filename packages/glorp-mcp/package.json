@@ -1,6 +1,6 @@
 {
   "name": "@porkytheblack/glorp-mcp",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "MCP server exposing Glorp Garage orchestration — namespaces, workspaces, sessions, and the multi-agent roster — as tools for any MCP-capable agent.",
   "type": "module",
   "license": "MIT",
