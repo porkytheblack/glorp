@@ -25,7 +25,7 @@ function summarize(t: Template): TemplateSummaryDto {
 }
 
 /** Null-normalise a declared param's optional fields for the wire contract. */
-function paramDto(p: NonNullable<Template["params"]>[number]): TemplateParamDto {
+export function paramDto(p: NonNullable<Template["params"]>[number]): TemplateParamDto {
   return {
     name: p.name,
     description: p.description ?? null,

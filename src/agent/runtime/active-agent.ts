@@ -14,6 +14,7 @@ import type { IGloveRunnable } from "glove-core/glove";
 import type { Context } from "glove-core/core";
 import type { ResourceFsAdapter } from "glove-memory";
 import { GlorpStore } from "../store.ts";
+import type { TaskSink } from "../task-sink.ts";
 import { VerificationTracker } from "./verification-tracker.ts";
 import { createSessionResources } from "./resources.ts";
 import { createRefreshers } from "./refresh.ts";
@@ -52,6 +53,9 @@ export interface ActivationDeps {
   titleTimeoutMs: number;
   /** Per-session env injected into bash spawns (e.g. GLORP_SESSION_ID). */
   sessionEnv?: Record<string, string>;
+  /** Task context (task mode) — applied to the MAIN agent only. */
+  task?: { type: string };
+  taskSink?: TaskSink;
 }
 
 export interface ActiveAgent {
@@ -106,6 +110,9 @@ export async function activateAgent(
     displayManager: deps.displayManager, diskExtensions: deps.diskExtensions,
     refresh, ctxRef, inboxContext, verification, systemPrompt, meshName: spec.id,
     sessionEnv: deps.sessionEnv,
+    // Task self-knowledge + toolkit go to the MAIN worker only, not spawned agents.
+    task: isMain ? deps.task : undefined,
+    taskSink: isMain ? deps.taskSink : undefined,
   });
   return {
     spec, store, agent: assembled.agent, meshAdapter: assembled.meshAdapter,

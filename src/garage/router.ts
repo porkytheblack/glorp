@@ -29,6 +29,8 @@ const MODEL_PROFILE_REASONING = /^\/models\/profiles\/([^/]+)\/reasoning$/;
 const TEMPLATE = /^\/templates\/([^/]+)$/;
 const NAMESPACE = /^\/namespaces\/([^/]+)$/;
 const NAMESPACE_KEYS = /^\/namespaces\/([^/]+)\/keys$/;
+const TASK_ID = /^\/tasks\/([^/]+)$/;
+const TASK_SUB = /^\/tasks\/([^/]+)\/([^/]+)(?:\/(.+))?$/;
 
 export interface GarageRouter {
   route(req: Request, pathname: string, bundle: NamespaceBundle): Promise<Response>;
@@ -108,6 +110,10 @@ export function createGarageRouter(
       const ws = matchWorkspaceRoute(req, pathname, g);
       if (ws) return ws;
 
+      // --- Tasks (per-namespace, the simple black-box surface) ---
+      const task = matchTaskRoute(req, pathname, g);
+      if (task) return task;
+
       // --- Sessions (per-namespace) ---
       if (pathname === "/sessions") {
         if (m === "POST") return g.sessions.create(req);
@@ -171,6 +177,7 @@ function routeSubpath(req: Request, m: RegExpMatchArray, g: RouteGroups): Promis
       if (method === "DELETE" && rest) return g.control.removeAgent(id, rest);
       break;
     case "slots":
+      if (method === "GET" && !rest) return g.state.slots(id);
       if (method === "POST") {
         return rest ? g.control.resolveSlot(id, rest, req) : errorJson("bad_request", "Missing slot id", 400);
       }
@@ -191,6 +198,49 @@ function routeSubpath(req: Request, m: RegExpMatchArray, g: RouteGroups): Promis
       break;
   }
   return methodNotAllowed();
+}
+
+/**
+ * Dispatch the `/tasks…` surface. Task id == session id, so the file
+ * sub-routes reuse the session files group directly (uploads + R2 for free).
+ * Returns null when the path isn't a task route, so the caller falls through.
+ */
+function matchTaskRoute(req: Request, pathname: string, g: RouteGroups): Promise<Response> | Response | null {
+  const m = req.method;
+  if (pathname === "/tasks") {
+    if (m === "POST") return g.tasks.create(req);
+    if (m === "GET") return g.tasks.list();
+    return methodNotAllowed();
+  }
+  const sub = pathname.match(TASK_SUB);
+  if (sub) {
+    const [, id, resource, rest] = sub as unknown as [string, string, string, string | undefined];
+    switch (resource) {
+      case "messages":
+        if (m === "POST") return g.tasks.messages(id, req);
+        break;
+      case "answers":
+        if (m === "POST") return g.tasks.answers(id, req);
+        break;
+      case "files":
+        if (m === "GET" && !rest) return g.files.list(id, req);
+        if (m === "POST" && !rest) return g.files.upload(id, req);
+        if (m === "GET" && rest) return g.files.download(id, rest);
+        if (m === "DELETE" && rest) return g.files.remove(id, rest);
+        break;
+    }
+    return methodNotAllowed();
+  }
+  const idm = pathname.match(TASK_ID);
+  if (idm) {
+    const id = idm[1]!;
+    // `/tasks/types` is the catalog, not a task id.
+    if (id === "types") return m === "GET" ? g.tasks.types() : methodNotAllowed();
+    if (m === "GET") return g.tasks.get(id);
+    if (m === "DELETE") return g.tasks.destroy(id);
+    return methodNotAllowed();
+  }
+  return null;
 }
 
 function methodNotAllowed(): Response {

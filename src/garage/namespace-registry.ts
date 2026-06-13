@@ -9,6 +9,7 @@
 
 import { SessionManager } from "./manager.ts";
 import { WorkspaceStore } from "./workspace-store.ts";
+import { TaskStore } from "./task-store.ts";
 import { NamespaceCredentialsStore } from "./credentials.ts";
 import { buildRouteGroups, type RouteGroups } from "./route-groups.ts";
 import { provision, type ProvisionContext } from "./templates/engine.ts";
@@ -34,6 +35,7 @@ export interface NamespaceBundle {
   ns: Namespace;
   manager: SessionManager;
   workspaces: WorkspaceStore;
+  tasks: TaskStore;
   credentials: CredentialsStore;
   routes: RouteGroups;
 }
@@ -106,6 +108,7 @@ export class NamespaceRegistry {
 
   private build(ns: Namespace): NamespaceBundle {
     const workspaces = new WorkspaceStore(ns.dataDir);
+    const tasks = new TaskStore(ns.dataDir);
     // The default namespace shares the garage credentials instance outright so
     // its writes and the tenant fallback reads never see a stale in-memory copy.
     const credentials: CredentialsStore = this.store.isDefault(ns.id)
@@ -137,8 +140,9 @@ export class NamespaceRegistry {
       ns,
       manager,
       workspaces,
+      tasks,
       credentials,
-      routes: buildRouteGroups(manager, this.config, credentials, ns.id, this.uploadsSync),
+      routes: buildRouteGroups(manager, this.config, credentials, ns.id, tasks, this.templates, this.uploadsSync),
     };
   }
 }

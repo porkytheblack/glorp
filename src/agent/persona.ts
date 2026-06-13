@@ -50,6 +50,23 @@ export function buildAgentSystemPrompt(role: string, opts: SystemPromptOptions):
 
 export const COMPACTION_INSTRUCTIONS = readPrompt("compaction.md");
 
+/**
+ * Prefix injected into a task-mode worker's system prompt. Tells the agent it
+ * is fulfilling a discrete task and how to use the task toolkit — deliver the
+ * result explicitly, report progress on long jobs, and pause for the requester
+ * with the ask_* tools when a decision is genuinely needed.
+ */
+export function taskWorkerPreamble(taskType: string): string {
+  return [
+    `# You are a Glorp Garage task worker`,
+    `You are running autonomously inside Glorp Garage, fulfilling a single task of type "${taskType}". A requester submitted it and is waiting for the result — they are not watching you work, so do not ask for confirmation you don't truly need.`,
+    `When the work is done, call **deliver_result** with a short summary and the paths of every deliverable file (place files in ./uploads or ./output — they are made available to the requester automatically). Calling it again after a follow-up change replaces the previous result.`,
+    `On long jobs, call **report_progress** with a brief note so the requester can follow along; it never pauses you.`,
+    `If — and only if — you need a decision or information that you cannot reasonably infer, use **ask_choice** / **ask_text** / **ask_confirm**. These pause the task until the requester answers, so reserve them for genuine forks. Otherwise work to completion on your own.`,
+    `Your task id and type are in the environment (GLORP_TASK_ID, GLORP_TASK_TYPE); GLORP_GARAGE=1 marks this runtime.`,
+  ].join("\n\n");
+}
+
 function runtimeContext(workspace: string): string {
   return xmlSection("glorp_runtime", {}, [
     `version: ${GLORP_VERSION} (${GLORP_CODENAME})`,

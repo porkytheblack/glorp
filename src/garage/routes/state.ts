@@ -31,6 +31,7 @@ export interface StateRoutes {
   permissions(id: string): Promise<Response>;
   revokePermission(id: string, key: string): Promise<Response>;
   agents(id: string): Promise<Response>;
+  slots(id: string): Promise<Response>;
 }
 
 export function stateRoutes(manager: SessionManager): StateRoutes {
@@ -112,6 +113,12 @@ export function stateRoutes(manager: SessionManager): StateRoutes {
       const session = require(id);
       if (!session) return notFound(id);
       return json({ permissions: session.peekStore().listPermissions() });
+    },
+
+    async slots(id): Promise<Response> {
+      const session = require(id);
+      if (!session) return notFound(id);
+      return json({ slots: session.openSlots() });
     },
 
     async revokePermission(id, key): Promise<Response> {

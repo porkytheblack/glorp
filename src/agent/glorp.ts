@@ -23,6 +23,7 @@ import {
 } from "./runtime/active-agent.ts";
 import { loadRoster, saveRoster } from "./runtime/agent-roster.ts";
 import { resolveSessionPaths } from "./session-paths.ts";
+import { createTaskSink } from "./task-sink.ts";
 import { SessionErrorLog, setActiveErrorLog } from "./runtime/error-log.ts";
 import { PermissionDM } from "./runtime/permission-mode.ts";
 import { classifyModelError } from "../shared/error-classify.ts";
@@ -32,6 +33,7 @@ import { agentId as toAgentId } from "../orchestrator/types.ts";
 import { discoverWorkspaceContext } from "../orchestrator/workspace-context.ts";
 import type { BuildGlorpOptions, GlorpHandle } from "./glorp-types.ts";
 import type { ContentPart } from "glove-core/core";
+import type { DisplaySlotEvent } from "../shared/events.ts";
 import type { PickedModel } from "./model-picker.ts";
 import type { OrchestratorConfig } from "../orchestrator/types.ts";
 import * as path from "node:path"; import * as os from "node:os";
@@ -71,13 +73,26 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   );
   await orchestrator.start(); wireOrchestratorToBridge(orchestrator, bridge);
 
+  // Task mode: the agent declares its deliverable through this sink (small JSON
+  // files in the session folder), which the Garage Task API reads back.
+  const taskSink = opts.task
+    ? createTaskSink({ resultFile: paths.taskResultFile, progressFile: paths.taskProgressFile, workspace: opts.workspace })
+    : undefined;
+
   const activationDeps: ActivationDeps = {
     workspace: opts.workspace, dataDir, paths,
     bridge, orchestrator, displayManager: permissionDM, diskExtensions,
     sessionResources, titleTimeoutMs: TITLE_MODEL_TIMEOUT_MS,
     // Workspace processes can self-identify (PR markers, event callbacks):
     // a GitHub webhook carrying this id routes straight back to this session.
-    sessionEnv: { GLORP_SESSION_ID: opts.sessionId, GLORP_WORKSPACE: opts.workspace },
+    // In task mode the agent (and its subprocesses) also learn the task.
+    sessionEnv: {
+      GLORP_SESSION_ID: opts.sessionId,
+      GLORP_WORKSPACE: opts.workspace,
+      ...(opts.task ? { GLORP_GARAGE: "1", GLORP_TASK_ID: opts.sessionId, GLORP_TASK_TYPE: opts.task.type } : {}),
+    },
+    task: opts.task,
+    taskSink,
   };
 
   const roster = loadRoster(paths.rosterFile, opts.sessionId);
@@ -102,6 +117,17 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   });
 
   void state.active.refresh.all(); void catalog.refresh();
+
+  // Open display slots = the agent's own (display-manager) plus any the
+  // orchestrator forwarded up from a sub-agent, projected to one shape. Both
+  // hydrate replay and the REST `openSlots()` read from this.
+  const collectOpenSlots = (): DisplaySlotEvent[] => [
+    ...slotBridge.openSlots(),
+    ...orchestrator.openForwardedSlots().map((f) => ({
+      slotId: f.slotId, renderer: f.renderer, input: f.input,
+      createdAt: f.createdAt, isPermissionRequest: f.renderer === "permission_request",
+    })),
+  ];
 
   return {
     get agent() { return state.active.agent; },
@@ -131,20 +157,15 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       // — or is resyncing — would otherwise never see them and the agent would
       // hang on pushAndWait forever. Reducers upsert by slotId, so this is
       // idempotent for clients that already have the slot.
-      for (const slot of slotBridge.openSlots()) {
+      for (const slot of collectOpenSlots()) {
         bridge.emit({ type: "display_slot_pushed", slot });
-      }
-      for (const f of orchestrator.openForwardedSlots()) {
-        bridge.emit({
-          type: "display_slot_pushed",
-          slot: { slotId: f.slotId, renderer: f.renderer, input: f.input, createdAt: f.createdAt, isPermissionRequest: f.renderer === "permission_request" },
-        });
       }
       hydrateAgentRecords(await orchestrator.loadPersistedAgents(), bridge);
       await state.active.titleScheduler.refreshTitle();
       state.active.titleScheduler.schedule();
       emitRoster(activationDeps, state, busy);
     },
+    openSlots: collectOpenSlots,
     resolveSlot(slotId, value) {
       if (orchestrator.hasForwardedSlot(slotId)) { orchestrator.resolveForwardedSlot(slotId, value); bridge.emit({ type: "display_slot_resolved", slotId }); }
       else resolveDisplaySlot(rawDM, bridge, slotId, value);

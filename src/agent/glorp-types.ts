@@ -1,6 +1,6 @@
 import type { IGloveRunnable } from "glove-core/glove";
 import type { PermissionStatus, ContentPart } from "glove-core/core";
-import type { AgentInfo } from "../shared/events.ts";
+import type { AgentInfo, DisplaySlotEvent } from "../shared/events.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import type { GlorpStore } from "./store.ts";
 import type { CredentialsStore } from "./credentials.ts";
@@ -33,6 +33,9 @@ export interface GlorpHandle {
   resolveSlot(slotId: string, value: unknown): void;
   rejectSlot(slotId: string, reason?: string): void;
   resolvePermission(slotId: string, allow: boolean): void;
+  /** Currently-open display slots (own + orchestrator-forwarded) — the same
+   *  set replayed on hydrate. Lets a polling REST client read pending questions. */
+  openSlots(): DisplaySlotEvent[];
   /** Stop a running orchestrated agent by ID. */
   stopAgent(agentId: string, reason?: string): Promise<void>;
   /** Promote a background agent to foreground. Returns false if not found. */
@@ -85,4 +88,10 @@ export interface BuildGlorpOptions {
    *   "bypass"  — auto-approve everything; zero permission prompts
    */
   permissionMode?: PermissionMode;
+  /**
+   * Present when this session runs as a Garage task: gives the agent its task
+   * self-knowledge (preamble + env) and the task toolkit (deliver_result,
+   * report_progress).
+   */
+  task?: { type: string };
 }

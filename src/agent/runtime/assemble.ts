@@ -7,8 +7,9 @@ import { Glove } from "glove-core/glove";
 import { Displaymanager } from "glove-core/display-manager";
 import type { PickedModel } from "../model-picker.ts";
 import type { GlorpStore } from "../store.ts";
-import { buildGlorpSystemPrompt, COMPACTION_INSTRUCTIONS } from "../persona.ts";
-import { MAIN_AGENT_TOOLS, createToolRegistry, registerTools } from "../tools/registry.ts";
+import { buildGlorpSystemPrompt, taskWorkerPreamble, COMPACTION_INSTRUCTIONS } from "../persona.ts";
+import { MAIN_AGENT_TOOLS, TASK_TOOLS, createToolRegistry, registerTools } from "../tools/registry.ts";
+import type { TaskSink } from "../task-sink.ts";
 import { plannerSubAgent, researcherSubAgent, reviewerSubAgent } from "../subagents.ts";
 import { makeDiskSubAgent } from "../agents/disk-subagent.ts";
 import { getBridge } from "../../shared/bridge.ts";
@@ -51,6 +52,10 @@ export interface AssembleArgs {
   meshName?: string;
   /** Per-session env injected into bash spawns (e.g. GLORP_SESSION_ID). */
   sessionEnv?: Record<string, string>;
+  /** Task context (present only in task mode) — drives the worker preamble + toolkit. */
+  task?: { type: string };
+  /** Backs deliver_result / report_progress; present iff `task` is. */
+  taskSink?: TaskSink;
 }
 
 export interface AssembleResult {
@@ -65,11 +70,7 @@ export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult>
     model,
     displayManager: args.displayManager,
     serverMode: true,
-    systemPrompt: args.systemPrompt ?? buildGlorpSystemPrompt({
-      workspace: args.workspace,
-      contextLimit: args.contextLimit,
-      extensions: args.diskExtensions,
-    }),
+    systemPrompt: composeSystemPrompt(args),
     compaction_config: {
       compaction_instructions: COMPACTION_INSTRUCTIONS,
       compaction_context_limit: args.contextLimit,
@@ -90,8 +91,9 @@ export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult>
       contextRef: args.ctxRef,
       meshDir: args.meshDir,
       bridge: args.bridge,
+      taskSink: args.taskSink,
     }),
-    MAIN_AGENT_TOOLS,
+    args.taskSink ? [...MAIN_AGENT_TOOLS, ...TASK_TOOLS] : MAIN_AGENT_TOOLS,
   );
   foldResourceTools(builder, args.resources);
   builder
@@ -112,6 +114,16 @@ export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult>
   const caps = ["orchestrate", "plan", "interact", "generate"];
   const meshAdapter = await mountAgentMesh(agent, args.meshName ?? "main", args.meshDir, caps);
   return { agent, meshAdapter };
+}
+
+/** Base persona, prefixed with the task-worker preamble when in task mode. */
+function composeSystemPrompt(args: AssembleArgs): string {
+  const base = args.systemPrompt ?? buildGlorpSystemPrompt({
+    workspace: args.workspace,
+    contextLimit: args.contextLimit,
+    extensions: args.diskExtensions,
+  });
+  return args.task ? `${taskWorkerPreamble(args.task.type)}\n\n${base}` : base;
 }
 
 export function wireOrchestratorToBridge(
