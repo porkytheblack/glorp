@@ -89,6 +89,11 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     sessionEnv: {
       GLORP_SESSION_ID: opts.sessionId,
       GLORP_WORKSPACE: opts.workspace,
+      // Sourced before every bash command. When an authed GitHub repo was
+      // cloned, the engine wrote this script and it exports a fresh GH_TOKEN so
+      // `gh`/GitHub API calls just work — no token handling by the agent. Bash
+      // silently skips a missing BASH_ENV file, so this is a no-op otherwise.
+      BASH_ENV: path.join(opts.workspace, ".glorp", "gh-env.sh"),
       ...(opts.task ? { GLORP_GARAGE: "1", GLORP_TASK_ID: opts.sessionId, GLORP_TASK_TYPE: opts.task.type } : {}),
     },
     task: opts.task,
