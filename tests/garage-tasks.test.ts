@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { TaskStore } from "../src/garage/task-store.ts";
+import { loadGarageConfig } from "../src/garage/config.ts";
 import { projectStatus, toQuestion } from "../src/garage/routes/task-project.ts";
 import { coerceAnswer, validCallbackUrl } from "../src/garage/routes/tasks.ts";
 import { createTaskSink, readDeliveredResult, readProgressNote } from "../src/agent/task-sink.ts";
@@ -162,6 +163,22 @@ describe("task sink", () => {
     const sink = createTaskSink({ resultFile: path.join(tmp(), "r.json"), progressFile: path.join(tmp(), "p.json"), workspace: ws });
     expect(sink.deliver({ summary: "x", files: ["link.txt"] }).files).toEqual([]);
     expect(fs.existsSync(path.join(ws, "uploads", "secret.txt"))).toBe(false);
+  });
+});
+
+describe("managed task params (config)", () => {
+  it("reads GLORP_GARAGE_TASK_PARAM_<NAME> and skips a blank suffix", () => {
+    const dir = tmp();
+    process.env.GLORP_GARAGE_TASK_PARAM_RENDERER_KEY = "sk-1";
+    process.env["GLORP_GARAGE_TASK_PARAM_"] = "orphan"; // empty name — must be skipped
+    try {
+      const cfg = loadGarageConfig({ dataDir: dir });
+      expect(cfg.taskParams).toEqual({ RENDERER_KEY: "sk-1" });
+      expect(cfg.taskParams && "" in cfg.taskParams).toBe(false);
+    } finally {
+      delete process.env.GLORP_GARAGE_TASK_PARAM_RENDERER_KEY;
+      delete process.env["GLORP_GARAGE_TASK_PARAM_"];
+    }
   });
 });
 

@@ -237,12 +237,18 @@ export function loadGarageConfig(overrides: GarageConfigOverrides = {}): GarageC
  *  `GLORP_GARAGE_TASK_PARAM_<NAME>` env vars (env wins). Undefined when none. */
 function resolveTaskParams(fileParams?: Record<string, string>): Record<string, string> | undefined {
   const out: Record<string, string> = {};
+  // Skip blank/whitespace names so a stray `GLORP_GARAGE_TASK_PARAM_` (empty
+  // suffix) or an empty garage.json key can't write an unusable "" param key.
+  const set = (name: string, value: unknown): void => {
+    const key = name.trim();
+    if (key && typeof value === "string" && value) out[key] = value;
+  };
   if (fileParams && typeof fileParams === "object") {
-    for (const [k, v] of Object.entries(fileParams)) if (typeof v === "string" && v) out[k] = v;
+    for (const [k, v] of Object.entries(fileParams)) set(k, v);
   }
   const PREFIX = "GLORP_GARAGE_TASK_PARAM_";
   for (const [k, v] of Object.entries(process.env)) {
-    if (k.startsWith(PREFIX) && v) out[k.slice(PREFIX.length)] = v;
+    if (k.startsWith(PREFIX)) set(k.slice(PREFIX.length), v);
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
