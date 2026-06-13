@@ -115,8 +115,6 @@ export interface CreateSessionInput {
   profileId?: string;
   permissionMode?: PermissionMode;
   credentials?: SessionCredential;
-  /** Set by the Task API when this session is a task worker. */
-  task?: { type: string };
 }
 
 /** Public, secret-free view of a session returned by the REST API. */

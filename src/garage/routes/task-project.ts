@@ -83,8 +83,11 @@ function resultFiles(uploadsRoot: string, declared: DeliveredResult | null): Tas
   if (declared) {
     const out: TaskFile[] = [];
     for (const rel of declared.files) {
+      const abs = path.resolve(uploadsRoot, rel);
+      // Defense in depth: never stat outside uploads/ even if the on-disk
+      // result was hand-written with `../` or an absolute path.
+      if (abs !== uploadsRoot && !abs.startsWith(uploadsRoot + path.sep)) continue;
       try {
-        const abs = path.join(uploadsRoot, rel);
         const st = fs.statSync(abs);
         if (st.isFile()) out.push({ path: rel, size: st.size, modified_at: st.mtime.toISOString() });
       } catch { /* declared file vanished — skip */ }

@@ -23,9 +23,13 @@ export function attachTaskNotifier(
 ): () => void {
   let lastFired: string | null = null;
   let inFlight = false;
+  let dirty = false; // a transition arrived mid-POST — re-check when it lands
 
   async function maybeFire(): Promise<void> {
-    if (inFlight) return;
+    if (inFlight) {
+      dirty = true;
+      return;
+    }
     let dto: TaskDto;
     try {
       dto = await buildDto();
@@ -50,6 +54,10 @@ export function attachTaskNotifier(
       /* tolerate — GitHub-style re-delivery is not our job; never throw */
     } finally {
       inFlight = false;
+      if (dirty) {
+        dirty = false;
+        void maybeFire(); // catch a status change that happened during the POST
+      }
     }
   }
 

@@ -53,13 +53,23 @@ function writeJsonAtomic(file: string, value: unknown): void {
   fs.renameSync(tmp, file);
 }
 
-/** Resolve `rel` within `root`; null if it escapes or doesn't exist. */
-function safeExisting(root: string, rel: string): string | null {
+/** True when `abs` is `root` or strictly under it. */
+function within(root: string, abs: string): boolean {
+  return abs === root || abs.startsWith(root + path.sep);
+}
+
+/**
+ * Resolve `rel` to a real file inside `root`; null if it escapes or doesn't
+ * exist. Resolves symlinks (realpathSync) so a symlink left under the workspace
+ * pointing outside it can't smuggle an external file into a deliverable.
+ */
+function safeExisting(root: string, realRoot: string, rel: string): string | null {
   const abs = path.resolve(root, rel);
-  const within = abs === root || abs.startsWith(root + path.sep);
-  if (!within) return null;
+  if (!within(root, abs)) return null;
   try {
-    return fs.statSync(abs).isFile() ? abs : null;
+    const real = fs.realpathSync(abs);
+    if (!within(realRoot, real)) return null;
+    return fs.statSync(real).isFile() ? real : null;
   } catch {
     return null;
   }
@@ -68,13 +78,21 @@ function safeExisting(root: string, rel: string): string | null {
 export function createTaskSink(opts: TaskSinkOptions): TaskSink {
   const now = opts.now ?? (() => new Date().toISOString());
   const uploadsDir = opts.uploadsDir ?? "uploads";
-  const uploadsRoot = path.resolve(opts.workspace, uploadsDir);
+  // Resolve symlinks on the workspace root once, so containment checks compare
+  // real paths (the workspace itself may be reached via a symlink).
+  let realWorkspace = path.resolve(opts.workspace);
+  try {
+    realWorkspace = fs.realpathSync(realWorkspace);
+  } catch {
+    /* not yet created — resolve() is a safe fallback */
+  }
+  const uploadsRoot = path.resolve(realWorkspace, uploadsDir);
 
   /** Ensure a declared file lives under uploads/ and return its uploads-relative path. */
   function intoUploads(rel: string): string | null {
-    const abs = safeExisting(opts.workspace, rel);
+    const abs = safeExisting(realWorkspace, realWorkspace, rel);
     if (!abs) return null;
-    if (abs === uploadsRoot || abs.startsWith(uploadsRoot + path.sep)) {
+    if (within(uploadsRoot, abs)) {
       return path.relative(uploadsRoot, abs).split(path.sep).join("/");
     }
     // The agent left it elsewhere (e.g. ./output) — copy it in so it's

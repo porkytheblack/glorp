@@ -171,9 +171,6 @@ export interface CreateSessionInput {
   permissionMode?: PermissionMode;
   /** Custom API key that overrides the Garage default for this session. */
   credentials?: SessionCredential;
-  /** Set by the Task API when this session is a task worker (drives the
-   *  agent's task self-knowledge + toolkit). Not part of the public session DTO. */
-  task?: { type: string };
 }
 
 /** Public, secret-free view of a session returned by the REST API. */

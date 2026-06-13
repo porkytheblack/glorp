@@ -137,12 +137,14 @@ function buildClient(cfg: GlorpConfig) {
       /** Answer a pending question from `task.questions`. */
       answer: (id: string, questionId: string, answer: string | boolean | null) =>
         req<{ resolved: boolean }>("POST", `/tasks/${id}/answers`, { question_id: questionId, answer }),
+      files: (id: string) => req<FileListResponse>("GET", `/tasks/${id}/files`),
       uploadFile: (id: string, file: Blob, name: string) => {
         const form = new FormData();
         form.append("file", file, name);
         return requestForm<FileListResponse>(cfg, `/tasks/${id}/files`, form);
       },
       downloadFile: (id: string, p: string) => requestBinary(cfg, "GET", `/tasks/${id}/files/${encodePath(p)}`),
+      deleteFile: (id: string, p: string) => req<void>("DELETE", `/tasks/${id}/files/${encodePath(p)}`),
       delete: (id: string) => req<void>("DELETE", `/tasks/${id}`),
     },
 

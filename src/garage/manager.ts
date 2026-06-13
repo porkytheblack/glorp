@@ -65,8 +65,13 @@ export class SessionManager {
     this.workspaces = config.workspaces ?? new WorkspaceStore(config.dataDir);
   }
 
-  /** Create a brand-new session. Validates/provisions the workspace up front. */
-  async create(input: CreateSessionInput): Promise<GarageSession> {
+  /**
+   * Create a brand-new session. Validates/provisions the workspace up front.
+   * `internal` carries trust-gated context the PUBLIC body must never set — the
+   * task context (which arms the task toolkit + worker preamble) is only ever
+   * passed here by the Task API, never parsed from a `POST /sessions` body.
+   */
+  async create(input: CreateSessionInput, internal: { task?: { type: string } } = {}): Promise<GarageSession> {
     const id = input.sessionId ?? newSessionId();
     if (input.sessionId !== undefined && !SESSION_ID_RE.test(input.sessionId)) {
       throw new WorkspaceError(`Invalid sessionId: must match ${SESSION_ID_RE}`);
@@ -82,7 +87,7 @@ export class SessionManager {
     if (input.template) await this.provisionInto(input.template, input.params ?? {}, workspace, !preExisted);
     // Associate the session with a first-class workspace (get-or-create by path).
     const ws = input.workspaceId ? this.workspaces.get(input.workspaceId)! : this.workspaces.ensureForPath(workspace);
-    return this.register(id, workspace, ws.id, input);
+    return this.register(id, workspace, ws.id, input, internal);
   }
 
   /** Run a template in the workspace; tear the workspace down on any failure. */
@@ -117,6 +122,7 @@ export class SessionManager {
     workspace: string,
     workspaceId: string | null,
     input: CreateSessionInput,
+    internal: { task?: { type: string } } = {},
   ): GarageSession {
     const session = new GarageSession({
       id,
@@ -130,7 +136,7 @@ export class SessionManager {
       profileId: input.profileId,
       permissionMode: input.permissionMode ?? this.config.permissionMode,
       customCredential: input.credentials ?? null,
-      task: input.task ?? null,
+      task: internal.task ?? null,
     });
     this.sessions.set(id, session);
     return session;

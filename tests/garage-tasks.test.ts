@@ -12,7 +12,7 @@ import * as path from "node:path";
 
 import { TaskStore } from "../src/garage/task-store.ts";
 import { projectStatus, toQuestion } from "../src/garage/routes/task-project.ts";
-import { coerceAnswer } from "../src/garage/routes/tasks.ts";
+import { coerceAnswer, validCallbackUrl } from "../src/garage/routes/tasks.ts";
 import { createTaskSink, readDeliveredResult, readProgressNote } from "../src/agent/task-sink.ts";
 import { attachTaskNotifier } from "../src/garage/task-notifier.ts";
 import { Bridge } from "../src/shared/bridge.ts";
@@ -153,6 +153,29 @@ describe("task sink", () => {
     const sink = createTaskSink({ resultFile: path.join(tmp(), "r.json"), progressFile: path.join(tmp(), "p.json"), workspace: ws });
     expect(sink.deliver({ summary: "x", files: ["../../etc/passwd"] }).files).toEqual([]);
   });
+
+  it("refuses a symlink under the workspace that points outside it", () => {
+    const ws = tmp("ws-");
+    const outside = tmp("outside-");
+    fs.writeFileSync(path.join(outside, "secret.txt"), "classified");
+    fs.symlinkSync(path.join(outside, "secret.txt"), path.join(ws, "link.txt"));
+    const sink = createTaskSink({ resultFile: path.join(tmp(), "r.json"), progressFile: path.join(tmp(), "p.json"), workspace: ws });
+    expect(sink.deliver({ summary: "x", files: ["link.txt"] }).files).toEqual([]);
+    expect(fs.existsSync(path.join(ws, "uploads", "secret.txt"))).toBe(false);
+  });
+});
+
+describe("validCallbackUrl", () => {
+  it("accepts http(s), normalizes, and rejects other schemes", () => {
+    expect(validCallbackUrl("https://you.example/hook")).toBe("https://you.example/hook");
+    expect(validCallbackUrl("http://svc.internal:3009/cb")).toBe("http://svc.internal:3009/cb");
+    expect(validCallbackUrl(undefined)).toBeUndefined();
+    expect(validCallbackUrl("")).toBeUndefined();
+    expect(validCallbackUrl("file:///etc/passwd")).toBeNull();
+    expect(validCallbackUrl("gopher://x")).toBeNull();
+    expect(validCallbackUrl("not a url")).toBeNull();
+    expect(validCallbackUrl(42)).toBeNull();
+  });
 });
 
 describe("task notifier", () => {
@@ -175,8 +198,10 @@ describe("task notifier", () => {
       // working (no fire), needs_input (fire), needs_input again (dedupe), working (reset), completed (fire)
       for (let n = 0; n < 5; n++) {
         bridge.emit({ type: "busy", busy: false });
-        await new Promise((r) => setTimeout(r, 5));
+        await Promise.resolve(); // let each maybeFire settle before the next event
       }
+      const deadline = Date.now() + 2000;
+      while (posted.length < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
     } finally {
       globalThis.fetch = orig;
     }
