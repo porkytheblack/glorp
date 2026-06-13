@@ -30,6 +30,10 @@ export interface SessionPaths {
   agentsDir: string;
   /** Where sub-agent run transcripts live. */
   subagentsDir: string;
+  /** The agent's declared task deliverable (task mode); read by the Task API. */
+  taskResultFile: string;
+  /** The agent's latest non-blocking progress note (task mode). */
+  taskProgressFile: string;
 }
 
 function statKind(p: string): "file" | "dir" | null {
@@ -55,6 +59,8 @@ export function resolveSessionPaths(dataDir: string, sessionId: string): Session
       meshDir: path.join(dataDir, "mesh", sessionId),
       agentsDir: base, // legacy conversational stores were flat siblings: <id>__<aid>.json
       subagentsDir: path.join(base, `${id}.subagents`),
+      taskResultFile: path.join(base, `${id}.task-result.json`),
+      taskProgressFile: path.join(base, `${id}.task-progress.json`),
     };
   }
   return {
@@ -66,6 +72,8 @@ export function resolveSessionPaths(dataDir: string, sessionId: string): Session
     meshDir: path.join(root, "mesh"),
     agentsDir: path.join(root, "agents"),
     subagentsDir: path.join(root, "subagents"),
+    taskResultFile: path.join(root, "task-result.json"),
+    taskProgressFile: path.join(root, "task-progress.json"),
   };
 }
 
@@ -96,6 +104,8 @@ export function removeSessionStorage(dataDir: string, sessionId: string): void {
     path.join(base, `${id}.errors.log`),
     path.join(base, `${id}.resources.json`),
     path.join(base, `${id}.subagents`),
+    path.join(base, `${id}.task-result.json`),   // legacy task deliverable
+    path.join(base, `${id}.task-progress.json`),
     path.join(dataDir, "mesh", sessionId),     // legacy mesh
   ];
   for (const t of targets) { try { fs.rmSync(t, { recursive: true, force: true }); } catch { /* ignore */ } }

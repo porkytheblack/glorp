@@ -149,7 +149,7 @@ export function fileRoutes(
 }
 
 /** Recursively list files under `dir`, with paths relative to `root`. */
-function walk(dir: string, root: string): FileEntry[] {
+export function walk(dir: string, root: string): FileEntry[] {
   const out: FileEntry[] = [];
   for (const name of fs.readdirSync(dir)) {
     const abs = path.join(dir, name);

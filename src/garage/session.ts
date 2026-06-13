@@ -9,6 +9,7 @@ import { CredentialsStore } from "../agent/credentials.ts";
 import { resolveSessionPaths } from "../agent/session-paths.ts";
 import { classifyModelError } from "../shared/error-classify.ts";
 import type { GlorpHandle, BuildGlorpOptions } from "../agent/glorp-types.ts";
+import type { DisplaySlotEvent } from "../shared/events.ts";
 import { EventStream } from "./event-stream.ts";
 import { SessionCredentialsStore } from "./credentials.ts";
 import { SessionStats } from "./session-stats.ts";
@@ -151,6 +152,7 @@ export class GarageSession {
       bridge: this.bridge,
       credentials,
       permissionMode: this.init.permissionMode,
+      task: this.init.task ?? undefined,
     };
     // When a custom key or an explicit profile drives the session, the
     // credentials store's active profile resolves it — passing provider/model
@@ -257,6 +259,11 @@ export class GarageSession {
     if (this.handle) return this.handle.store;
     if (!this.readStore) this.readStore = new GlorpStore(this.id, this.init.dataDir);
     return this.readStore;
+  }
+
+  /** Open display slots (pending questions/prompts), or [] when not built. */
+  openSlots(): DisplaySlotEvent[] {
+    return this.handle ? this.handle.openSlots() : [];
   }
 
   async destroy(): Promise<void> {

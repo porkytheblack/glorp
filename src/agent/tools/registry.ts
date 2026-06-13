@@ -25,6 +25,8 @@ import {
   webFetchTool,
   writeTool,
 } from "./index.ts";
+import { deliverResultTool, reportProgressTool } from "./task.ts";
+import type { TaskSink } from "../task-sink.ts";
 
 export const MAIN_AGENT_TOOLS = [
   "read",
@@ -49,6 +51,9 @@ export const MAIN_AGENT_TOOLS = [
 
 export const READ_ONLY_TOOLS = ["read", "view_image", "grep", "glob", "ls", "web_fetch", "list_agents"] as const;
 
+/** Folded in addition to MAIN_AGENT_TOOLS only when a session runs as a task. */
+export const TASK_TOOLS = ["deliver_result", "report_progress"] as const;
+
 export type ToolName =
   | "read"
   | "view_image"
@@ -68,7 +73,9 @@ export type ToolName =
   | "ask_confirm"
   | "show_info"
   | "ask_choice"
-  | "ask_text";
+  | "ask_text"
+  | "deliver_result"
+  | "report_progress";
 
 export interface ToolRegistryDeps {
   workspace: string;
@@ -83,6 +90,8 @@ export interface ToolRegistryDeps {
   meshDir?: string;
   /** Per-session event bus, so the transmission tool stays session-scoped. */
   bridge?: Bridge;
+  /** Present only in task mode — backs deliver_result / report_progress. */
+  taskSink?: TaskSink;
 }
 
 type ToolFactory = () => GloveFoldArgs<any>;
@@ -112,6 +121,8 @@ export function createToolRegistry(deps: ToolRegistryDeps): Record<ToolName, Too
     show_info: () => showInfoTool,
     ask_choice: () => askChoiceTool,
     ask_text: () => askTextTool,
+    deliver_result: () => deliverResultTool(requireDep(deps.taskSink, "taskSink")),
+    report_progress: () => reportProgressTool(requireDep(deps.taskSink, "taskSink")),
   };
 }
 

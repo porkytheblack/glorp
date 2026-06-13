@@ -118,6 +118,8 @@ export interface CreateSessionInput {
   profileId?: string;
   permissionMode?: PermissionMode;
   credentials?: SessionCredential;
+  /** Set by the Task API when this session is a task worker. */
+  task?: { type: string };
 }
 
 /** Public, secret-free view of a session returned by the REST API. */
@@ -196,6 +198,92 @@ export interface SessionResult {
   turn_count: number;
   /** Machine-readable explanation of `text`/status (see `SessionResultReason`). */
   reason: SessionResultReason;
+}
+
+/* ── Tasks: the simple black-box surface (POST /tasks …) ─────────────────── */
+
+/**
+ * Where a task is in its lifecycle. Projected live from the worker session on
+ * every read, never stored.
+ *   queued      — accepted; the workspace is provisioning / the first turn hasn't started
+ *   working     — the agent is actively processing
+ *   needs_input — the agent asked the requester a question and is waiting (see `questions`)
+ *   completed   — the agent finished (its declared deliverable, if any, is in `result`)
+ *   failed      — provisioning failed, the session errored, or the last turn errored
+ */
+export type TaskStatus = "queued" | "working" | "needs_input" | "completed" | "failed";
+
+/** Kind of a pending question, derived from the agent's modal renderer. */
+export type TaskQuestionKind = "choice" | "confirm" | "text" | "info";
+
+/** A pending question the agent is blocking on — answer via POST /tasks/:id/answers. */
+export interface TaskQuestion {
+  id: string;
+  kind: TaskQuestionKind;
+  prompt: string;
+  /** Present for `choice`: the offered options. */
+  options?: Array<{ label: string; value: string; description?: string }>;
+  /** Present for `text`: input hints. */
+  placeholder?: string;
+  initial?: string;
+}
+
+/** One deliverable file (lives in the task's uploads/ folder). */
+export interface TaskFile {
+  path: string;
+  size: number;
+  modified_at: string;
+}
+
+/** A task's result. `summary` + `data` come from the agent's deliver_result;
+ *  `text` falls back to the last agent message when nothing was declared. */
+export interface TaskResult {
+  summary: string | null;
+  text: string | null;
+  files: TaskFile[];
+  data?: unknown;
+}
+
+/** A task type a consumer can submit — projected 1:1 from a setup template. */
+export interface TaskTypeDto {
+  name: string;
+  description: string | null;
+  inputs: TemplateParamDto[];
+}
+
+/** The task object — the entire black-box surface a simple consumer works with. */
+export interface TaskDto {
+  id: string;
+  type: string;
+  status: TaskStatus;
+  title: string | null;
+  result: TaskResult;
+  questions: TaskQuestion[];
+  /** Latest non-blocking progress note from the agent, if any. */
+  progress: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Body accepted by `POST /tasks`. */
+export interface CreateTaskInput {
+  type: string;
+  input: { prompt: string; params?: Record<string, string> };
+  permission_mode?: PermissionMode;
+  /** Garage POSTs the TaskDto here on needs_input / completed / failed. */
+  callback_url?: string;
+}
+
+/** Body accepted by `POST /tasks/:id/messages` (a follow-up). */
+export interface PostTaskMessageInput {
+  text: string;
+}
+
+/** Body accepted by `POST /tasks/:id/answers`. */
+export interface PostTaskAnswerInput {
+  question_id: string;
+  answer: string | boolean | null;
 }
 
 /** A conversational agent in a session's multi-agent roster. */

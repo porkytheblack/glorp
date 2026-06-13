@@ -130,6 +130,7 @@ export class SessionManager {
       profileId: input.profileId,
       permissionMode: input.permissionMode ?? this.config.permissionMode,
       customCredential: input.credentials ?? null,
+      task: input.task ?? null,
     });
     this.sessions.set(id, session);
     return session;
@@ -303,6 +304,7 @@ export class SessionManager {
       if (!session.loaded) continue; // dormant — holds no agent host
       if (session.stats.busy || session.state === "destroyed") continue;
       if (session.stream.size > 0) continue; // a client is actively watching
+      if (session.openSlots().length > 0) continue; // a task/prompt is awaiting an answer (G2)
       if (now - session.lastActivity < idleMs) continue;
       await session.flush().catch(() => {});
       try {

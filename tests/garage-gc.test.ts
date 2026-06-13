@@ -37,6 +37,7 @@ interface FakeSession {
   stream: { size: number };
   lastActivity: number;
   destroyed: boolean;
+  openSlots(): unknown[];
   flush(): Promise<void>;
   destroy(): Promise<void>;
 }
@@ -53,6 +54,7 @@ function fakeLoaded(
     stream: { size: opts.clients ?? 0 },
     lastActivity: Date.now() - (opts.ageMs ?? 0),
     destroyed: false,
+    openSlots: () => [],
     async flush() {},
     async destroy() {
       this.destroyed = true;

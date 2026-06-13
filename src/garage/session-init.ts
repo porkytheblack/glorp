@@ -19,4 +19,6 @@ export interface GarageSessionInit {
   profileId?: string;
   permissionMode: PermissionMode;
   customCredential?: SessionCredential | null;
+  /** Present when this session is the worker for a Garage task. */
+  task?: { type: string } | null;
 }

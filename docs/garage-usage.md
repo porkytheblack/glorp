@@ -157,6 +157,70 @@ For driving Garage from another machine or your own orchestration, see
 [`openapi.yaml`](./openapi.yaml), and the typed client
 [`@porkytheblack/glorp-client`](../packages/glorp-client/README.md).
 
+## Tasks — the simple black-box API
+
+If you just want to hand Garage a job and get a result — "make this video",
+"review this PR", "build this deck", "fix this bug" — use **tasks** instead of
+wiring sessions, templates, slots, and the event stream yourself. A task is one
+object with an `input` and a `result`; Garage provisions the right workspace,
+runs a task-aware agent, surfaces any questions it asks, and exposes the
+deliverable. (The lower-level session API below stays for advanced needs.)
+
+A **task type is a template name** — the catalog is self-extending, so adding a
+capability is adding a template, no server change.
+
+```bash
+# 1. Discover the task types and their inputs
+curl -s $BASE/tasks/types
+# → { "types": [ { "name":"slide-deck", "description":"…",
+#                  "inputs":[ { "name":"AUDIENCE", "required":false, … } ] }, … ] }
+
+# 2. Submit a task (returns immediately; the work runs in the background)
+curl -s -X POST $BASE/tasks -H 'content-type: application/json' \
+  -d '{ "type":"slide-deck",
+        "input":{ "prompt":"A 5-slide deck on our Q3 results" },
+        "callback_url":"https://you.example/hook" }'   # callback optional
+# → 202 { "id":"task_…", "type":"slide-deck", "status":"queued" }
+
+# 3. Poll one object until it settles (or receive the callback)
+curl -s $BASE/tasks/task_…
+# → { "id":"…", "status":"completed",
+#     "result":{ "summary":"5-slide deck on Q3", "files":[ { "path":"deck.pptx", … } ] },
+#     "questions":[], "progress":null, … }
+
+# If status is "needs_input", answer the pending question and it resumes:
+curl -s -X POST $BASE/tasks/task_…/answers -H 'content-type: application/json' \
+  -d '{ "question_id":"<questions[0].id>", "answer":"formal" }'
+
+# Follow up with a change — the same task keeps its context:
+curl -s -X POST $BASE/tasks/task_…/messages -H 'content-type: application/json' \
+  -d '{ "text":"make the title slide darker" }'
+
+# Download a deliverable, then clean up:
+curl -s $BASE/tasks/task_…/files/deck.pptx -o deck.pptx
+curl -s -X DELETE $BASE/tasks/task_…
+```
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/tasks/types` | Available task types + their inputs (from the template catalog) |
+| `POST` | `/tasks` | Submit a task — `{ type, input:{ prompt, params? }, permission_mode?, callback_url? }` |
+| `GET` | `/tasks` | List tasks |
+| `GET` | `/tasks/:id` | The task object (status, result, questions, progress, files) |
+| `POST` | `/tasks/:id/messages` | Follow-up instruction (continues the same task) |
+| `POST` | `/tasks/:id/answers` | Answer a pending question — `{ question_id, answer }` |
+| `POST`/`GET`/`DELETE` | `/tasks/:id/files[/:path]` | Upload inputs / download deliverables |
+| `DELETE` | `/tasks/:id` | Cancel + delete the task, its session, and its workspace |
+
+**Status** is `queued → working → needs_input → completed → failed`. With an
+optional `callback_url`, Garage POSTs the task object on every transition into
+`needs_input`, `completed`, or `failed` — so you can avoid polling. Tasks run in
+`bypass` permission mode by default, so they pause only for deliberate questions.
+
+The kit wraps all of this: `client.tasks.create({ type, input })`,
+`client.tasks.get(id)`, `.answer(id, qid, ans)`, `.message(id, text)`,
+`.downloadFile(id, path)`, `.delete(id)`.
+
 ## REST API
 
 Every path is served at the stable `/api/v1` prefix **and** at the bare root

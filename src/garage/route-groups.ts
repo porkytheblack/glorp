@@ -9,6 +9,9 @@ import type { SessionManager } from "./manager.ts";
 import type { GarageConfig } from "./config.ts";
 import type { CredentialsStore } from "../agent/credentials.ts";
 import type { UploadsSync } from "./storage/types.ts";
+import type { TaskStore } from "./task-store.ts";
+import type { TemplateSource } from "./templates/source.ts";
+import { taskRoutes } from "./routes/tasks.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
 import { workspaceRoutes } from "./routes/workspaces.ts";
 import { mcpRoutes } from "./routes/mcp.ts";
@@ -28,6 +31,7 @@ export interface RouteGroups {
   models: ReturnType<typeof modelRoutes>;
   creds: ReturnType<typeof credentialRoutes>;
   files: ReturnType<typeof fileRoutes>;
+  tasks: ReturnType<typeof taskRoutes>;
 }
 
 /** Build the per-namespace route groups for one bundle's manager + credentials. */
@@ -36,6 +40,8 @@ export function buildRouteGroups(
   config: GarageConfig,
   credentials: CredentialsStore,
   nsId: string,
+  tasks: TaskStore,
+  templates: TemplateSource,
   uploadsSync?: UploadsSync,
 ): RouteGroups {
   return {
@@ -47,5 +53,6 @@ export function buildRouteGroups(
     models: modelRoutes(credentials, new ModelCatalog(config.dataDir)),
     creds: credentialRoutes(manager),
     files: fileRoutes(manager, config, nsId, uploadsSync),
+    tasks: taskRoutes(manager, config, tasks, templates),
   };
 }

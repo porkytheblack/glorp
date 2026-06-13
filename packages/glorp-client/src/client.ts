@@ -14,15 +14,22 @@ import type {
   ApiKeyPublic,
   BridgeEvent,
   CreateSessionInput,
+  CreateTaskInput,
   CreateWorkspaceInput,
   FileListResponse,
   NamespaceDto,
   PermissionGrant,
   SessionDto,
   SessionResult,
+  TaskDto,
+  TaskStatus,
+  TaskTypeDto,
   TemplateSummaryDto,
   WorkspaceDto,
 } from "./contract.js";
+
+/** The acknowledgement returned by `tasks.create` (the full task via `tasks.get`). */
+type TaskCreated = { id: string; type: string; status: TaskStatus; created_at: string };
 
 /** The raw key returned once on creation (with its bound namespace). */
 type MintedKey = { id: string; name: string; key: string; keyPrefix: string; scopes: string[]; namespace?: string | null };
@@ -112,6 +119,31 @@ function buildClient(cfg: GlorpConfig) {
         requestBinary(cfg, "GET", `/sessions/${id}/files/${encodePath(p)}`),
       deleteFile: (id: string, p: string) =>
         req<void>("DELETE", `/sessions/${id}/files/${encodePath(p)}`),
+    },
+
+    /**
+     * Tasks — the simple black-box surface. Submit a typed job and poll one
+     * object: `create` → `get` until `status` is `completed`/`failed`, answering
+     * any `questions` with `answer`, and following up with `message`. A task type
+     * is a template name (see `tasks.types`); deliverables land in `result.files`.
+     */
+    tasks: {
+      types: () => req<{ types: TaskTypeDto[] }>("GET", "/tasks/types"),
+      create: (input: CreateTaskInput) => req<TaskCreated>("POST", "/tasks", input),
+      list: () => req<{ tasks: TaskDto[] }>("GET", "/tasks"),
+      get: (id: string) => req<TaskDto>("GET", `/tasks/${id}`),
+      /** Continue the task ("now fix X"); the status returns to `working`. */
+      message: (id: string, text: string) => req<{ accepted: boolean }>("POST", `/tasks/${id}/messages`, { text }),
+      /** Answer a pending question from `task.questions`. */
+      answer: (id: string, questionId: string, answer: string | boolean | null) =>
+        req<{ resolved: boolean }>("POST", `/tasks/${id}/answers`, { question_id: questionId, answer }),
+      uploadFile: (id: string, file: Blob, name: string) => {
+        const form = new FormData();
+        form.append("file", file, name);
+        return requestForm<FileListResponse>(cfg, `/tasks/${id}/files`, form);
+      },
+      downloadFile: (id: string, p: string) => requestBinary(cfg, "GET", `/tasks/${id}/files/${encodePath(p)}`),
+      delete: (id: string) => req<void>("DELETE", `/tasks/${id}`),
     },
 
     models: {
