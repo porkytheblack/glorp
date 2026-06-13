@@ -67,6 +67,8 @@ curl -s -X POST localhost:4271/sessions/<id>/messages -H 'content-type: applicat
 
 Full guide — CLI flags, `garage.json`, the REST/WS API, setup templates, and per-session keys — in [`docs/garage-usage.md`](docs/garage-usage.md). Bind to localhost, sit behind a reverse proxy, or enable API-key auth on any non-loopback bind.
 
+Want the **simple, black-box surface** instead — submit a typed job (make a video, build a deck, review a PR, fix a bug) and poll one object for the result? See the [**Task API integration guide**](docs/tasks.md).
+
 All three Glorp servers (the Garage runtime, the single-session `src/server`, and the `glorp-mcp` HTTP transport) are served with [Hono](https://hono.dev).
 
 #### Garage dashboard

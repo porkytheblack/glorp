@@ -217,9 +217,14 @@ optional `callback_url`, Garage POSTs the task object on every transition into
 `needs_input`, `completed`, or `failed` — so you can avoid polling. Tasks run in
 `bypass` permission mode by default, so they pause only for deliberate questions.
 
-The kit wraps all of this: `client.tasks.create({ type, input })`,
-`client.tasks.get(id)`, `.answer(id, qid, ans)`, `.message(id, text)`,
-`.downloadFile(id, path)`, `.delete(id)`.
+The kit wraps all of this: `client.tasks.create({ type, input })` then
+`client.tasks.wait(id, { onQuestion })` (polls to completion, answering
+questions), plus `.get`, `.message`, `.answer`, `.files`, `.uploadFile`,
+`.downloadFile`, `.delete`.
+
+**→ Full integration guide for app developers: [docs/tasks.md](./tasks.md)** —
+the task object shape, status lifecycle, answering questions, follow-ups,
+webhooks, and copy-paste recipes for video / deck / PR-review / bug-fix.
 
 ## REST API
 

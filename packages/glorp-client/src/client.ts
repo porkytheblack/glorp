@@ -22,6 +22,7 @@ import type {
   SessionDto,
   SessionResult,
   TaskDto,
+  TaskQuestion,
   TaskStatus,
   TaskTypeDto,
   TemplateSummaryDto,
@@ -30,6 +31,22 @@ import type {
 
 /** The acknowledgement returned by `tasks.create` (the full task via `tasks.get`). */
 type TaskCreated = { id: string; type: string; status: TaskStatus; created_at: string };
+
+/** Options for `tasks.wait` — the poll-to-finish helper. */
+export interface WaitTaskOptions {
+  /** Poll interval while the task is working (ms). Default 1000. */
+  pollMs?: number;
+  /** Give up after this long (ms). Default 600000 (10 min). */
+  timeoutMs?: number;
+  /** Answer each pending question; return the answer to resolve it and resume. */
+  onQuestion?: (question: TaskQuestion, task: TaskDto) => Promise<string | boolean | null> | string | boolean | null;
+  /** Called when the agent posts a new progress note. */
+  onProgress?: (note: string, task: TaskDto) => void;
+  /** Called on every poll with the latest task object. */
+  onUpdate?: (task: TaskDto) => void;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** The raw key returned once on creation (with its bound namespace). */
 type MintedKey = { id: string; name: string; key: string; keyPrefix: string; scopes: string[]; namespace?: string | null };
@@ -132,6 +149,34 @@ function buildClient(cfg: GlorpConfig) {
       create: (input: CreateTaskInput) => req<TaskCreated>("POST", "/tasks", input),
       list: () => req<{ tasks: TaskDto[] }>("GET", "/tasks"),
       get: (id: string) => req<TaskDto>("GET", `/tasks/${id}`),
+      /**
+       * Poll a task to a terminal state, answering questions along the way.
+       * Resolves with the final `completed`/`failed` task. The black-box flow:
+       * `const t = await client.tasks.create(...); const done = await client.tasks.wait(t.id, { onQuestion })`.
+       */
+      wait: async (id: string, opts: WaitTaskOptions = {}): Promise<TaskDto> => {
+        const { pollMs = 1000, timeoutMs = 600_000, onQuestion, onProgress, onUpdate } = opts;
+        const deadline = Date.now() + timeoutMs;
+        let lastProgress: string | null = null;
+        while (Date.now() < deadline) {
+          const task = await req<TaskDto>("GET", `/tasks/${id}`);
+          onUpdate?.(task);
+          if (task.progress && task.progress !== lastProgress) {
+            lastProgress = task.progress;
+            onProgress?.(task.progress, task);
+          }
+          if (task.status === "completed" || task.status === "failed") return task;
+          if (task.status === "needs_input" && onQuestion && task.questions.length) {
+            for (const q of task.questions) {
+              const answer = await onQuestion(q, task);
+              await req("POST", `/tasks/${id}/answers`, { question_id: q.id, answer });
+            }
+            continue; // re-poll immediately after answering
+          }
+          await sleep(pollMs);
+        }
+        throw new Error(`tasks.wait timed out after ${timeoutMs}ms for task ${id}`);
+      },
       /** Continue the task ("now fix X"); the status returns to `working`. */
       message: (id: string, text: string) => req<{ accepted: boolean }>("POST", `/tasks/${id}/messages`, { text }),
       /** Answer a pending question from `task.questions`. */

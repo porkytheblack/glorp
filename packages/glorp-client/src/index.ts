@@ -15,7 +15,7 @@ import { streamSessionWith, type SessionStream } from "./ws.js";
 import type { BridgeEvent } from "./contract.js";
 
 export { configure, resolveConfig, type GlorpConfig } from "./config.js";
-export { createClient, type GlorpClient } from "./client.js";
+export { createClient, type GlorpClient, type WaitTaskOptions } from "./client.js";
 export { GlorpRemoteError } from "./errors.js";
 export { type RunOptions, type RunHandle, type ResultOptions } from "./run.js";
 export { type SessionStream } from "./ws.js";
