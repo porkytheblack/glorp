@@ -192,6 +192,13 @@ describe("Template v2 — repos", () => {
     expect(gitConfig.replace(/\s/g, "")).toContain("useHttpPath=true");
     // The token never lands in .git/config (it rides http.extraHeader env only).
     expect(gitConfig).not.toContain("ghs_FAKE_TOKEN");
+    // A gh-auth bridge is written so `gh` works without the agent acquiring a
+    // token — it mints via the repo's credential helper and exports GH_TOKEN.
+    const ghEnv = fs.readFileSync(path.join(ws, ".glorp", "gh-env.sh"), "utf-8");
+    expect(ghEnv).toContain("export GH_TOKEN");
+    expect(ghEnv).toContain("credential fill");
+    expect(ghEnv).toContain(path.join(ws, "repo")); // mints against the cloned repo
+    expect(ghEnv).not.toContain("ghs_FAKE_TOKEN"); // no token baked into the script
   });
 });
 
