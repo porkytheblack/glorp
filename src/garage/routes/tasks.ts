@@ -90,8 +90,15 @@ export function taskRoutes(
   return {
     async types(): Promise<Response> {
       const list = await templates.list();
+      const managed = config.taskParams ?? {};
       return json({
-        types: list.map((t) => ({ name: t.name, description: t.description ?? null, inputs: (t.params ?? []).map(paramDto) })),
+        types: list.map((t) => ({
+          name: t.name,
+          description: t.description ?? null,
+          // Operator-managed params are filled server-side — hide them so a
+          // consumer never sees (or has to supply) infrastructure inputs.
+          inputs: (t.params ?? []).filter((p) => !(p.name in managed)).map(paramDto),
+        })),
       });
     },
 
@@ -113,7 +120,10 @@ export function taskRoutes(
       const id = newSessionId();
       const created_at = new Date().toISOString();
       const record = store.create({ id, type, created_at, ...(callbackUrl ? { callback_url: callbackUrl } : {}) });
-      kickProvision(manager, store, config, record, body.input.params, body.permission_mode, prompt);
+      // Operator-managed params are authoritative — they fill (and override) the
+      // submitter's, so infra secrets like a render key never cross the API.
+      const params = { ...body.input.params, ...config.taskParams };
+      kickProvision(manager, store, config, record, params, body.permission_mode, prompt);
       return json({ id, type, status: "queued", created_at }, 202);
     },
 
