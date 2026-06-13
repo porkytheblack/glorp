@@ -134,4 +134,49 @@ describe("Task API routes", () => {
       await garage.stop();
     }
   });
+
+  it("fills an operator-managed param server-side and hides it from the catalog", async () => {
+    const dataDir = tmp();
+    const tdir = path.join(dataDir, "templates");
+    fs.mkdirSync(tdir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tdir, "needs-infra.json"),
+      JSON.stringify({
+        name: "needs-infra",
+        description: "Requires an infra secret the operator manages.",
+        params: [{ name: "INFRA_KEY", description: "render key", required: true, secret: true }],
+        steps: [{ type: "shell", command: "mkdir -p uploads && printf '%s' '{param:INFRA_KEY}' > uploads/key.txt" }],
+        system_prompt: "test",
+      }),
+    );
+    process.env.GLORP_GARAGE_TASK_PARAM_INFRA_KEY = "sk-managed-123";
+    const garage = await startGarage(
+      loadGarageConfig({ dataDir, port: await freePort(), hostname: "127.0.0.1", workspaceRoot: path.join(dataDir, "ws") }),
+    );
+    const base = `http://127.0.0.1:${garage.port}/api/v1`;
+    try {
+      // The managed param does not appear in the type's inputs.
+      const types = (await fetch(`${base}/tasks/types`).then((r) => r.json())) as { types: Array<{ name: string; inputs: Array<{ name: string }> }> };
+      const t = types.types.find((x) => x.name === "needs-infra")!;
+      expect(t.inputs.find((i) => i.name === "INFRA_KEY")).toBeUndefined();
+
+      // Submitting WITHOUT the param succeeds, and the managed value is used.
+      const created = await fetch(`${base}/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "needs-infra", input: { prompt: "go" } }),
+      });
+      expect(created.status).toBe(202);
+      const { id } = (await created.json()) as { id: string };
+      await poll(
+        async () => (await fetch(`${base}/tasks/${id}`).then((r) => r.json())) as { result: { files: Array<{ path: string }> } },
+        (d) => d.result.files.some((f) => f.path === "key.txt"),
+      );
+      const value = await fetch(`${base}/tasks/${id}/files/key.txt`).then((r) => r.text());
+      expect(value).toBe("sk-managed-123");
+    } finally {
+      delete process.env.GLORP_GARAGE_TASK_PARAM_INFRA_KEY;
+      await garage.stop();
+    }
+  });
 });

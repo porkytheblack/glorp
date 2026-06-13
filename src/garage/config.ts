@@ -72,6 +72,15 @@ export interface GarageConfig {
    * allows any origin. `GLORP_GARAGE_ALLOWED_ORIGINS` (comma-separated).
    */
   allowedOrigins?: string[];
+  /**
+   * Operator-managed task params, filled into EVERY task's params server-side
+   * (authoritative — they override a submitter's value). For infrastructure
+   * inputs a black-box consumer must not have to supply, e.g. a render
+   * service's key/URL: set them once on the Garage host and they vanish from
+   * `GET /tasks/types`. From `GLORP_GARAGE_TASK_PARAM_<NAME>` env vars and the
+   * garage.json `taskParams` map (env wins).
+   */
+  taskParams?: Record<string, string>;
 }
 
 /** Default idle-session TTL: 30 minutes. */
@@ -107,6 +116,7 @@ interface GarageFileConfig {
   templateRegistryUrl?: string;
   templateRegistryHeaders?: Record<string, string>;
   allowedOrigins?: string[];
+  taskParams?: Record<string, string>;
 }
 
 /**
@@ -219,5 +229,20 @@ export function loadGarageConfig(overrides: GarageConfigOverrides = {}): GarageC
       (Array.isArray(file.allowedOrigins)
         ? file.allowedOrigins.filter((o): o is string => typeof o === "string" && o.trim() !== "").map((o) => o.trim())
         : undefined),
+    taskParams: resolveTaskParams(file.taskParams),
   };
+}
+
+/** Operator-managed task params: garage.json `taskParams`, overlaid by
+ *  `GLORP_GARAGE_TASK_PARAM_<NAME>` env vars (env wins). Undefined when none. */
+function resolveTaskParams(fileParams?: Record<string, string>): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  if (fileParams && typeof fileParams === "object") {
+    for (const [k, v] of Object.entries(fileParams)) if (typeof v === "string" && v) out[k] = v;
+  }
+  const PREFIX = "GLORP_GARAGE_TASK_PARAM_";
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith(PREFIX) && v) out[k.slice(PREFIX.length)] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }

@@ -124,6 +124,13 @@ const { types } = await glorp.tasks.types();
 time; mask `secret: true` ones in your UI. The `prompt` is always the free-text
 instruction for the job.
 
+**You never supply infrastructure secrets.** Things like a render service's key
+or URL are *operator-managed* — set once on the Garage host — so they don't
+appear in `inputs` and you don't pass them. `tasks.types()` shows exactly what
+your app is responsible for and nothing more. (For example, the `remotion-video`
+type takes just a `prompt`; its renderer key/URL are filled server-side.) See
+[Operator: managed params](#operator-managed-params) if you run Garage.
+
 ## Submitting
 
 ```ts
@@ -275,6 +282,25 @@ const fixed = await glorp.tasks.wait(b.id);   // result.text / a PR link from th
 > `git-service`). To add a type — e.g. `pr-review` — add a template to the
 > companion's library; no Garage or app change is needed, and it appears in
 > `tasks.types()` automatically.
+
+## Operator: managed params
+
+If you run the Garage host, set **managed params** so infrastructure inputs are
+filled automatically and never have to be supplied (or even seen) by the apps
+submitting tasks. Set them once:
+
+```bash
+# env on the Garage host — GLORP_GARAGE_TASK_PARAM_<NAME>=<value>
+GLORP_GARAGE_TASK_PARAM_RENDERER_URL=http://remotion-renderer.railway.internal:3010
+GLORP_GARAGE_TASK_PARAM_RENDERER_KEY=<the render service key>
+```
+
+(or a `taskParams` map in `garage.json`; env wins). They are **authoritative** —
+applied to every task, overriding any value a submitter sends, so a tenant can't
+point a task at its own infrastructure — and they are **removed from
+`GET /tasks/types`**, so consumers only see the inputs they own. A template
+param the operator manages no longer needs to be passed at submit time even if
+the template declares it `required`.
 
 ## REST reference
 
