@@ -150,11 +150,13 @@ describe("Task API routes", () => {
       }),
     );
     process.env.GLORP_GARAGE_TASK_PARAM_INFRA_KEY = "sk-managed-123";
-    const garage = await startGarage(
-      loadGarageConfig({ dataDir, port: await freePort(), hostname: "127.0.0.1", workspaceRoot: path.join(dataDir, "ws") }),
-    );
-    const base = `http://127.0.0.1:${garage.port}/api/v1`;
+    let garage: Awaited<ReturnType<typeof startGarage>> | undefined;
     try {
+      // Inside try so the finally always clears the env var, even if startup throws.
+      garage = await startGarage(
+        loadGarageConfig({ dataDir, port: await freePort(), hostname: "127.0.0.1", workspaceRoot: path.join(dataDir, "ws") }),
+      );
+      const base = `http://127.0.0.1:${garage.port}/api/v1`;
       // The managed param does not appear in the type's inputs.
       const types = (await fetch(`${base}/tasks/types`).then((r) => r.json())) as { types: Array<{ name: string; inputs: Array<{ name: string }> }> };
       const t = types.types.find((x) => x.name === "needs-infra")!;
@@ -176,7 +178,7 @@ describe("Task API routes", () => {
       expect(value).toBe("sk-managed-123");
     } finally {
       delete process.env.GLORP_GARAGE_TASK_PARAM_INFRA_KEY;
-      await garage.stop();
+      if (garage) await garage.stop();
     }
   });
 });
