@@ -137,7 +137,12 @@ The default image runs **only** the Garage API — the right call when you drive
 from your own code or the kit. If instead you want one container that is a
 self-hosted Claude-Code-web — the **MCP server**, the **web dashboard**, and the
 **companion service** (GitHub App git tokens + a template registry) — build the
-all-in-one variant (`docker/Dockerfile.allinone`):
+all-in-one variant (`docker/Dockerfile.allinone`). It is **fully kitted out**:
+the complete media/document/image/Python/Rust toolchain (the same
+`docker/toolchain-install.sh` the full image uses) is baked in, so **every task
+type runs here** — documents (LibreOffice/pandoc/python-docx/weasyprint), decks
+(python-pptx), spreadsheets, images (ImageMagick/libvips/Pillow), video/audio
+(ffmpeg), and code (node/bun/git/gh). It's large (~3–4 GB) as a result.
 
 ```bash
 docker compose -f docker-compose.allinone.yml up -d --build

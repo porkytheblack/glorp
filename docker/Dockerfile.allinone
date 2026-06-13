@@ -1,7 +1,7 @@
-# All-in-one Glorp image: Garage API + MCP server + dashboard in ONE container.
-#   docker build -f docker/Dockerfile.allinone -t glorp-allinone .
-# For the lean, Garage-only image use ../Dockerfile; for the media/document
-# toolchain variant use ./Dockerfile.full. See docs/docker.md ("All-in-one").
+# All-in-one Glorp image: Garage API + MCP server + dashboard in ONE container,
+# fully kitted out — the complete media/document/image/Python/Rust toolchain is
+# baked in (shared with Dockerfile.full), so EVERY task type runs here. For the
+# lean, Garage-only orchestration image use ../Dockerfile. See docs/docker.md.
 FROM oven/bun:1.3
 
 # Toolchain for the agent sandbox (extend the apt line for your stack). tini is
@@ -25,6 +25,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && corepack prepare pnpm@11.6.0 --activate \
     && corepack prepare yarn@4.16.0 --activate \
     && rm -rf /var/lib/apt/lists/*
+
+# Full media/document/image/Python/Rust toolchain so EVERY task type works in
+# this one image (documents, decks, spreadsheets, images, video, code) — not
+# just the JS/code ones. Shared with Dockerfile.full so the two never drift.
+ENV RUSTUP_HOME=/opt/rust/rustup CARGO_HOME=/opt/rust/cargo
+ENV PATH=/opt/rust/cargo/bin:$PATH
+COPY docker/toolchain-install.sh /tmp/toolchain-install.sh
+RUN bash /tmp/toolchain-install.sh && rm -f /tmp/toolchain-install.sh
 
 WORKDIR /app
 
@@ -55,6 +63,11 @@ RUN bun run build \
  && (cd packages/glorp-mcp && bun install) \
  && (cd dashboard && bun install \
        && NEXT_TELEMETRY_DISABLED=1 NEXT_PUBLIC_GARAGE_URL="$GARAGE_URL" bun run build)
+
+# Agent skill bundles (docx/pptx/pdf/xlsx + more) into ~/.agents/skills so every
+# session can use them — paired with the document/media toolchain above.
+# Best-effort: a network hiccup warns rather than failing the image build.
+RUN bash docker/skills-install.sh
 
 # /data       → Garage state: API keys, the persisted MCP key, session snapshots
 # /workspaces → agent working directories (isolated from /app)
