@@ -200,6 +200,20 @@ describe("Template v2 — repos", () => {
     expect(ghEnv).toContain(path.join(ws, "repo")); // mints against the cloned repo
     expect(ghEnv).not.toContain("ghs_FAKE_TOKEN"); // no token baked into the script
   });
+
+  it("writes the gh-auth bridge for the FIRST authed repo (deterministic, not last-wins)", async () => {
+    const ws = tmp("ws-");
+    const a = gitFixture("a.txt", "a");
+    const b = gitFixture("b.txt", "b");
+    const gitTokens = { getToken: async () => "ghs_FAKE_TOKEN" } as unknown as NonNullable<ProvisionContext["gitTokens"]>;
+    await provision(
+      { name: "t", repos: [{ url: a, dest: "primary", auth: "github" }, { url: b, dest: "secondary", auth: "github" }] },
+      {}, ws, ctx({ gitTokens }),
+    );
+    const ghEnv = fs.readFileSync(path.join(ws, ".glorp", "gh-env.sh"), "utf-8");
+    expect(ghEnv).toContain(path.join(ws, "primary"));
+    expect(ghEnv).not.toContain(path.join(ws, "secondary")); // first wins, deterministically
+  });
 });
 
 describe("Template v2 — gitAuthEnv (pure)", () => {

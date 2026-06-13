@@ -75,7 +75,14 @@ async function cloneRepo(
   if (env) {
     await installCredHelper(target, spawn);
     const slug = repoSlug(url);
-    if (slug) writeGhAuthBridge(workspace, target, slug);
+    // Write the gh-auth bridge for the FIRST authed repo only — deterministic
+    // (the primary repo, e.g. `app`). A session sources ONE GH_TOKEN and
+    // BASH_ENV runs before any `cd`, so it can't pick a repo from $PWD; for a
+    // multi-authed-repo template `gh` therefore targets the primary, while the
+    // other repos stay git-fetch/pushable via their own credential helper.
+    if (slug && !fs.existsSync(path.join(workspace, ".glorp", "gh-env.sh"))) {
+      writeGhAuthBridge(workspace, target, slug);
+    }
   }
 }
 
