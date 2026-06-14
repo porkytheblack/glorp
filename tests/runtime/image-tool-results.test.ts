@@ -4,8 +4,14 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { Message } from "glove-core/core";
 
+import { formatMessages } from "glove-core/models/openai-compat";
+
 import { viewImageTool, GLORP_IMAGE_RENDER_KEY } from "../../src/agent/tools/view-image.ts";
-import { injectImageMessages } from "../../src/agent/runtime/image-tool-results.ts";
+import {
+  injectImageMessages,
+  capUserImages,
+  coalesceMergeableUserMessages,
+} from "../../src/agent/runtime/image-tool-results.ts";
 import { VerificationTracker } from "../../src/agent/runtime/verification-tracker.ts";
 
 const display: any = {};
@@ -116,6 +122,70 @@ describe("injectImageMessages", () => {
       .filter((m) => m.content?.some((p) => p.type === "image"))
       .map((m) => (m.content![0] as any).source.data);
     expect(injectedData).toEqual(["IMG3", "IMG4", "IMG5", "IMG6"]);
+  });
+});
+
+describe("coalesceMergeableUserMessages", () => {
+  const imageMsg = (data: string): Message =>
+    ({ sender: "user", text: "", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data } }] } as any);
+  const textMsg = (t: string): Message => ({ sender: "user", text: t } as Message);
+  const toolResultMsg = (): Message =>
+    ({ sender: "user", text: "tool results", tool_results: [{ tool_name: "ls", call_id: "x", result: { status: "success", data: "ok" } }] } as any);
+
+  test("folds an image message and a following user note into one content message", () => {
+    const out = coalesceMergeableUserMessages([imageMsg("IMG"), textMsg("[Inbox] resolved")]);
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toEqual([
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "IMG" } },
+      { type: "text", text: "[Inbox] resolved" },
+    ]);
+  });
+
+  test("leaves plain-text-only runs untouched (same reference, no rewrite)", () => {
+    const messages = [textMsg("a"), textMsg("b")];
+    expect(coalesceMergeableUserMessages(messages)).toBe(messages);
+  });
+
+  test("does not merge across a tool-result (role 'tool') message", () => {
+    const messages = [imageMsg("IMG"), toolResultMsg(), textMsg("note")];
+    const out = coalesceMergeableUserMessages(messages);
+    // image stays its own message; the tool-result breaks the run.
+    expect(out).toHaveLength(3);
+    expect(out[1].tool_results).toBeDefined();
+  });
+});
+
+// The bug this guards: glove-core's OpenAI-compat adapter merges consecutive
+// user messages by stringifying content, turning an image array into
+// "[object Object]". The full inject→cap→coalesce pipeline must keep the image
+// intact all the way through the real adapter formatter.
+describe("end-to-end through glove-core OpenAI-compat formatter", () => {
+  const pipe = (messages: Message[]): Message[] =>
+    coalesceMergeableUserMessages(capUserImages(injectImageMessages(messages)));
+  const agentView = (id: string): Message =>
+    ({ sender: "agent", text: "", tool_calls: [{ tool_name: "view_image", input_args: { path: "p.png" }, id }] } as any);
+  const viewResult = (data: string, id: string): Message =>
+    ({ sender: "user", text: "tool results", tool_results: [{ tool_name: "view_image", call_id: id, result: { status: "success", data: "Loaded p.png", renderData: { [GLORP_IMAGE_RENDER_KEY]: { media_type: "image/png", data } } } }] } as any);
+  const userText = (t: string): Message => ({ sender: "user", text: t } as Message);
+
+  test("image survives when a user-role message follows the view (the reported failure)", () => {
+    const wire = formatMessages(pipe([
+      userText("render the deck and check it"),
+      agentView("t1"),
+      viewResult("BASE64IMG", "t1"),
+      userText("[Inbox: 1 item resolved] ..."),
+    ]));
+    const s = JSON.stringify(wire);
+    expect(s).toContain("image_url");
+    expect(s).toContain("BASE64IMG");
+    expect(s).not.toContain("[object Object]");
+  });
+
+  test("image survives on the immediate-view happy path too", () => {
+    const wire = formatMessages(pipe([userText("check it"), agentView("t1"), viewResult("HAPPY", "t1")]));
+    const s = JSON.stringify(wire);
+    expect(s).toContain("HAPPY");
+    expect(s).not.toContain("[object Object]");
   });
 });
 
