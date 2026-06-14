@@ -135,6 +135,68 @@ describe("Task API routes", () => {
     }
   });
 
+  it("defer_start stages the task, accepts an input upload, then starts it", async () => {
+    const { garage, base } = await boot();
+    try {
+      const created = await fetch(`${base}/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "echo-task", input: { prompt: "use brief.txt" }, defer_start: true }),
+      });
+      expect(created.status).toBe(202);
+      const { id } = (await created.json()) as { id: string };
+
+      // Provisioning runs, but the first turn is withheld → "staged".
+      const staged = await poll(
+        async () => (await fetch(`${base}/tasks/${id}`).then((r) => r.json())) as { status: string },
+        (d) => d.status === "staged",
+      );
+      expect(staged.status).toBe("staged");
+
+      // An input upload lands in inputs/, listed + downloadable there.
+      const form = new FormData();
+      form.append("file", new Blob(["the brief"]), "brief.txt");
+      const up = await fetch(`${base}/tasks/${id}/inputs`, { method: "POST", body: form });
+      expect(up.status).toBe(201);
+      const inputs = (await fetch(`${base}/tasks/${id}/inputs`).then((r) => r.json())) as { files: Array<{ path: string }> };
+      expect(inputs.files.map((f) => f.path)).toContain("brief.txt");
+      expect(await fetch(`${base}/tasks/${id}/inputs/brief.txt`).then((r) => r.text())).toBe("the brief");
+
+      // Inputs are separate from deliverables: result.files has the uploads/ seed,
+      // never the caller's input file.
+      const dto = (await fetch(`${base}/tasks/${id}`).then((r) => r.json())) as { result: { files: Array<{ path: string }> } };
+      expect(dto.result.files.map((f) => f.path)).toContain("seed.txt");
+      expect(dto.result.files.map((f) => f.path)).not.toContain("brief.txt");
+
+      // Start dispatches the held turn → the task leaves "staged"; a re-start conflicts.
+      const start = await fetch(`${base}/tasks/${id}/start`, { method: "POST" });
+      expect(start.status).toBe(202);
+      const after = await poll(
+        async () => (await fetch(`${base}/tasks/${id}`).then((r) => r.json())) as { status: string },
+        (d) => d.status !== "staged",
+      );
+      expect(after.status).not.toBe("staged");
+      expect((await fetch(`${base}/tasks/${id}/start`, { method: "POST" })).status).toBe(409);
+    } finally {
+      await garage.stop();
+    }
+  });
+
+  it("rejects start on a task that was not deferred", async () => {
+    const { garage, base } = await boot();
+    try {
+      const created = await fetch(`${base}/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "echo-task", input: { prompt: "go" } }),
+      });
+      const { id } = (await created.json()) as { id: string };
+      expect((await fetch(`${base}/tasks/${id}/start`, { method: "POST" })).status).toBe(409);
+    } finally {
+      await garage.stop();
+    }
+  });
+
   it("fills an operator-managed param server-side and hides it from the catalog", async () => {
     const dataDir = tmp();
     const tdir = path.join(dataDir, "templates");

@@ -31,6 +31,8 @@ export interface RouteGroups {
   models: ReturnType<typeof modelRoutes>;
   creds: ReturnType<typeof credentialRoutes>;
   files: ReturnType<typeof fileRoutes>;
+  /** Caller-supplied task INPUT files — the worker's read-side, in `inputs/`. */
+  inputs: ReturnType<typeof fileRoutes>;
   tasks: ReturnType<typeof taskRoutes>;
 }
 
@@ -53,6 +55,9 @@ export function buildRouteGroups(
     models: modelRoutes(credentials, new ModelCatalog(config.dataDir)),
     creds: credentialRoutes(manager),
     files: fileRoutes(manager, config, nsId, uploadsSync),
+    // Inputs live alongside uploads but in their own folder; kept local (no R2
+    // mirror) — they are caller-provided job inputs, not deliverables.
+    inputs: fileRoutes(manager, config, nsId, undefined, "inputs"),
     tasks: taskRoutes(manager, config, tasks, templates),
   };
 }

@@ -94,4 +94,11 @@ export interface BuildGlorpOptions {
    * report_progress).
    */
   task?: { type: string };
+  /**
+   * The session runs inside a disposable, per-session sandbox container (Garage)
+   * rather than on the user's own machine. The container is the isolation
+   * boundary, so the shell guard skips workspace-path confinement (which would
+   * otherwise false-positive on routine `/tmp` scratch, `/usr` reads, etc.).
+   */
+  sandboxed?: boolean;
 }

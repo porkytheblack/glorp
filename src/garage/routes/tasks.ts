@@ -9,17 +9,18 @@
 import type { SessionManager } from "../manager.ts";
 import type { GarageConfig } from "../config.ts";
 import type { TemplateSource } from "../templates/source.ts";
-import type { TaskStore, TaskRecord } from "../task-store.ts";
+import type { TaskStore } from "../task-store.ts";
 import type { CreateTaskInput, PostTaskMessageInput, PostTaskAnswerInput } from "../contract.ts";
 import { json, errorJson, noContent, readJson } from "../respond.ts";
 import { newSessionId } from "../../agent/sessions.ts";
 import { paramDto } from "./templates.ts";
 import { buildTaskDto } from "./task-project.ts";
-import { attachTaskNotifier } from "../task-notifier.ts";
+import { kickProvision } from "./task-provision.ts";
 
 export interface TaskRoutes {
   types(): Promise<Response>;
   create(req: Request): Promise<Response>;
+  start(id: string): Promise<Response>;
   list(): Promise<Response>;
   get(id: string): Promise<Response>;
   messages(id: string, req: Request): Promise<Response>;
@@ -46,39 +47,6 @@ export function coerceAnswer(renderer: string, answer: unknown): unknown {
   if (renderer === "confirm") return answer === true || answer === "yes" || answer === "true";
   if (renderer === "info") return null;
   return answer == null ? "" : String(answer);
-}
-
-/** Provision the workspace + start the first turn, detached. The 202 already returned. */
-function kickProvision(
-  manager: SessionManager,
-  store: TaskStore,
-  config: GarageConfig,
-  record: TaskRecord,
-  params: Record<string, string> | undefined,
-  permissionMode: CreateTaskInput["permission_mode"],
-  prompt: string,
-): void {
-  void (async () => {
-    try {
-      const session = await manager.create(
-        {
-          sessionId: record.id,
-          template: record.type,
-          params,
-          permissionMode: permissionMode ?? "bypass",
-        },
-        { task: { type: record.type } }, // trust-gated: never from a public body
-      );
-      if (record.callback_url) {
-        attachTaskNotifier(session, () => buildTaskDto(record, manager.getOrRehydrate(record.id), config, Date.now()), record.callback_url);
-      }
-      await session.send(prompt);
-    } catch (err) {
-      // create() tears the workspace down on failure, leaving nothing in the
-      // session map — recording the error is the only way the task is observable.
-      store.setProvisionError(record.id, err instanceof Error ? err.message : String(err));
-    }
-  })();
 }
 
 export function taskRoutes(
@@ -119,12 +87,39 @@ export function taskRoutes(
 
       const id = newSessionId();
       const created_at = new Date().toISOString();
-      const record = store.create({ id, type, created_at, ...(callbackUrl ? { callback_url: callbackUrl } : {}) });
       // Operator-managed params are authoritative — they fill (and override) the
       // submitter's, so infra secrets like a render key never cross the API.
       const params = { ...body.input.params, ...config.taskParams };
-      kickProvision(manager, store, config, record, params, body.permission_mode, prompt);
+      // defer_start: provision but withhold the prompt so the caller can upload
+      // input files first, then POST /tasks/:id/start. The held prompt is persisted
+      // so `start` is observable across reads.
+      const deferred = body.defer_start === true;
+      const record = store.create({
+        id, type, created_at,
+        ...(callbackUrl ? { callback_url: callbackUrl } : {}),
+        ...(deferred ? { held: { prompt }, started: false } : {}),
+      });
+      kickProvision({
+        manager, store, config, record, params,
+        permissionMode: body.permission_mode,
+        sendPrompt: deferred ? undefined : prompt,
+      });
+      // Always "queued" at this instant — a deferred task flips to "staged" once
+      // provisioning completes (projected live), an immediate one to "working".
       return json({ id, type, status: "queued", created_at }, 202);
+    },
+
+    async start(id): Promise<Response> {
+      const record = store.get(id);
+      if (!record) return errorJson("not_found", `Task ${id} not found`, 404);
+      if (!record.held) return errorJson("conflict", "Task was not created with defer_start; nothing to start", 409);
+      if (record.started) return errorJson("conflict", "Task already started", 409);
+      const session = manager.getOrRehydrate(id);
+      if (!session) return errorJson("not_active", "Task is still provisioning — retry once status is 'staged'", 409);
+      // Mark before dispatch (synchronous, so a racing start sees `started`).
+      store.setStarted(id);
+      void session.send(record.held.prompt);
+      return json({ accepted: true, id }, 202);
     },
 
     async list(): Promise<Response> {

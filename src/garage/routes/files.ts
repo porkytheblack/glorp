@@ -42,12 +42,16 @@ export function fileRoutes(
   config: GarageConfig,
   nsId = "default",
   uploadsSync?: UploadsSync,
+  /** Exchange sub-folder under the workspace. Defaults to the configured
+   *  uploads dir; the task surface mounts a second group on "inputs". */
+  dirName?: string,
 ): FileRoutes {
   const engine = asEngine(uploadsSync);
+  const folder = dirName ?? config.filesDir ?? DEFAULT_DIR;
 
   /** Absolute path to the session's exchange folder, created on first use. */
   function rootFor(session: GarageSession): string {
-    const root = path.join(session.workspace, config.filesDir ?? DEFAULT_DIR);
+    const root = path.join(session.workspace, folder);
     fs.mkdirSync(root, { recursive: true });
     return root;
   }

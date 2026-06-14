@@ -5,6 +5,7 @@ import * as os from "node:os";
 
 import { bashTool } from "../src/agent/tools/bash.ts";
 import { commandEscapesWorkspace } from "../src/agent/tools/fs-shared.ts";
+import { guardCommand } from "../src/agent/tools/command-guard.ts";
 
 let workspace: string;
 let home: string;
@@ -111,6 +112,41 @@ describe("commandEscapesWorkspace — outside-workspace commands flagged", () =>
 
   test("absolute path embedded in a redirect", () => {
     expect(commandEscapesWorkspace("git diff > /tmp/diff.patch", workspace, home)).toMatch(/outside the workspace/);
+  });
+});
+
+// =====================================================================
+// Sandboxed workers (Garage's disposable container) skip workspace-path
+// confinement — the container is the boundary, so /tmp scratch, /usr reads,
+// and absolute paths mentioned in strings stop false-positiving.
+// =====================================================================
+describe("guardCommand — sandboxed sessions skip workspace confinement", () => {
+  test.each([
+    "curl -sLo /tmp/storyboard.md https://host/storyboard.md",
+    "cat /etc/hostname",
+    'echo "see /usr/local for details"',
+    "cd /tmp && ls",
+    "mv build/out /var/tmp/out",
+  ])("'%s' is allowed when sandboxed", (cmd) => {
+    expect(guardCommand(cmd, workspace, { sandboxed: true })).toBeNull();
+    // …but the very same command is still hard-blocked on a local (host) agent.
+    expect(guardCommand(cmd, workspace)?.severity).toBe("block");
+  });
+
+  test("catastrophic + global-install guards still apply inside a sandbox", () => {
+    expect(guardCommand("rm -rf /", workspace, { sandboxed: true })?.severity).toBe("block");
+    expect(guardCommand("npm install -g cowsay", workspace, { sandboxed: true })?.severity).toBe("block");
+  });
+
+  test("bashTool with GLORP_SANDBOX=1 runs an outside-path read that's otherwise blocked", async () => {
+    const sandboxTool = bashTool(workspace, { GLORP_SANDBOX: "1" });
+    const ok = await sandboxTool.do({ command: "cat /etc/hostname", description: "read host" }, display, glove);
+    expect(ok.status).toBe("success");
+
+    const hostTool = bashTool(workspace);
+    const blocked = await hostTool.do({ command: "cat /etc/hostname", description: "read host" }, display, glove);
+    expect(blocked.status).toBe("error");
+    expect(blocked.message ?? "").toMatch(/blocked/i);
   });
 });
 

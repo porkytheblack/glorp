@@ -201,12 +201,14 @@ export interface SessionResult {
  * Where a task is in its lifecycle. Projected live from the worker session on
  * every read, never stored.
  *   queued      — accepted; the workspace is provisioning / the first turn hasn't started
+ *   staged      — created with `defer_start`: provisioned and holding the first turn so you
+ *                 can upload input files (POST /tasks/:id/inputs), then POST /tasks/:id/start
  *   working     — the agent is actively processing
  *   needs_input — the agent asked the requester a question and is waiting (see `questions`)
  *   completed   — the agent finished (its declared deliverable, if any, is in `result`)
  *   failed      — provisioning failed, the session errored, or the last turn errored
  */
-export type TaskStatus = "queued" | "working" | "needs_input" | "completed" | "failed";
+export type TaskStatus = "queued" | "staged" | "working" | "needs_input" | "completed" | "failed";
 
 /** Kind of a pending question, derived from the agent's modal renderer. */
 export type TaskQuestionKind = "choice" | "confirm" | "text" | "info";
@@ -268,6 +270,12 @@ export interface CreateTaskInput {
   permission_mode?: PermissionMode;
   /** Garage POSTs the TaskDto here on needs_input / completed / failed. */
   callback_url?: string;
+  /**
+   * Hold the first turn after provisioning instead of running it immediately.
+   * The task settles in `staged`; upload input files (POST /tasks/:id/inputs),
+   * then POST /tasks/:id/start to run the prompt with those files present.
+   */
+  defer_start?: boolean;
 }
 
 /** Body accepted by `POST /tasks/:id/messages` (a follow-up). */
