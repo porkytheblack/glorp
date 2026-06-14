@@ -36,6 +36,7 @@ export function withImageToolResults(model: ModelAdapter): ModelAdapter {
     prompt(request, notify, signal) {
       let messages = injectImageMessages(request.messages);
       messages = capUserImages(messages);
+      messages = coalesceMergeableUserMessages(messages);
       if (messages === request.messages) return model.prompt(request, notify, signal);
       return model.prompt({ ...request, messages }, notify, signal);
     },
@@ -119,4 +120,58 @@ export function capUserImages(messages: Message[]): Message[] {
       ),
     };
   });
+}
+
+/**
+ * glove-core's OpenAI-compat adapter merges consecutive user-role messages by
+ * STRINGIFYING their content (`prev.content = String(prev.content) + ...`),
+ * which turns an array content part — an image — into the literal
+ * "[object Object]", silently dropping it. (The Anthropic adapter concatenates
+ * arrays losslessly, so it is unaffected.) Our injected image messages — and
+ * user-pasted image messages — are array-content user messages, so whenever any
+ * user-role message (an inbox-resolved notice, a queued user note, a
+ * continuation nudge) immediately follows one, the image is destroyed.
+ *
+ * Pre-empt that here: coalesce each maximal run of consecutive mergeable user
+ * messages (a user-role message that isn't a tool-result message — those format
+ * as role "tool" and never merge) into a single user message with a unified
+ * content-parts array. We only rewrite a run that actually carries array
+ * content, so plain-text turns are left byte-for-byte untouched. glove-core then
+ * sees one user message per run and its lossy merge never fires. The result is
+ * correct for both adapters (formatContentParts renders mixed text+image parts).
+ */
+export function coalesceMergeableUserMessages(messages: Message[]): Message[] {
+  let changed = false;
+  const out: Message[] = [];
+  for (let i = 0; i < messages.length; ) {
+    if (!isMergeableUser(messages[i])) { out.push(messages[i]); i++; continue; }
+    let j = i;
+    while (j < messages.length && isMergeableUser(messages[j])) j++;
+    const run = messages.slice(i, j);
+    if (run.length > 1 && run.some((m) => Array.isArray(m.content) && m.content.length)) {
+      out.push(mergeUserRun(run));
+      changed = true;
+    } else {
+      out.push(...run);
+    }
+    i = j;
+  }
+  return changed ? out : messages;
+}
+
+/** A user-role message glove-core would fold into the previous user message —
+ * i.e. anything not from the agent that isn't a (role "tool") tool-result. */
+function isMergeableUser(m: Message): boolean {
+  return m.sender !== "agent" && !m.tool_results?.length;
+}
+
+/** Flatten a run of mergeable user messages into one content-array message,
+ * preserving image parts as structured content and plain text as text parts. */
+function mergeUserRun(run: Message[]): Message {
+  const content: ContentPart[] = [];
+  for (const m of run) {
+    if (Array.isArray(m.content) && m.content.length) content.push(...m.content);
+    else if (m.text) content.push({ type: "text", text: m.text } as ContentPart);
+  }
+  return { sender: "user", text: "", content };
 }
