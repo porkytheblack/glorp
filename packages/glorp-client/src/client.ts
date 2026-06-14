@@ -147,6 +147,37 @@ function buildClient(cfg: GlorpConfig) {
     tasks: {
       types: () => req<{ types: TaskTypeDto[] }>("GET", "/tasks/types"),
       create: (input: CreateTaskInput) => req<TaskCreated>("POST", "/tasks", input),
+      /** Run a `defer_start` task's held first turn (after uploading inputs). */
+      start: (id: string) => req<{ accepted: boolean; id: string }>("POST", `/tasks/${id}/start`, {}),
+      /**
+       * The files-first happy path: create the task deferred, wait until it is
+       * `staged`, upload each input into `inputs/`, then start it. The prompt can
+       * reference the files by name. Returns once the run has been kicked.
+       */
+      createWithInputs: async (
+        input: CreateTaskInput,
+        files: Array<{ blob: Blob; name: string }>,
+        opts: { pollMs?: number; timeoutMs?: number } = {},
+      ): Promise<TaskCreated> => {
+        const { pollMs = 500, timeoutMs = 120_000 } = opts;
+        const created = await req<TaskCreated>("POST", "/tasks", { ...input, defer_start: true });
+        const deadline = Date.now() + timeoutMs;
+        let task = await req<TaskDto>("GET", `/tasks/${created.id}`);
+        while (task.status === "queued" && Date.now() < deadline) {
+          await sleep(pollMs);
+          task = await req<TaskDto>("GET", `/tasks/${created.id}`);
+        }
+        if (task.status !== "staged") {
+          throw new Error(`task ${created.id} did not reach 'staged' (status: ${task.status}; error: ${task.error ?? "none"})`);
+        }
+        for (const f of files) {
+          const form = new FormData();
+          form.append("file", f.blob, f.name);
+          await requestForm<FileListResponse>(cfg, `/tasks/${created.id}/inputs`, form);
+        }
+        await req("POST", `/tasks/${created.id}/start`, {});
+        return created;
+      },
       list: () => req<{ tasks: TaskDto[] }>("GET", "/tasks"),
       get: (id: string) => req<TaskDto>("GET", `/tasks/${id}`),
       /**
@@ -190,6 +221,17 @@ function buildClient(cfg: GlorpConfig) {
       },
       downloadFile: (id: string, p: string) => requestBinary(cfg, "GET", `/tasks/${id}/files/${encodePath(p)}`),
       deleteFile: (id: string, p: string) => req<void>("DELETE", `/tasks/${id}/files/${encodePath(p)}`),
+
+      // Input files — the caller's read-side, in the task's `inputs/` folder.
+      // The worker reads these; they never appear in `result.files`.
+      inputs: (id: string) => req<FileListResponse>("GET", `/tasks/${id}/inputs`),
+      uploadInput: (id: string, file: Blob, name: string) => {
+        const form = new FormData();
+        form.append("file", file, name);
+        return requestForm<FileListResponse>(cfg, `/tasks/${id}/inputs`, form);
+      },
+      downloadInput: (id: string, p: string) => requestBinary(cfg, "GET", `/tasks/${id}/inputs/${encodePath(p)}`),
+      deleteInput: (id: string, p: string) => req<void>("DELETE", `/tasks/${id}/inputs/${encodePath(p)}`),
       delete: (id: string) => req<void>("DELETE", `/tasks/${id}`),
     },
 

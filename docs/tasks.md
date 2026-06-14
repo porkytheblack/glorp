@@ -101,6 +101,7 @@ queued ──▶ working ──▶ completed
 | Status | Meaning | What your app does |
 | --- | --- | --- |
 | `queued` | Accepted; workspace provisioning / first turn not started | wait |
+| `staged` | Created with `defer_start`: provisioned, holding the first turn | upload inputs, then `start` (see [Attaching input files](#attaching-input-files)) |
 | `working` | The agent is actively processing | wait (optionally surface `progress`) |
 | `needs_input` | The agent asked a question and is blocked | answer `questions[*]` |
 | `completed` | Finished; `result` holds the deliverable | read `result` |
@@ -145,13 +146,48 @@ const { id } = await glorp.tasks.create({
 });
 ```
 
-To attach input files (a brief for a deck, assets for a video), upload them
-after creating — they land in the task's `uploads/` folder, which is the agent's
-input area:
+### Attaching input files
+
+When the prompt needs to *reference* files the requester provides — a brief for a
+deck, a dataset, assets for a video — create the task with **`defer_start`** so the
+first turn is held until the files are in place. The files land in the task's
+**`inputs/`** folder (the worker's read-only input area, kept separate from the
+`uploads/` deliverables), and the prompt can name them directly.
 
 ```ts
-await glorp.tasks.uploadFile(id, new Blob([pdfBytes]), "brief.pdf");
+// 1. Create deferred → the task provisions and settles in `staged`.
+const { id } = await glorp.tasks.create({
+  type: "slide-deck",
+  input: { prompt: "Build an investor deck from brief.pdf and figures.csv" },
+  defer_start: true,
+});
+
+// 2. Wait until `staged`, then upload each input into inputs/.
+for (let t = await glorp.tasks.get(id); t.status === "queued"; t = await glorp.tasks.get(id)) {}
+await glorp.tasks.uploadInput(id, new Blob([pdfBytes]), "brief.pdf");
+await glorp.tasks.uploadInput(id, new Blob([csvBytes]), "figures.csv");
+
+// 3. Start — the held prompt now runs with the files present.
+await glorp.tasks.start(id);
+const deck = await glorp.tasks.wait(id);
 ```
+
+`tasks.createWithInputs(input, files)` does all three steps for you:
+
+```ts
+const { id } = await glorp.tasks.createWithInputs(
+  { type: "slide-deck", input: { prompt: "Investor deck from brief.pdf" } },
+  [{ blob: new Blob([pdfBytes]), name: "brief.pdf" }],
+);
+const deck = await glorp.tasks.wait(id);
+```
+
+Files **already in the workspace** (seeded by the task template, or left by an
+earlier turn) need no upload — the worker reads them directly; just refer to them
+by path in the prompt.
+
+You can still drop files into `uploads/` after a task is running (e.g. mid-iteration)
+with `tasks.uploadFile(id, …)`; those share the deliverable folder.
 
 ## Answering questions
 
@@ -266,9 +302,11 @@ await glorp.tasks.wait(v.id);
 await glorp.tasks.message(v.id, "make the logo bigger in the last 3 seconds");
 const final = await glorp.tasks.wait(v.id);
 
-// Build a slide deck from a brief
-const d = await glorp.tasks.create({ type: "slide-deck", input: { prompt: "Investor update from the attached brief" } });
-await glorp.tasks.uploadFile(d.id, new Blob([brief]), "brief.md");
+// Build a slide deck from a brief (files referenced by the prompt → inputs/)
+const d = await glorp.tasks.createWithInputs(
+  { type: "slide-deck", input: { prompt: "Investor update from brief.md" } },
+  [{ blob: new Blob([brief]), name: "brief.md" }],
+);
 const deck = await glorp.tasks.wait(d.id, { onQuestion: (q) => q.options?.[0]?.value ?? "" });
 
 // Fix a bug and open a PR
@@ -310,12 +348,16 @@ optional `X-Glorp-Namespace: <ns>`.
 | Method | Path | Body / result |
 | --- | --- | --- |
 | `GET` | `/tasks/types` | `{ types: [{ name, description, inputs }] }` |
-| `POST` | `/tasks` | `{ type, input:{ prompt, params? }, permission_mode?, callback_url? }` → 202 `{ id, type, status, created_at }` |
+| `POST` | `/tasks` | `{ type, input:{ prompt, params? }, permission_mode?, callback_url?, defer_start? }` → 202 `{ id, type, status, created_at }` |
+| `POST` | `/tasks/:id/start` | (no body) run a `defer_start` task's held turn → 202; 409 if already started / not deferred / still provisioning |
 | `GET` | `/tasks` | `{ tasks: TaskDto[] }` |
 | `GET` | `/tasks/:id` | `TaskDto` |
 | `POST` | `/tasks/:id/messages` | `{ text }` → 202 |
 | `POST` | `/tasks/:id/answers` | `{ question_id, answer }` |
-| `POST` | `/tasks/:id/files` | multipart `file` → file list |
+| `POST` | `/tasks/:id/inputs` | multipart `file` → input file list (caller-provided inputs, in `inputs/`) |
+| `GET` | `/tasks/:id/inputs[/:path]` | list / download inputs |
+| `DELETE` | `/tasks/:id/inputs/:path` | delete one input |
+| `POST` | `/tasks/:id/files` | multipart `file` → file list (deliverable exchange, in `uploads/`) |
 | `GET` | `/tasks/:id/files[/:path]` | list / download |
 | `DELETE` | `/tasks/:id/files/:path` | delete one file |
 | `DELETE` | `/tasks/:id` | cancel + remove |

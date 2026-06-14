@@ -219,6 +219,9 @@ function matchTaskRoute(req: Request, pathname: string, g: RouteGroups): Promise
       case "messages":
         if (m === "POST") return g.tasks.messages(id, req);
         break;
+      case "start":
+        if (m === "POST") return g.tasks.start(id);
+        break;
       case "answers":
         if (m === "POST") return g.tasks.answers(id, req);
         break;
@@ -227,6 +230,13 @@ function matchTaskRoute(req: Request, pathname: string, g: RouteGroups): Promise
         if (m === "POST" && !rest) return g.files.upload(id, req);
         if (m === "GET" && rest) return g.files.download(id, rest);
         if (m === "DELETE" && rest) return g.files.remove(id, rest);
+        break;
+      case "inputs":
+        // Caller-supplied input files (the worker's read-side), in `inputs/`.
+        if (m === "GET" && !rest) return g.inputs.list(id, req);
+        if (m === "POST" && !rest) return g.inputs.upload(id, req);
+        if (m === "GET" && rest) return g.inputs.download(id, rest);
+        if (m === "DELETE" && rest) return g.inputs.remove(id, rest);
         break;
     }
     return methodNotAllowed();

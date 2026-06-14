@@ -40,6 +40,7 @@ const base = {
   lastError: null as string | null,
   turnCount: 0,
   hasOutput: false,
+  startPending: false,
 };
 
 describe("TaskStore", () => {
@@ -87,6 +88,15 @@ describe("projectStatus", () => {
   });
   it("session exists but no output yet → working (first turn in flight)", () => {
     expect(projectStatus({ ...base })).toBe("working");
+  });
+  it("provisioned but holding the first turn (defer_start) → staged", () => {
+    expect(projectStatus({ ...base, startPending: true })).toBe("staged");
+    // staged wins over a busy/output projection (the turn hasn't run)…
+    expect(projectStatus({ ...base, startPending: true, busy: true, hasOutput: true })).toBe("staged");
+    // …but provisioning/session failures and a missing session still win over it.
+    expect(projectStatus({ ...base, startPending: true, provisionError: "x" })).toBe("failed");
+    expect(projectStatus({ ...base, startPending: true, sessionError: "wedged" })).toBe("failed");
+    expect(projectStatus({ ...base, startPending: true, hasSession: false, ageMs: 1000 })).toBe("queued");
   });
 });
 

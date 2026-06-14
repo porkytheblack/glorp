@@ -12,6 +12,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+/**
+ * The first turn a `defer_start` task holds until POST /tasks/:id/start. Only
+ * the prompt is withheld — provisioning (with its params + permission mode) has
+ * already run by the time the task is staged, so `start` just dispatches this.
+ */
+export interface HeldTurn {
+  prompt: string;
+}
+
 export interface TaskRecord {
   id: string;
   type: string;
@@ -19,6 +28,13 @@ export interface TaskRecord {
   created_at: string;
   /** Set when provisioning threw before a session existed → status "failed". */
   provision_error?: string | null;
+  /**
+   * Present only for `defer_start` tasks: the first turn, withheld until
+   * `start`. While set and `started` is false, the task projects as "staged".
+   */
+  held?: HeldTurn | null;
+  /** True once the (held) first turn has been dispatched. */
+  started?: boolean;
 }
 
 interface TasksFile {
@@ -67,11 +83,26 @@ export class TaskStore {
     return rec;
   }
 
-  /** Record a provisioning failure so a sessionless task reads as "failed". */
+  /** Record a provisioning failure so a sessionless task reads as "failed".
+   *  Called from the DETACHED provisioning path, where the store's data dir may
+   *  already be gone (process/namespace torn down) — so the persist is
+   *  best-effort: the in-memory record still drives this process's projection. */
   setProvisionError(id: string, message: string): void {
     const rec = this.data.tasks[id];
     if (!rec) return;
     rec.provision_error = message;
+    try {
+      this.flush();
+    } catch {
+      /* backing dir vanished under a detached write — nothing left to persist */
+    }
+  }
+
+  /** Mark a deferred task's held turn as dispatched (so it leaves "staged"). */
+  setStarted(id: string): void {
+    const rec = this.data.tasks[id];
+    if (!rec) return;
+    rec.started = true;
     this.flush();
   }
 

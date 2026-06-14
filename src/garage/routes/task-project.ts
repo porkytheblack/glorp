@@ -30,6 +30,8 @@ export interface StatusSignals {
   turnCount: number;
   /** A declared deliverable exists, or an agent turn is on disk. */
   hasOutput: boolean;
+  /** A deferred-start task is provisioned but its first turn is still withheld. */
+  startPending: boolean;
 }
 
 /** Pure status projection — the single source of truth for a task's lifecycle. */
@@ -37,6 +39,9 @@ export function projectStatus(s: StatusSignals): TaskStatus {
   if (s.provisionError) return "failed";
   if (!s.hasSession) return s.ageMs > SESSION_GRACE_MS ? "failed" : "queued";
   if (s.sessionError) return "failed";
+  // Provisioned, but the caller asked us to hold the first turn (defer_start):
+  // surface that we're waiting on `start` so uploads can land first.
+  if (s.startPending) return "staged";
   if (s.openQuestionCount > 0) return "needs_input"; // precedence over busy (G1)
   if (s.busy) return "working";
   if (s.lastError && s.turnCount > 0) return "failed";
@@ -129,6 +134,7 @@ export async function buildTaskDto(
     lastError: session?.stats.lastError ?? null,
     turnCount: session?.stats.turnCount ?? 0,
     hasOutput: !!declared || text !== null,
+    startPending: !!record.held && !record.started,
   });
 
   const result: TaskResult = {
