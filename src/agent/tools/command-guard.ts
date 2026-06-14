@@ -14,8 +14,20 @@ export interface CommandViolation {
   reason: string;
 }
 
-export function guardCommand(cmd: string, workspace: string): CommandViolation | null {
-  const b = blockReason(cmd, workspace);
+/**
+ * Where the command runs. A sandboxed Garage worker lives in a disposable,
+ * per-session container, so the workspace-confinement heuristic — a safety net
+ * for a LOCAL machine whose filesystem the agent shares — only false-positives
+ * there (it hard-blocks routine `/tmp` scratch, reads of `/usr`, an absolute
+ * path merely mentioned in an `echo` string, etc.). The container itself is the
+ * isolation boundary, so confinement is skipped when `sandboxed`.
+ */
+export interface GuardOptions {
+  sandboxed?: boolean;
+}
+
+export function guardCommand(cmd: string, workspace: string, opts: GuardOptions = {}): CommandViolation | null {
+  const b = blockReason(cmd, workspace, opts);
   if (b) return { severity: "block", reason: b };
   const c = confirmReason(cmd);
   if (c) return { severity: "confirm", reason: c };
@@ -68,7 +80,8 @@ const SYSTEM_SCOPE: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\b(curl|wget)\b[^|;&]*\|\s*(bash|sh|zsh|fish)\b/, reason: "pipe-to-shell installer" },
 ];
 
-function blockReason(cmd: string, workspace: string): string | null {
+function blockReason(cmd: string, workspace: string, opts: GuardOptions = {}): string | null {
+  // These protect the session/host wherever it runs, so they apply in a sandbox too.
   for (const p of CATASTROPHIC) {
     if (p.test(cmd)) return `Catastrophic pattern detected (${p}). Refusing.`;
   }
@@ -78,8 +91,12 @@ function blockReason(cmd: string, workspace: string): string | null {
   for (const { pattern, reason } of SYSTEM_SCOPE) {
     if (pattern.test(cmd)) return `Blocked: ${reason}. Agents must not modify system state.`;
   }
-  const escape = commandEscapesWorkspace(cmd, workspace);
-  if (escape) return `Blocked: ${escape}. Agents must stay inside the workspace.`;
+  // Workspace confinement is a host-filesystem safety net; a sandboxed worker is
+  // already isolated by its container, where this only false-positives.
+  if (!opts.sandboxed) {
+    const escape = commandEscapesWorkspace(cmd, workspace);
+    if (escape) return `Blocked: ${escape}. Agents must stay inside the workspace.`;
+  }
   return null;
 }
 

@@ -60,6 +60,9 @@ function summaryArgs(input: { command: string; description: string }, result: {
 export function bashTool(workspace: string, extraEnv?: Record<string, string>): SummaryTool<{
   command: string; description: string; timeout_ms?: number;
 }, BashSummaryArgs> {
+  // Garage marks its disposable per-session containers; there, the container is
+  // the isolation boundary, so workspace-confinement checks are skipped.
+  const sandboxed = extraEnv?.GLORP_SANDBOX === "1";
   return {
     name: "bash",
     description:
@@ -74,7 +77,7 @@ export function bashTool(workspace: string, extraEnv?: Record<string, string>): 
         .describe("Timeout in ms (default 120000)"),
     }),
     async do(input, display, _glove, signal) {
-      const guard = guardCommand(input.command, workspace);
+      const guard = guardCommand(input.command, workspace, { sandboxed });
       if (guard?.severity === "block") {
         return { status: "error", data: null, message: guard.reason };
       }

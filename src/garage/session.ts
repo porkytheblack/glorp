@@ -153,6 +153,9 @@ export class GarageSession {
       credentials,
       permissionMode: this.init.permissionMode,
       task: this.init.task ?? undefined,
+      // Garage sessions run in a disposable per-session container — the sandbox
+      // is the boundary, so the shell guard skips workspace-path confinement.
+      sandboxed: true,
     };
     // When a custom key or an explicit profile drives the session, the
     // credentials store's active profile resolves it — passing provider/model

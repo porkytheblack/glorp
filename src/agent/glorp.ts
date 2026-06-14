@@ -95,6 +95,9 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
       // silently skips a missing BASH_ENV file, so this is a no-op otherwise.
       BASH_ENV: path.join(opts.workspace, ".glorp", "gh-env.sh"),
       ...(opts.task ? { GLORP_GARAGE: "1", GLORP_TASK_ID: opts.sessionId, GLORP_TASK_TYPE: opts.task.type } : {}),
+      // Marks a disposable sandbox container; the shell guard reads this to skip
+      // workspace-path confinement (the container is the real boundary).
+      ...(opts.sandboxed ? { GLORP_SANDBOX: "1" } : {}),
     },
     task: opts.task,
     taskSink,
