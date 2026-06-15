@@ -36,9 +36,12 @@ export interface UsageTotals {
   costKnown: boolean;
 }
 
-/** Stable map key for a (provider, model) pair. */
+/** Stable map key for a (provider, model) pair. Separated by NUL: a model id
+ *  can itself contain "/" (e.g. "anthropic/claude-opus" on OpenRouter), so a
+ *  printable delimiter could collide. The key is only ever an in-memory Map key
+ *  (re-derived from the value on load), so it never reaches the wire or a snapshot. */
 export function modelKey(providerId: string, model: string): string {
-  return `${providerId}/${model}`;
+  return `${providerId}\x00${model}`;
 }
 
 /**
@@ -126,7 +129,8 @@ export function coerceModelUsage(raw: unknown): ModelUsage | null {
     tokensOut: num(r.tokensOut),
     requests: num(r.requests),
     costUsd: num(r.costUsd),
-    costKnown: r.costKnown !== false,
+    // Default unknown for missing/corrupt data — never over-claim pricing confidence.
+    costKnown: r.costKnown === true,
   };
 }
 

@@ -9,7 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { GlorpStore } from "../src/agent/store.ts";
-import { tokenCostUsd, totalsOf, storeTotals, mergeModelUsage, type ModelUsage } from "../src/agent/usage.ts";
+import { tokenCostUsd, totalsOf, storeTotals, mergeModelUsage, modelKey, coerceModelUsage, type ModelUsage } from "../src/agent/usage.ts";
 import { SessionStats } from "../src/garage/session-stats.ts";
 
 let dataDir: string;
@@ -130,11 +130,29 @@ describe("mergeModelUsage", () => {
       { providerId: "anthropic", model: "opus", tokensIn: 20, tokensOut: 5, requests: 1, costUsd: 2, costKnown: true },
       { providerId: "openai", model: "gpt", tokensIn: 1, tokensOut: 1, requests: 1, costUsd: 0, costKnown: false },
     ]);
-    const opus = into.get("anthropic/opus")!;
+    const opus = into.get(modelKey("anthropic", "opus"))!;
     expect(opus.tokensIn).toBe(30);
     expect(opus.requests).toBe(2);
     expect(opus.costUsd).toBeCloseTo(3, 6);
-    expect(into.get("openai/gpt")!.costKnown).toBe(false);
+    expect(into.get(modelKey("openai", "gpt"))!.costKnown).toBe(false);
+  });
+});
+
+describe("modelKey", () => {
+  test("does not collide when provider/model boundary is ambiguous", () => {
+    // A "/" delimiter would map both of these to "anthropic/beta/opus".
+    expect(modelKey("anthropic", "beta/opus")).not.toBe(modelKey("anthropic/beta", "opus"));
+  });
+});
+
+describe("coerceModelUsage", () => {
+  test("defaults costKnown to false when the field is missing/corrupt", () => {
+    const u = coerceModelUsage({ providerId: "x", model: "y", tokensIn: 5 });
+    expect(u?.costKnown).toBe(false);
+  });
+  test("preserves an explicit costKnown:true", () => {
+    const u = coerceModelUsage({ providerId: "x", model: "y", costKnown: true });
+    expect(u?.costKnown).toBe(true);
   });
 });
 

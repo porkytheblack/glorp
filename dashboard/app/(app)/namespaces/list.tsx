@@ -35,7 +35,7 @@ export function NamespaceRow({
       <span className="tnum hidden w-20 shrink-0 text-right text-[12px] text-muted-foreground sm:block">
         {count} {count === 1 ? "session" : "sessions"}
       </span>
-      <span className="tnum hidden w-16 shrink-0 text-right text-[12px] text-brand sm:block" title="estimated cost (catalog list price)">{usd(n.cost_usd, n.cost_known)}</span>
+      <span className="tnum hidden w-16 shrink-0 text-right text-[12px] text-brand sm:block" title={n.cost_known ? "catalog list price" : "no catalog price — token count only"}>{usd(n.cost_usd, n.cost_known)}</span>
       <span className="tnum hidden w-12 shrink-0 text-right text-[12px] text-faint md:block">{timeAgo(n.created_at)}</span>
       <div className="flex shrink-0 items-center gap-1">
         <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => onMint(n)}>
