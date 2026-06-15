@@ -2,14 +2,18 @@
 
 import type { GarageSession } from "./session.ts";
 import type { SessionDto } from "./types.ts";
-import { totalsOf } from "../agent/usage.ts";
+import { snapshotExists } from "./persistence.ts";
+import { storeTotals } from "../agent/usage.ts";
 
 export function buildSessionDto(s: GarageSession): SessionDto {
   const handle = s.current();
-  // A registered-but-unbuilt session has no live stats yet (no events fired) —
-  // read its persisted counters + usage ledger straight off the snapshot so its
-  // tokens/turns/cost don't read as 0 until the handle is built and hydrated.
-  const counters = s.loaded ? null : peekCounters(s);
+  // The live `SessionStats` is only populated by bridge events (hydrate / token
+  // consumption), so a session that's built-but-unhydrated or merely rehydrated
+  // would read as 0. Read counters + cost straight off the store instead: the
+  // live handle store when loaded, else the snapshot — but only when one exists,
+  // so listing a freshly-created, never-flushed session doesn't construct a
+  // store (which would create an empty session folder on a read path).
+  const counters = peekCounters(s);
   return {
     id: s.id,
     state: s.state,
@@ -35,11 +39,15 @@ export function buildSessionDto(s: GarageSession): SessionDto {
   };
 }
 
-/** Persisted counters + cost for an unbuilt session, read off its snapshot. */
-function peekCounters(s: GarageSession): { tokensIn: number; tokensOut: number; turnCount: number; costUsd: number; costKnown: boolean } {
+/** Counters + cost from the store (live when loaded, snapshot when present),
+ *  or null when there is nothing persisted yet — caller falls back to stats. */
+function peekCounters(
+  s: GarageSession,
+): { tokensIn: number; tokensOut: number; turnCount: number; costUsd: number; costKnown: boolean } | null {
+  if (!s.loaded && !snapshotExists(s.dataDir, s.id)) return null;
   const store = s.peekStore();
   const c = store.countersSync();
-  const totals = totalsOf(store.getUsage());
+  const totals = storeTotals(c.tokensIn, c.tokensOut, store.getUsage());
   return { ...c, costUsd: totals.costUsd, costKnown: totals.costKnown };
 }
 

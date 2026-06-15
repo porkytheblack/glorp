@@ -2,7 +2,7 @@ import type { Message, ToolResultData } from "glove-core/core";
 import type { BridgeEvent, ChatTurn, ToolEvent } from "../../shared/events.ts";
 import type { GlorpStore } from "../store.ts";
 import type { AgentRecord } from "../../orchestrator/agent-state.ts";
-import { totalsOf } from "../usage.ts";
+import { storeTotals } from "../usage.ts";
 
 interface Bridge {
   emit(event: BridgeEvent): void;
@@ -23,7 +23,7 @@ export async function hydrateUiSession(
     store.getTurnCount(),
   ]);
   const total = counts.in + counts.out;
-  const usage = totalsOf(store.getUsage());
+  const usage = storeTotals(counts.in, counts.out, store.getUsage());
   bridge.emit({
     type: "session_hydrate",
     turns: turnsFromMessages(messages),

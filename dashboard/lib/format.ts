@@ -32,7 +32,7 @@ export function usd(n: number | null | undefined, known = true): string {
   if (n === 0) return `${mark}$0`;
   if (n < 0.01) return `${mark}<$0.01`;
   if (n < 1000) return `${mark}$${n.toFixed(2)}`;
-  return `${mark}$${new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n)}`;
+  return `${mark}$${compact(n)}`;
 }
 
 /** Last path segment of a workspace path, for a friendly label. */

@@ -195,8 +195,14 @@ catalog price (token count only). The namespace rollup (`manager.usageRollup`) r
 live ledgers via `peekStore()` and dormant ones off `listSessions` snapshots, then
 folds them by model / workspace / session. Cost scalars also ride the session DTO
 (`session-dto.ts`, off the live `SessionStats` or — when unbuilt — `peekStore`), the
-workspace DTO, and the namespace DTO. Subagent / fleet sub-store usage is not yet
-rolled up.
+workspace DTO, and the namespace DTO. Costs are a frozen catalog-list estimate
+(priced at consumption time, not recomputed if catalog prices change later).
+`cost_known: false` (rendered as a `~` floor) fires whenever a store's flat
+counters exceed its priced per-model ledger — i.e. legacy pre-tracking sessions,
+or deltas attributed to a model with no catalog price. Two spend sources are
+*invisible* (counted in neither tokens nor cost), not just unpriced: title-model
+calls (`title.ts` prompts the model directly, bypassing `addTokens`) and
+subagent / roster-agent / fleet usage (separate stores, not yet rolled up).
 
 ### control.ts — live-session control
 Operates on the *live* handle (`session.current()`); returns 409 `not_active` when

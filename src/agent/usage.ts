@@ -43,8 +43,10 @@ export function modelKey(providerId: string, model: string): string {
 
 /**
  * Catalog list-price cost (USD) for a token delta. models.dev rates are
- * per-million tokens. `known` is false when neither an input nor output rate
- * exists, so the caller can mark the bucket's cost as an underestimate.
+ * per-million tokens. `known` is false unless BOTH the input and output rates
+ * exist — a one-sided rate would bill the missing side at $0 and present an
+ * undercount as authoritative, so we return the partial cost as a *floor* and
+ * flag it unknown.
  */
 export function tokenCostUsd(
   tokensIn: number,
@@ -53,9 +55,8 @@ export function tokenCostUsd(
 ): { usd: number; known: boolean } {
   const inRate = cost?.input;
   const outRate = cost?.output;
-  if (inRate == null && outRate == null) return { usd: 0, known: false };
   const usd = (tokensIn / 1e6) * (inRate ?? 0) + (tokensOut / 1e6) * (outRate ?? 0);
-  return { usd, known: true };
+  return { usd, known: inRate != null && outRate != null };
 }
 
 export function emptyTotals(): UsageTotals {
@@ -79,6 +80,19 @@ export function totalsOf(usage: ModelUsage[]): UsageTotals {
   const t = emptyTotals();
   for (const u of usage) addToTotals(t, u);
   return t;
+}
+
+/**
+ * Token + cost totals for a store, reconciling the per-model ledger against the
+ * flat counters. The counters are authoritative for tokens; when they exceed the
+ * ledger (a session that accrued tokens before usage tracking existed, or
+ * untracked sub-store spend) the surplus is unpriced, so the cost is a floor and
+ * `costKnown` is false.
+ */
+export function storeTotals(tokensIn: number, tokensOut: number, usage: ModelUsage[]): UsageTotals {
+  const ledger = totalsOf(usage);
+  const untracked = tokensIn + tokensOut > ledger.tokensIn + ledger.tokensOut;
+  return { tokensIn, tokensOut, costUsd: ledger.costUsd, costKnown: ledger.costKnown && !untracked };
 }
 
 /** Merge per-model buckets keyed by provider/model into `into` (mutates it). */

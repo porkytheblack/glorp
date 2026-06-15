@@ -12,7 +12,7 @@ import type { PermissionMode } from "../agent/runtime/permission-mode.ts";
 import { GarageSession } from "./session.ts";
 import { snapshotExists, readSnapshotMeta } from "./persistence.ts";
 import { WorkspaceStore } from "./workspace-store.ts";
-import { type ModelUsage, type UsageTotals, emptyTotals, addToTotals, totalsOf, mergeModelUsage } from "../agent/usage.ts";
+import { type ModelUsage, type UsageTotals, emptyTotals, addToTotals, storeTotals, mergeModelUsage } from "../agent/usage.ts";
 import type { CreateSessionInput, CreateWorkspaceInput, SessionDto, Workspace, WorkspaceDto } from "./types.ts";
 
 /** One session's usage with the identity needed for the namespace rollup. */
@@ -225,8 +225,10 @@ export class SessionManager {
   async sessionUsage(id: string): Promise<{ usage: ModelUsage[]; totals: UsageTotals } | undefined> {
     const session = this.getOrRehydrate(id);
     if (!session) return undefined;
-    const usage = session.peekStore().getUsage();
-    return { usage, totals: totalsOf(usage) };
+    const store = session.peekStore();
+    const c = store.countersSync();
+    const usage = store.getUsage();
+    return { usage, totals: storeTotals(c.tokensIn, c.tokensOut, usage) };
   }
 
   /** Namespace-wide spend rollup: totals + per-model + per-workspace + per-session. */
@@ -262,14 +264,16 @@ export class SessionManager {
     for (const session of this.sessions.values()) {
       if (session.state === "destroyed") continue;
       seen.add(session.id);
-      const usage = session.peekStore().getUsage();
+      const store = session.peekStore();
+      const c = store.countersSync();
+      const usage = store.getUsage();
       out.push({
         sessionId: session.id,
         title: session.stats.title,
         workspaceId: session.workspaceId,
         modelLabel: session.current()?.modelLabel ?? null,
         usage,
-        totals: totalsOf(usage),
+        totals: storeTotals(c.tokensIn, c.tokensOut, usage),
       });
     }
     for (const info of await listSessions(this.config.dataDir, { kind: "all" })) {

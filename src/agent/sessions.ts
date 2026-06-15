@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { deriveProjectId } from "./workspace-id.ts";
 import { removeSessionStorage } from "./session-paths.ts";
 import { randomSessionName } from "./session-name.ts";
-import { type ModelUsage, type UsageTotals, totalsOf, coerceModelUsage } from "./usage.ts";
+import { type ModelUsage, type UsageTotals, storeTotals, coerceModelUsage } from "./usage.ts";
 
 /**
  * Lightweight metadata view of a saved session — read directly from the
@@ -124,7 +124,7 @@ export async function listSessions(
         tokensIn: snap.tokensIn ?? 0,
         tokensOut: snap.tokensOut ?? 0,
         usage,
-        usageTotals: totalsOf(usage),
+        usageTotals: storeTotals(snap.tokensIn ?? 0, snap.tokensOut ?? 0, usage),
         turnCount: snap.turnCount ?? 0,
         lastActivity: stat.mtime,
         workspace: snapWorkspace,

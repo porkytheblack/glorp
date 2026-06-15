@@ -9,7 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { GlorpStore } from "../src/agent/store.ts";
-import { tokenCostUsd, totalsOf, mergeModelUsage, type ModelUsage } from "../src/agent/usage.ts";
+import { tokenCostUsd, totalsOf, storeTotals, mergeModelUsage, type ModelUsage } from "../src/agent/usage.ts";
 import { SessionStats } from "../src/garage/session-stats.ts";
 
 let dataDir: string;
@@ -28,6 +28,33 @@ describe("tokenCostUsd", () => {
     const c = tokenCostUsd(1000, 1000, undefined);
     expect(c.known).toBe(false);
     expect(c.usd).toBe(0);
+  });
+
+  test("a one-sided rate is a floor, not authoritative", () => {
+    // input priced, output missing → bill output at $0 but flag the figure unknown.
+    const c = tokenCostUsd(1_000_000, 1_000_000, { input: 3 });
+    expect(c.known).toBe(false);
+    expect(c.usd).toBeCloseTo(3, 6);
+  });
+});
+
+describe("storeTotals reconciliation", () => {
+  test("counters beyond the priced ledger flag cost as a floor (legacy / untracked)", () => {
+    // A pre-tracking session: real tokens on the counters, empty ledger.
+    const t = storeTotals(5000, 2000, []);
+    expect(t.tokensIn).toBe(5000);
+    expect(t.tokensOut).toBe(2000);
+    expect(t.costUsd).toBe(0);
+    expect(t.costKnown).toBe(false);
+  });
+
+  test("counters matching the ledger stay authoritative", () => {
+    const usage: ModelUsage[] = [
+      { providerId: "anthropic", model: "opus", tokensIn: 5000, tokensOut: 2000, requests: 1, costUsd: 0.05, costKnown: true },
+    ];
+    const t = storeTotals(5000, 2000, usage);
+    expect(t.costKnown).toBe(true);
+    expect(t.costUsd).toBeCloseTo(0.05, 6);
   });
 });
 
