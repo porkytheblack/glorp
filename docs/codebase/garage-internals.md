@@ -183,6 +183,27 @@ text + status, the one-call orchestration fetch, `state.ts:34`), `plan`, `tasks`
 URL-decoded). `agents` (`state.ts:88`) *does* build the handle to read the roster
 and returns 502 on build failure.
 
+### usage.ts — token + cost rollup (read-only)
+`GET /sessions/:id/usage` and `GET /usage` read the per-(provider, model) usage
+ledger every `GlorpStore` keeps. The store attributes each `addTokens` delta to its
+*active model* (set in `active-agent.ts` from the picked model + on every profile
+swap, so a session that switches models mid-chain accrues a bucket per model) and
+prices it from the cached models.dev catalog (`tokenCostUsd`, per-million input/output
+rates). glove-core surfaces only `{tokens_in, tokens_out}` — no provider cost — so
+costs are catalog list-price estimates; `cost_known: false` flags a model with no
+catalog price (token count only). The namespace rollup (`manager.usageRollup`) reads
+live ledgers via `peekStore()` and dormant ones off `listSessions` snapshots, then
+folds them by model / workspace / session. Cost scalars also ride the session DTO
+(`session-dto.ts`, off the live `SessionStats` or — when unbuilt — `peekStore`), the
+workspace DTO, and the namespace DTO. Costs are a frozen catalog-list estimate
+(priced at consumption time, not recomputed if catalog prices change later).
+`cost_known: false` (rendered as a `~` floor) fires whenever a store's flat
+counters exceed its priced per-model ledger — i.e. legacy pre-tracking sessions,
+or deltas attributed to a model with no catalog price. Two spend sources are
+*invisible* (counted in neither tokens nor cost), not just unpriced: title-model
+calls (`title.ts` prompts the model directly, bypassing `addTokens`) and
+subagent / roster-agent / fleet usage (separate stores, not yet rolled up).
+
 ### control.ts — live-session control
 Operates on the *live* handle (`session.current()`); returns 409 `not_active` when
 the session isn't in memory. `abort` is a no-op for non-live sessions

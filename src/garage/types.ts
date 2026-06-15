@@ -66,6 +66,14 @@ export interface NamespaceDto {
   is_default: boolean;
   /** Live+dormant session count. Present on detail reads; omitted from lists. */
   session_count?: number;
+  /** Cumulative input tokens across the namespace's sessions. */
+  tokens_in?: number;
+  /** Cumulative output tokens across the namespace's sessions. */
+  tokens_out?: number;
+  /** Cumulative estimated USD cost (catalog list pricing). */
+  cost_usd?: number;
+  /** False when any contributing model lacked a catalog price. */
+  cost_known?: boolean;
 }
 
 /** Body accepted by `POST /namespaces`. */
@@ -100,6 +108,14 @@ export interface WorkspaceDto {
   path: string;
   created_at: string;
   session_count: number;
+  /** Cumulative input tokens across this workspace's sessions. */
+  tokens_in: number;
+  /** Cumulative output tokens across this workspace's sessions. */
+  tokens_out: number;
+  /** Cumulative estimated USD cost (catalog list pricing). */
+  cost_usd: number;
+  /** False when any contributing model lacked a catalog price. */
+  cost_known: boolean;
 }
 
 /** Body accepted by `POST /workspaces`. */
@@ -191,10 +207,67 @@ export interface SessionDto {
   loaded: boolean;
   tokens_in: number;
   tokens_out: number;
+  /** Cumulative estimated USD cost (catalog list pricing). */
+  cost_usd: number;
+  /** False when any attributed model lacked a catalog price (cost is a floor). */
+  cost_known: boolean;
   turn_count: number;
   error: string | null;
   /** Present only when a session-level custom key is set. Never the raw key. */
   custom_credentials: { provider: string; last4: string } | null;
+}
+
+/** One model's slice of a session's (or rollup's) token + cost usage. */
+export interface ModelUsageDto {
+  provider_id: string;
+  model: string;
+  label: string | null;
+  tokens_in: number;
+  tokens_out: number;
+  /** Model turns attributed to this model. */
+  requests: number;
+  cost_usd: number;
+  cost_known: boolean;
+}
+
+/** A rolled-up token + cost total. */
+export interface UsageTotalsDto {
+  tokens_in: number;
+  tokens_out: number;
+  cost_usd: number;
+  cost_known: boolean;
+}
+
+/** Returned by `GET /sessions/:id/usage` — one session's per-model breakdown. */
+export interface SessionUsageDto {
+  session_id: string;
+  totals: UsageTotalsDto;
+  models: ModelUsageDto[];
+}
+
+/** Per-workspace usage line in the namespace rollup. */
+export interface WorkspaceUsageDto {
+  workspace_id: string | null;
+  name: string;
+  totals: UsageTotalsDto;
+}
+
+/** Per-session usage line in the namespace rollup. */
+export interface SessionUsageLineDto {
+  session_id: string;
+  title: string | null;
+  workspace_id: string | null;
+  model_label: string | null;
+  totals: UsageTotalsDto;
+}
+
+/** Returned by `GET /usage` — the namespace-wide spend rollup. */
+export interface NamespaceUsageDto {
+  namespace: string;
+  totals: UsageTotalsDto;
+  by_model: ModelUsageDto[];
+  by_workspace: WorkspaceUsageDto[];
+  by_session: SessionUsageLineDto[];
 }
 
 /** One MCP identity (e.g. a Linear workspace) supplied at provision time. */

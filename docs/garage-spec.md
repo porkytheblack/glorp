@@ -185,6 +185,9 @@ GET    /sessions/:id/permissions          List granted permissions
 DELETE /sessions/:id/permissions/:key     Revoke a permission
 POST   /sessions/:id/credentials          Set custom API key for session
 DELETE /sessions/:id/credentials          Revert session to Garage defaults
+GET    /sessions/:id/usage                 Per-model token + cost breakdown
+
+GET    /usage                             Namespace spend rollup (by model / workspace / session)
 
 GET    /templates                         List templates
 GET    /templates/:name                   Template detail

@@ -21,6 +21,7 @@ import { modelRoutes } from "./routes/models.ts";
 import { ModelCatalog } from "../agent/model-catalog.ts";
 import { credentialRoutes } from "./routes/credentials.ts";
 import { fileRoutes } from "./routes/files.ts";
+import { usageRoutes } from "./routes/usage.ts";
 
 export interface RouteGroups {
   sessions: ReturnType<typeof sessionRoutes>;
@@ -34,6 +35,7 @@ export interface RouteGroups {
   /** Caller-supplied task INPUT files — the worker's read-side, in `inputs/`. */
   inputs: ReturnType<typeof fileRoutes>;
   tasks: ReturnType<typeof taskRoutes>;
+  usage: ReturnType<typeof usageRoutes>;
 }
 
 /** Build the per-namespace route groups for one bundle's manager + credentials. */
@@ -59,5 +61,6 @@ export function buildRouteGroups(
     // mirror) — they are caller-provided job inputs, not deliverables.
     inputs: fileRoutes(manager, config, nsId, undefined, "inputs"),
     tasks: taskRoutes(manager, config, tasks, templates),
+    usage: usageRoutes(manager, nsId),
   };
 }

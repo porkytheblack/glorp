@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { deriveProjectId } from "./workspace-id.ts";
 import { removeSessionStorage } from "./session-paths.ts";
 import { randomSessionName } from "./session-name.ts";
+import { type ModelUsage, type UsageTotals, storeTotals, coerceModelUsage } from "./usage.ts";
 
 /**
  * Lightweight metadata view of a saved session — read directly from the
@@ -20,6 +21,12 @@ export interface SessionInfo {
   taskCount: number;
   pendingInboxCount: number;
   tokenCount: number;
+  tokensIn: number;
+  tokensOut: number;
+  /** Per-model usage ledger from the snapshot (empty for pre-usage sessions). */
+  usage: ModelUsage[];
+  /** Rolled-up token + cost total derived from `usage`. */
+  usageTotals: UsageTotals;
   turnCount: number;
   lastActivity: Date;
   /** Workspace this session was created in. Undefined for legacy snapshots. */
@@ -84,6 +91,7 @@ export async function listSessions(
         inboxItems?: Array<{ status?: string }>;
         tokensIn?: number;
         tokensOut?: number;
+        usage?: Record<string, unknown>;
         turnCount?: number;
         metadata?: { workspace?: string; projectId?: string; kind?: string };
       };
@@ -100,6 +108,9 @@ export async function listSessions(
       const firstUser = msgs.find((m) => m.sender === "user")?.text ?? null;
       const agentCount = msgs.filter((m) => m.sender === "agent").length;
       const userCount = msgs.filter((m) => m.sender === "user").length;
+      const usage = Object.values(snap.usage ?? {})
+        .map(coerceModelUsage)
+        .filter((u): u is ModelUsage => u !== null);
       results.push({
         id,
         title: typeof snap.title === "string" && snap.title.trim() ? snap.title.trim() : null,
@@ -110,6 +121,10 @@ export async function listSessions(
         taskCount: snap.tasks?.length ?? 0,
         pendingInboxCount: (snap.inboxItems ?? []).filter((i) => i.status === "pending").length,
         tokenCount: (snap.tokensIn ?? 0) + (snap.tokensOut ?? 0),
+        tokensIn: snap.tokensIn ?? 0,
+        tokensOut: snap.tokensOut ?? 0,
+        usage,
+        usageTotals: storeTotals(snap.tokensIn ?? 0, snap.tokensOut ?? 0, usage),
         turnCount: snap.turnCount ?? 0,
         lastActivity: stat.mtime,
         workspace: snapWorkspace,

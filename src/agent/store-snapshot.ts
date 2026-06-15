@@ -1,5 +1,6 @@
 import type { Message, Task, PermissionStatus, InboxItem } from "glove-core/core";
 import type { PlanDocument } from "../shared/events.ts";
+import type { ModelUsage } from "./usage.ts";
 
 export interface SnapshotMeta {
   kind: "session" | "subagent" | "fleet";
@@ -42,6 +43,9 @@ export interface Snapshot {
   titleUpdatedAt?: string | null;
   tokensIn: number;
   tokensOut: number;
+  /** Per-(provider, model) usage ledger with catalog-priced cost. Absent on
+   *  snapshots written before usage tracking — treated as an empty ledger. */
+  usage?: Record<string, ModelUsage>;
   turnCount: number;
   plan?: PlanDocument | null;
   tasks: Task[];

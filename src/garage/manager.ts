@@ -12,7 +12,26 @@ import type { PermissionMode } from "../agent/runtime/permission-mode.ts";
 import { GarageSession } from "./session.ts";
 import { snapshotExists, readSnapshotMeta } from "./persistence.ts";
 import { WorkspaceStore } from "./workspace-store.ts";
+import { type ModelUsage, type UsageTotals, emptyTotals, addToTotals, storeTotals, mergeModelUsage } from "../agent/usage.ts";
 import type { CreateSessionInput, CreateWorkspaceInput, SessionDto, Workspace, WorkspaceDto } from "./types.ts";
+
+/** One session's usage with the identity needed for the namespace rollup. */
+export interface SessionUsageEntry {
+  sessionId: string;
+  title: string | null;
+  workspaceId: string | null;
+  modelLabel: string | null;
+  usage: ModelUsage[];
+  totals: UsageTotals;
+}
+
+/** Aggregated token + cost spend for a whole namespace (see GET /usage). */
+export interface UsageRollup {
+  totals: UsageTotals;
+  byModel: ModelUsage[];
+  byWorkspace: Array<{ workspaceId: string | null; name: string; totals: UsageTotals }>;
+  bySession: SessionUsageEntry[];
+}
 
 /** Provisions a fresh workspace from a named setup template. */
 export interface TemplateProvisioner {
@@ -181,14 +200,94 @@ export class SessionManager {
 
   // --- Workspaces ---------------------------------------------------------
 
-  /** All workspaces with their live+dormant session counts. */
+  /** All workspaces with their live+dormant session counts + token/cost totals. */
   async listWorkspaces(): Promise<WorkspaceDto[]> {
     const sessions = await this.list();
-    const counts = new Map<string, number>();
+    const agg = new Map<string, { count: number; totals: UsageTotals }>();
     for (const s of sessions) {
-      if (s.workspace_id) counts.set(s.workspace_id, (counts.get(s.workspace_id) ?? 0) + 1);
+      if (!s.workspace_id) continue;
+      let a = agg.get(s.workspace_id);
+      if (!a) { a = { count: 0, totals: emptyTotals() }; agg.set(s.workspace_id, a); }
+      a.count++;
+      addToTotals(a.totals, { tokensIn: s.tokens_in, tokensOut: s.tokens_out, costUsd: s.cost_usd, costKnown: s.cost_known });
     }
-    return this.workspaces.list().map((w) => workspaceDto(w, counts.get(w.id) ?? 0));
+    return this.workspaces.list().map((w) => {
+      const a = agg.get(w.id);
+      return workspaceDto(w, a?.count ?? 0, a?.totals ?? emptyTotals());
+    });
+  }
+
+  /**
+   * Per-model token + cost usage for one session, live or dormant. Reads the
+   * session's store ledger (in-memory when built, off disk otherwise). Returns
+   * undefined when neither a live session nor a snapshot exists.
+   */
+  async sessionUsage(id: string): Promise<{ usage: ModelUsage[]; totals: UsageTotals } | undefined> {
+    const session = this.getOrRehydrate(id);
+    if (!session) return undefined;
+    const store = session.peekStore();
+    const c = store.countersSync();
+    const usage = store.getUsage();
+    return { usage, totals: storeTotals(c.tokensIn, c.tokensOut, usage) };
+  }
+
+  /** Namespace-wide spend rollup: totals + per-model + per-workspace + per-session. */
+  async usageRollup(): Promise<UsageRollup> {
+    const entries = await this.collectSessionUsage();
+    const totals = emptyTotals();
+    const byModel = new Map<string, ModelUsage>();
+    const byWorkspace = new Map<string, { name: string; totals: UsageTotals }>();
+    for (const e of entries) {
+      addToTotals(totals, e.totals);
+      mergeModelUsage(byModel, e.usage);
+      const wsKey = e.workspaceId ?? "__none__";
+      let ws = byWorkspace.get(wsKey);
+      if (!ws) {
+        const name = e.workspaceId ? this.workspaces.get(e.workspaceId)?.name ?? e.workspaceId : "Unassigned";
+        ws = { name, totals: emptyTotals() };
+        byWorkspace.set(wsKey, ws);
+      }
+      addToTotals(ws.totals, e.totals);
+    }
+    return {
+      totals,
+      byModel: [...byModel.values()],
+      byWorkspace: [...byWorkspace.entries()].map(([k, v]) => ({ workspaceId: k === "__none__" ? null : k, name: v.name, totals: v.totals })),
+      bySession: entries,
+    };
+  }
+
+  /** Gather each session's usage ledger once (live ledger or on-disk snapshot). */
+  private async collectSessionUsage(): Promise<SessionUsageEntry[]> {
+    const out: SessionUsageEntry[] = [];
+    const seen = new Set<string>();
+    for (const session of this.sessions.values()) {
+      if (session.state === "destroyed") continue;
+      seen.add(session.id);
+      const store = session.peekStore();
+      const c = store.countersSync();
+      const usage = store.getUsage();
+      out.push({
+        sessionId: session.id,
+        title: session.stats.title,
+        workspaceId: session.workspaceId,
+        modelLabel: session.current()?.modelLabel ?? null,
+        usage,
+        totals: storeTotals(c.tokensIn, c.tokensOut, usage),
+      });
+    }
+    for (const info of await listSessions(this.config.dataDir, { kind: "all" })) {
+      if (seen.has(info.id)) continue;
+      out.push({
+        sessionId: info.id,
+        title: info.title,
+        workspaceId: info.workspace ? this.workspaces.ensureForPath(info.workspace).id : null,
+        modelLabel: null,
+        usage: info.usage,
+        totals: info.usageTotals,
+      });
+    }
+    return out;
   }
 
   getWorkspace(id: string): Workspace | undefined {
@@ -210,7 +309,7 @@ export class SessionManager {
     const preExisted = fs.existsSync(resolved);
     this.validateWorkspace(resolved);
     if (input.template) await this.provisionInto(input.template, input.params ?? {}, resolved, !preExisted);
-    return workspaceDto(this.workspaces.create({ path: resolved, name: input.name }), 0);
+    return workspaceDto(this.workspaces.create({ path: resolved, name: input.name }), 0, emptyTotals());
   }
 
   /** A unique, filesystem-safe folder segment for a minted workspace. */
@@ -369,8 +468,11 @@ export class SessionManager {
   }
 }
 
-function workspaceDto(w: Workspace, sessionCount: number): WorkspaceDto {
-  return { id: w.id, name: w.name, path: w.path, created_at: w.createdAt, session_count: sessionCount };
+function workspaceDto(w: Workspace, sessionCount: number, totals: UsageTotals): WorkspaceDto {
+  return {
+    id: w.id, name: w.name, path: w.path, created_at: w.createdAt, session_count: sessionCount,
+    tokens_in: totals.tokensIn, tokens_out: totals.tokensOut, cost_usd: totals.costUsd, cost_known: totals.costKnown,
+  };
 }
 
 function dormantDto(
@@ -390,8 +492,10 @@ function dormantDto(
     connected_clients: 0,
     busy: false,
     loaded: false,
-    tokens_in: 0,
-    tokens_out: 0,
+    tokens_in: info.tokensIn,
+    tokens_out: info.tokensOut,
+    cost_usd: info.usageTotals.costUsd,
+    cost_known: info.usageTotals.costKnown,
     turn_count: info.turnCount,
     error: null,
     custom_credentials: null,

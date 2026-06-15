@@ -22,6 +22,19 @@ export function compact(n: number | null | undefined): string {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n);
 }
 
+/**
+ * Compact USD for spend figures: "$0", "<$0.01", "$0.42", "$12.30", "$1.2K".
+ * Pass `known: false` to flag a floor estimate with a leading "~".
+ */
+export function usd(n: number | null | undefined, known = true): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  const mark = known ? "" : "~";
+  if (n === 0) return `${mark}$0`;
+  if (n < 0.01) return `${mark}<$0.01`;
+  if (n < 1000) return `${mark}$${n.toFixed(2)}`;
+  return `${mark}$${compact(n)}`;
+}
+
 /** Last path segment of a workspace path, for a friendly label. */
 export function baseName(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");

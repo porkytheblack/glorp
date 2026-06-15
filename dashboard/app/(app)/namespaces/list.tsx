@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyRound, Layers, Trash2 } from "lucide-react";
-import { timeAgo } from "@/lib/format";
+import { timeAgo, usd } from "@/lib/format";
 import { ConfirmButton } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,7 @@ export function NamespaceRow({
       <span className="tnum hidden w-20 shrink-0 text-right text-[12px] text-muted-foreground sm:block">
         {count} {count === 1 ? "session" : "sessions"}
       </span>
+      <span className="tnum hidden w-16 shrink-0 text-right text-[12px] text-brand sm:block" title={n.cost_known ? "catalog list price" : "no catalog price — token count only"}>{usd(n.cost_usd, n.cost_known)}</span>
       <span className="tnum hidden w-12 shrink-0 text-right text-[12px] text-faint md:block">{timeAgo(n.created_at)}</span>
       <div className="flex shrink-0 items-center gap-1">
         <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => onMint(n)}>

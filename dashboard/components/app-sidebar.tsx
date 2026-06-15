@@ -11,6 +11,7 @@ import {
   Cpu,
   KeyRound,
   Cloud,
+  CircleDollarSign,
   LogOut,
   ChevronsUpDown,
   type LucideIcon,
@@ -39,6 +40,7 @@ const OPERATE: NavLink[] = [
   { href: "/", label: "Fleet", icon: Radar },
   { href: "/sessions", label: "Sessions", icon: MessageSquare },
   { href: "/workspaces", label: "Workspaces", icon: FolderGit2 },
+  { href: "/usage", label: "Usage", icon: CircleDollarSign },
 ];
 
 const CONFIGURE: NavLink[] = [

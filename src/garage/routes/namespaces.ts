@@ -13,25 +13,55 @@ import type { KeyStore } from "../auth/key-store.ts";
 import type { GarageConfig } from "../config.ts";
 import type { Namespace, NamespaceDto, CreateNamespaceInput, CreateNamespaceKeyInput } from "../types.ts";
 import { json, errorJson, readJson } from "../respond.ts";
+import { listSessions } from "../../agent/sessions.ts";
+import { type UsageTotals, emptyTotals, addToTotals } from "../../agent/usage.ts";
 
 export interface NamespaceControlRoutes {
   create(req: Request): Promise<Response>;
-  list(): Response;
+  list(): Promise<Response>;
   get(id: string): Promise<Response>;
   destroy(id: string, req: Request): Promise<Response>;
   createKey(id: string, req: Request): Promise<Response>;
   listKeys(id: string): Promise<Response>;
 }
 
-function toDto(store: NamespaceStore, ns: Namespace, sessionCount?: number): NamespaceDto {
+interface NsUsage {
+  count: number;
+  totals: UsageTotals;
+}
+
+function toDto(store: NamespaceStore, ns: Namespace, usage?: NsUsage): NamespaceDto {
   return {
     id: ns.id,
     name: ns.name,
     slug: ns.slug,
     created_at: ns.createdAt,
     is_default: store.isDefault(ns.id),
-    ...(sessionCount !== undefined ? { session_count: sessionCount } : {}),
+    ...(usage
+      ? {
+          session_count: usage.count,
+          tokens_in: usage.totals.tokensIn,
+          tokens_out: usage.totals.tokensOut,
+          cost_usd: usage.totals.costUsd,
+          cost_known: usage.totals.costKnown,
+        }
+      : {}),
   };
+}
+
+/**
+ * Coarse per-namespace token + cost rollup read straight from the on-disk
+ * session snapshots (no manager build). Near-live because the store flushes
+ * after every token delta; the per-namespace detail uses the live manager.
+ */
+async function nsUsage(ns: Namespace): Promise<NsUsage> {
+  const totals = emptyTotals();
+  let count = 0;
+  for (const info of await listSessions(ns.dataDir, { kind: "all" })) {
+    count++;
+    addToTotals(totals, info.usageTotals);
+  }
+  return { count, totals };
 }
 
 /** rm a path only when it resolves strictly UNDER `root` (never the root itself). */
@@ -66,15 +96,15 @@ export function namespaceControlRoutes(
       }
       try {
         const ns = store.create(body);
-        return json(toDto(store, ns, 0), 201);
+        return json(toDto(store, ns, { count: 0, totals: emptyTotals() }), 201);
       } catch (err) {
         if (err instanceof NamespaceError) return errorJson("namespace_error", err.message, 400);
         throw err;
       }
     },
 
-    list(): Response {
-      const namespaces = store.list().map((ns) => toDto(store, ns));
+    async list(): Promise<Response> {
+      const namespaces = await Promise.all(store.list().map(async (ns) => toDto(store, ns, await nsUsage(ns))));
       return json({ namespaces, total: namespaces.length });
     },
 
@@ -82,7 +112,11 @@ export function namespaceControlRoutes(
       const ns = store.get(id);
       if (!ns) return notFound(id);
       const sessions = await registry.resolve(id).manager.list();
-      return json(toDto(store, ns, sessions.length));
+      const totals = emptyTotals();
+      for (const s of sessions) {
+        addToTotals(totals, { tokensIn: s.tokens_in, tokensOut: s.tokens_out, costUsd: s.cost_usd, costKnown: s.cost_known });
+      }
+      return json(toDto(store, ns, { count: sessions.length, totals }));
     },
 
     async destroy(id, req): Promise<Response> {
