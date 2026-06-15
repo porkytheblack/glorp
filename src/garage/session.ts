@@ -257,10 +257,15 @@ export class GarageSession {
     return this.handle;
   }
 
-  /** Read-only state queries without building the model adapter. */
+  /** Read-only state queries without building the model adapter. Resolves the
+   *  actual snapshot path (folder or legacy flat layout) so dormant reads see
+   *  the real persisted state, not an empty store at the wrong path. */
   peekStore(): GlorpStore {
     if (this.handle) return this.handle.store;
-    if (!this.readStore) this.readStore = new GlorpStore(this.id, this.init.dataDir);
+    if (!this.readStore) {
+      const filePath = resolveSessionPaths(this.init.dataDir, this.id).storeFile;
+      this.readStore = new GlorpStore(this.id, this.init.dataDir, { filePath });
+    }
     return this.readStore;
   }
 

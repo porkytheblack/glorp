@@ -10,6 +10,10 @@ export class SessionStats {
   title: string | null = null;
   tokensIn = 0;
   tokensOut = 0;
+  /** Cumulative estimated USD cost (catalog list pricing). */
+  costUsd = 0;
+  /** False once any attributed model lacked a catalog price. */
+  costKnown = true;
   turnCount = 0;
   busy = false;
   /**
@@ -38,11 +42,15 @@ export class SessionStats {
         this.title = ev.title;
         this.tokensIn = ev.stats.tokens_in;
         this.tokensOut = ev.stats.tokens_out;
+        this.costUsd = ev.stats.cost_usd ?? 0;
+        this.costKnown = ev.stats.cost_known ?? true;
         this.turnCount = ev.stats.turns;
         break;
       case "stats":
         this.tokensIn = ev.stats.tokens_in;
         this.tokensOut = ev.stats.tokens_out;
+        this.costUsd = ev.stats.cost_usd ?? 0;
+        this.costKnown = ev.stats.cost_known ?? true;
         this.turnCount = ev.stats.turns;
         break;
     }

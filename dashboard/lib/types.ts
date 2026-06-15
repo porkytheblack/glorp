@@ -10,6 +10,10 @@ export interface NamespaceDto {
   created_at: string;
   is_default: boolean;
   session_count?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+  cost_usd?: number;
+  cost_known?: boolean;
 }
 
 export interface WorkspaceDto {
@@ -18,6 +22,10 @@ export interface WorkspaceDto {
   path: string;
   created_at: string;
   session_count: number;
+  tokens_in: number;
+  tokens_out: number;
+  cost_usd: number;
+  cost_known: boolean;
 }
 
 export interface SessionDto {
@@ -35,9 +43,60 @@ export interface SessionDto {
   loaded: boolean;
   tokens_in: number;
   tokens_out: number;
+  cost_usd: number;
+  cost_known: boolean;
   turn_count: number;
   error: string | null;
   custom_credentials: { provider: string; last4: string } | null;
+}
+
+/** One model's slice of token + cost usage (GET /usage, /sessions/:id/usage). */
+export interface ModelUsageDto {
+  provider_id: string;
+  model: string;
+  label: string | null;
+  tokens_in: number;
+  tokens_out: number;
+  requests: number;
+  cost_usd: number;
+  cost_known: boolean;
+}
+
+export interface UsageTotalsDto {
+  tokens_in: number;
+  tokens_out: number;
+  cost_usd: number;
+  cost_known: boolean;
+}
+
+/** GET /sessions/:id/usage */
+export interface SessionUsageDto {
+  session_id: string;
+  totals: UsageTotalsDto;
+  models: ModelUsageDto[];
+}
+
+export interface WorkspaceUsageDto {
+  workspace_id: string | null;
+  name: string;
+  totals: UsageTotalsDto;
+}
+
+export interface SessionUsageLineDto {
+  session_id: string;
+  title: string | null;
+  workspace_id: string | null;
+  model_label: string | null;
+  totals: UsageTotalsDto;
+}
+
+/** GET /usage — the namespace-wide spend rollup. */
+export interface NamespaceUsageDto {
+  namespace: string;
+  totals: UsageTotalsDto;
+  by_model: ModelUsageDto[];
+  by_workspace: WorkspaceUsageDto[];
+  by_session: SessionUsageLineDto[];
 }
 
 export interface AgentInfo {
@@ -222,6 +281,10 @@ export interface SessionStats {
   tokens_in: number;
   tokens_out: number;
   contextPct: number;
+  /** Cumulative estimated USD cost (catalog list pricing). */
+  cost_usd?: number;
+  /** False when any attributed model lacked a catalog price. */
+  cost_known?: boolean;
 }
 
 export interface DisplaySlot {

@@ -114,6 +114,9 @@ export function createGarageRouter(
       const task = matchTaskRoute(req, pathname, g);
       if (task) return task;
 
+      // --- Usage / spend rollup (per-namespace) ---
+      if (pathname === "/usage" && m === "GET") return g.usage.namespace();
+
       // --- Sessions (per-namespace) ---
       if (pathname === "/sessions") {
         if (m === "POST") return g.sessions.create(req);
@@ -163,6 +166,9 @@ function routeSubpath(req: Request, m: RegExpMatchArray, g: RouteGroups): Promis
       break;
     case "result":
       if (method === "GET") return g.state.result(id);
+      break;
+    case "usage":
+      if (method === "GET" && !rest) return g.usage.session(id);
       break;
     case "plan":
       if (method === "GET") return g.state.plan(id);

@@ -1,9 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Activity, CircleDashed, FolderGit2, Gauge } from "lucide-react";
+import { Activity, CircleDashed, FolderGit2, CircleDollarSign } from "lucide-react";
 import { useQuery } from "@/lib/hooks";
-import { compact } from "@/lib/format";
+import { compact, usd } from "@/lib/format";
 import { ErrorState } from "@/components/shared";
 import { Metric } from "@/components/primitives";
 import { LaunchComposer } from "@/components/fleet/launch";
@@ -30,6 +30,8 @@ export default function FleetPage() {
   const idle = live.filter((s) => s.state === "idle").length;
   const wsCount = workspaces.data?.workspaces?.length ?? 0;
   const tokensOut = live.reduce((n, s) => n + (s.tokens_out ?? 0), 0);
+  const spend = live.reduce((n, s) => n + (s.cost_usd ?? 0), 0);
+  const spendKnown = live.every((s) => s.cost_known !== false);
   const ready = !sessions.loading || all.length > 0;
   const v = (n: number) => (ready ? n : "—");
 
@@ -73,7 +75,7 @@ export default function FleetPage() {
             <Metric label="Running" value={v(running)} icon={Activity} tone="success" hint="busy or provisioning" />
             <Metric label="Idle" value={v(idle)} icon={CircleDashed} hint="loaded, awaiting work" />
             <Metric label="Workspaces" value={ready ? wsCount : "—"} icon={FolderGit2} hint="in this namespace" />
-            <Metric label="Tokens out" value={ready ? compact(tokensOut) : "—"} icon={Gauge} tone="brand" hint="across live sessions" />
+            <Metric label="Spend" value={ready ? usd(spend, spendKnown) : "—"} icon={CircleDollarSign} tone="brand" hint={`est. · ${compact(tokensOut)} tokens out`} />
           </div>
         )}
 

@@ -1,6 +1,7 @@
 import type { GlorpStore } from "../store.ts";
 import type { BridgeEvent } from "../../shared/events.ts";
 import type { InboxEntry, TaskItem } from "../../shared/events.ts";
+import { totalsOf } from "../usage.ts";
 
 interface Bridge {
   emit(event: BridgeEvent): void;
@@ -17,6 +18,7 @@ export function createRefreshers(
       const counts = await store.getTokenCounts();
       const turns = await store.getTurnCount();
       const total = counts.in + counts.out;
+      const usage = totalsOf(store.getUsage());
       bridge.emit({
         type: "stats",
         stats: {
@@ -24,6 +26,8 @@ export function createRefreshers(
           tokens_in: counts.in,
           tokens_out: counts.out,
           contextPct: Math.min(100, Math.round((total / limitOf()) * 100)),
+          cost_usd: usage.costUsd,
+          cost_known: usage.costKnown,
         },
       });
     } catch {}

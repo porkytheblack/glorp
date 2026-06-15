@@ -1,7 +1,7 @@
 "use client";
 
 import { FolderGit2, Trash2 } from "lucide-react";
-import { timeAgo } from "@/lib/format";
+import { timeAgo, usd } from "@/lib/format";
 import { ConfirmButton } from "@/components/shared";
 import type { WorkspaceDto } from "@/lib/types";
 
@@ -25,6 +25,7 @@ export function WorkspaceRow({ w, onDelete }: { w: WorkspaceDto; onDelete: (id: 
           <span className="text-faint">no sessions</span>
         )}
       </span>
+      <span className="tnum hidden w-16 shrink-0 text-right text-[12px] text-brand sm:block" title="estimated cost (catalog list price)">{usd(w.cost_usd, w.cost_known)}</span>
       <span className="tnum hidden w-12 shrink-0 text-right text-[12px] text-faint md:block">{timeAgo(w.created_at)}</span>
       <div className="flex shrink-0 justify-end">
         <ConfirmButton label="" icon={Trash2} onConfirm={() => onDelete(w.id)} />

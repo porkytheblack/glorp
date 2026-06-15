@@ -89,6 +89,15 @@ export async function activateAgent(
   const isMain = spec.id === MAIN_AGENT_ID;
   const storeFile = isMain ? deps.paths.storeFile : agentStoreFile(deps.paths, spec.id);
   const store = new GlorpStore(spec.storeId, deps.dataDir, { workspace: deps.workspace, filePath: storeFile });
+  // Attribute this agent's token deltas to the picked model (with its catalog
+  // price) so the per-model usage ledger reflects the model actually running —
+  // including mid-session profile swaps, which re-run this path.
+  store.setActiveModel({
+    providerId: picked.providerId,
+    model: picked.model,
+    label: picked.label,
+    cost: picked.modelInfo?.cost,
+  });
   const resources = isMain
     ? deps.sessionResources
     : createSessionResources(deps.dataDir, spec.storeId, agentResourcesFile(deps.paths, spec.id));

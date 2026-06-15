@@ -26,6 +26,12 @@ const _assertions: [
   Equal<C.CreateWorkspaceInput, T.CreateWorkspaceInput>,
   Equal<C.CreateSessionInput, T.CreateSessionInput>,
   Equal<C.SessionDto, T.SessionDto>,
+  Equal<C.ModelUsageDto, T.ModelUsageDto>,
+  Equal<C.UsageTotalsDto, T.UsageTotalsDto>,
+  Equal<C.SessionUsageDto, T.SessionUsageDto>,
+  Equal<C.WorkspaceUsageDto, T.WorkspaceUsageDto>,
+  Equal<C.SessionUsageLineDto, T.SessionUsageLineDto>,
+  Equal<C.NamespaceUsageDto, T.NamespaceUsageDto>,
   Equal<C.McpIdentityInput, T.McpIdentityInput>,
   Equal<C.ProvisionMcpInput, T.ProvisionMcpInput>,
   Equal<C.McpSyncDiff, T.McpSyncDiff>,
@@ -34,6 +40,6 @@ const _assertions: [
   Equal<C.TemplateSummaryDto, T.TemplateSummaryDto>,
   Equal<C.StorageConfigDto, T.StorageConfigDto>,
   Equal<C.UpdateStorageConfigInput, T.UpdateStorageConfigInput>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
 
 void _assertions;

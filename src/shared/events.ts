@@ -88,6 +88,11 @@ export interface AgentStats {
   tokens_in: number;
   tokens_out: number;
   contextPct: number;
+  /** Cumulative estimated USD cost from catalog list pricing. Optional so older
+   *  producers/consumers stay valid; absent ⇒ treat as 0. */
+  cost_usd?: number;
+  /** False when any attributed model lacked a catalog price (cost is a floor). */
+  cost_known?: boolean;
 }
 
 export interface RunnerAgentStats {

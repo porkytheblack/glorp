@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useQuery } from "@/lib/hooks";
 import { api } from "@/lib/api";
 import { Page, PageHeader, Loading, EmptyState, ErrorState, SessionStatus, ConfirmButton } from "@/components/shared";
-import { timeAgo, compact } from "@/lib/format";
+import { timeAgo, compact, usd } from "@/lib/format";
 import { NewSessionDialog } from "@/components/session/new-session-dialog";
 import type { SessionDto, WorkspaceDto, ProfileDto } from "@/lib/types";
 
@@ -29,6 +29,7 @@ function SessionRow({ s, onOpen, onDelete }: { s: SessionDto; onOpen: () => void
         <div className="truncate text-[13.5px] text-foreground">{s.title ?? "Untitled session"}</div>
         <div className="truncate text-[11.5px] text-faint">{s.model_label ?? "Default model"}</div>
       </div>
+      <span className="tnum hidden w-16 shrink-0 text-right text-[12px] text-brand sm:block" title="estimated cost (catalog list price)">{usd(s.cost_usd, s.cost_known)}</span>
       <span className="tnum hidden w-16 shrink-0 text-right text-[12px] text-muted-foreground sm:block">{compact(tokens)} tok</span>
       <span className="tnum hidden w-12 shrink-0 text-right text-[12px] text-faint md:block">{s.turn_count} {s.turn_count === 1 ? "turn" : "turns"}</span>
       <span className="tnum w-12 shrink-0 text-right text-[12px] text-faint">{timeAgo(s.last_activity)}</span>

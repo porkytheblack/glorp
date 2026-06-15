@@ -10,6 +10,16 @@ import { deriveProjectId } from "./workspace-id.ts";
 import { sessionMigrator, CURRENT_SESSION_VERSION } from "./migrations/session-store.ts";
 import { repairToolFlow, toolFlowIsClean } from "./runtime/tool-flow-repair.ts";
 import type { VerificationTracker } from "./runtime/verification-tracker.ts";
+import type { ModelCost } from "./model-catalog.ts";
+import { type ModelUsage, modelKey, tokenCostUsd, coerceModelUsage } from "./usage.ts";
+
+/** The model an `addTokens` delta is attributed to, with its catalog price. */
+interface ActiveModel {
+  providerId: string;
+  model: string;
+  label?: string;
+  cost?: ModelCost;
+}
 
 export class GlorpStore implements StoreAdapter {
   identifier: string;
@@ -21,6 +31,10 @@ export class GlorpStore implements StoreAdapter {
   private titleUpdatedAt: string | null = null;
   private tokensIn = 0;
   private tokensOut = 0;
+  /** Per-(provider, model) usage ledger. Keyed by `modelKey`. */
+  private usage = new Map<string, ModelUsage>();
+  /** Model that `addTokens` attributes to until the next `setActiveModel`. */
+  private activeModel: ActiveModel | null = null;
   private turnCount = 0;
   private plan: PlanDocument | null = null;
   private tasks: Task[] = [];
@@ -71,6 +85,7 @@ export class GlorpStore implements StoreAdapter {
       this.titleUpdatedAt = snap.titleUpdatedAt ?? null;
       this.tokensIn = snap.tokensIn ?? 0;
       this.tokensOut = snap.tokensOut ?? 0;
+      this.usage = loadUsage(snap.usage);
       this.turnCount = snap.turnCount ?? 0;
       this.plan = snap.plan ?? null;
       this.tasks = snap.tasks ?? [];
@@ -125,6 +140,7 @@ export class GlorpStore implements StoreAdapter {
       titleUpdatedAt: this.titleUpdatedAt,
       tokensIn: this.tokensIn,
       tokensOut: this.tokensOut,
+      usage: Object.fromEntries(this.usage),
       turnCount: this.turnCount,
       plan: this.plan,
       tasks: this.tasks,
@@ -197,10 +213,50 @@ export class GlorpStore implements StoreAdapter {
     return { in: this.tokensIn, out: this.tokensOut };
   }
 
+  /**
+   * Set the model that subsequent {@link addTokens} deltas are attributed to.
+   * Called when the agent is (re)built and again on every profile swap, so a
+   * session that switches models mid-chain accrues a separate ledger bucket per
+   * model. The `cost` is the catalog price record used to value each delta.
+   */
+  setActiveModel(model: ActiveModel): void {
+    this.activeModel = model;
+  }
+
+  /** Snapshot of the per-model usage ledger (cheap, synchronous). */
+  getUsage(): ModelUsage[] {
+    return [...this.usage.values()].map((u) => ({ ...u }));
+  }
+
+  /** Synchronous snapshot of the persisted counters — lets a DTO read a
+   *  dormant (unbuilt) session's totals straight off the loaded store. */
+  countersSync(): { tokensIn: number; tokensOut: number; turnCount: number } {
+    return { tokensIn: this.tokensIn, tokensOut: this.tokensOut, turnCount: this.turnCount };
+  }
+
   async addTokens(args: TokenConsumptionCounter): Promise<void> {
     this.tokensIn += args.tokens_in;
     this.tokensOut += args.tokens_out;
+    this.recordModelUsage(args.tokens_in, args.tokens_out);
     this.scheduleFlush();
+  }
+
+  /** Fold one token delta into the active model's ledger bucket. */
+  private recordModelUsage(tokensIn: number, tokensOut: number): void {
+    const m = this.activeModel ?? { providerId: "unknown", model: "unknown" };
+    const key = modelKey(m.providerId, m.model);
+    let bucket = this.usage.get(key);
+    if (!bucket) {
+      bucket = { providerId: m.providerId, model: m.model, label: m.label, tokensIn: 0, tokensOut: 0, requests: 0, costUsd: 0, costKnown: true };
+      this.usage.set(key, bucket);
+    }
+    bucket.tokensIn += tokensIn;
+    bucket.tokensOut += tokensOut;
+    bucket.requests += 1;
+    const c = tokenCostUsd(tokensIn, tokensOut, this.activeModel?.cost);
+    bucket.costUsd += c.usd;
+    if (!c.known) bucket.costKnown = false;
+    if (!bucket.label && m.label) bucket.label = m.label;
   }
 
   async getTurnCount(): Promise<number> { return this.turnCount; }
@@ -209,6 +265,7 @@ export class GlorpStore implements StoreAdapter {
   async resetCounters(): Promise<void> {
     this.tokensIn = 0;
     this.tokensOut = 0;
+    this.usage.clear();
     this.turnCount = 0;
     this.scheduleFlush();
   }
@@ -300,6 +357,17 @@ export class GlorpStore implements StoreAdapter {
       metadata: { kind: "subagent", parentSessionId: this.identifier, namespace, triggerMessageId: trigger.id, triggerMessageIndex: trigger.index, triggerMessageText: trigger.text, durable, createdAt: new Date().toISOString() },
     });
   }
+}
+
+/** Rehydrate the persisted usage ledger, dropping any malformed entries. */
+function loadUsage(raw: Record<string, unknown> | undefined): Map<string, ModelUsage> {
+  const out = new Map<string, ModelUsage>();
+  if (!raw || typeof raw !== "object") return out;
+  for (const value of Object.values(raw)) {
+    const u = coerceModelUsage(value);
+    if (u) out.set(modelKey(u.providerId, u.model), u);
+  }
+  return out;
 }
 
 function cleanTitle(title: unknown): string | null {

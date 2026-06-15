@@ -3,12 +3,13 @@
 import * as React from "react";
 import { FolderGit2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { compact, timeAgo, baseName } from "@/lib/format";
+import { compact, timeAgo, baseName, usd } from "@/lib/format";
 import { CopyButton } from "@/components/shared";
+import { useQuery } from "@/lib/hooks";
 import { TaskList } from "@/components/chat/task-list";
 import { AgentRoster } from "@/components/session/agent-roster";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import type { SessionDto, SessionStats, TaskItem, AgentInfo } from "@/lib/types";
+import type { SessionDto, SessionStats, SessionUsageDto, TaskItem, AgentInfo } from "@/lib/types";
 import { FilesPanel } from "./files-panel";
 
 const MODE_LABEL: Record<string, string> = {
@@ -65,6 +66,32 @@ function ContextMeter({ pct }: { pct: number }) {
         <div className={cn("h-full rounded-full transition-all", hot ? "bg-warning" : "bg-brand")} style={{ width: `${v}%` }} />
       </div>
     </div>
+  );
+}
+
+/** Per-model token + cost breakdown for the chain of models this session used. */
+function ModelsSection({ sessionId, refresh }: { sessionId: string; refresh?: boolean }) {
+  const { data } = useQuery<SessionUsageDto>(`/sessions/${sessionId}/usage`, [refresh], 6000);
+  const models = data?.models ?? [];
+  if (models.length === 0) return null;
+  return (
+    <Section eyebrow="Models" count={models.length > 1 ? models.length : null}>
+      <div className="space-y-2.5">
+        {models.map((m) => (
+          <div key={`${m.provider_id}/${m.model}`} className="flex items-baseline justify-between gap-3 text-[12.5px]">
+            <div className="min-w-0">
+              <div className="truncate text-foreground">{m.label ?? m.model}</div>
+              <div className="truncate text-[11px] text-faint">
+                {compact(m.tokens_in)} in · {compact(m.tokens_out)} out · {m.requests} {m.requests === 1 ? "call" : "calls"}
+              </div>
+            </div>
+            <span className="tnum shrink-0 text-right text-foreground" title={m.cost_known ? "catalog list price" : "no catalog price — token count only"}>
+              {usd(m.cost_usd, m.cost_known)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Section>
   );
 }
 
@@ -135,6 +162,7 @@ export function Inspector({
         </div>
         <Row label="Turns">{stats ? stats.turns : session.turn_count}</Row>
         <Row label="Tokens">{stats ? `${compact(stats.tokens_in)} in · ${compact(stats.tokens_out)} out` : "—"}</Row>
+        <Row label="Cost">{costLabel(stats, session)}</Row>
         {stats && <ContextMeter pct={stats.contextPct} />}
         <Row label="Last activity">{timeAgo(session.last_activity)}</Row>
         <div className="mt-2.5 flex items-center justify-between gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 shadow-sheen">
@@ -142,7 +170,15 @@ export function Inspector({
           <CopyButton value={session.id} />
         </div>
       </Section>
+      <ModelsSection sessionId={session.id} refresh={busyRefresh} />
       <FilesPanel sessionId={session.id} refresh={busyRefresh} />
     </div>
   );
+}
+
+/** Prefer the live stats cost; fall back to the polled session DTO. */
+function costLabel(stats: SessionStats | null, session: SessionDto): string {
+  const cost = stats?.cost_usd ?? session.cost_usd;
+  const known = stats?.cost_known ?? session.cost_known;
+  return usd(cost, known);
 }
