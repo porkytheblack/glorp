@@ -41,12 +41,20 @@ export interface Snapshot {
   messages: Message[];
   title?: string | null;
   titleUpdatedAt?: string | null;
+  /** Context-window token counters (reset on every compaction). */
   tokensIn: number;
   tokensOut: number;
+  /** Session-cumulative token counters (survive compaction). Absent on
+   *  pre-cumulative snapshots — back-filled from the flat counters on load. */
+  cumTokensIn?: number;
+  cumTokensOut?: number;
   /** Per-(provider, model) usage ledger with catalog-priced cost. Absent on
    *  snapshots written before usage tracking — treated as an empty ledger. */
   usage?: Record<string, ModelUsage>;
+  /** Context-window turn count (reset on compaction). */
   turnCount: number;
+  /** Session-cumulative turn count (survives compaction). */
+  cumTurnCount?: number;
   plan?: PlanDocument | null;
   tasks: Task[];
   permissions: Record<string, PermissionStatus>;

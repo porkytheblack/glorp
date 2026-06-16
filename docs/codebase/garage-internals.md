@@ -204,6 +204,21 @@ or deltas attributed to a model with no catalog price. Two spend sources are
 calls (`title.ts` prompts the model directly, bypassing `addTokens`) and
 subagent / roster-agent / fleet usage (separate stores, not yet rolled up).
 
+**Window vs cumulative (the compaction trap).** glove-core's Observer uses
+`store.getTokenCount()` as its context-fill gauge and calls `store.resetCounters()`
+on *every* compaction (`runCompactionNow`). So the store keeps two sets of
+counters: WINDOW (`tokensIn`/`tokensOut`/`turnCount`, reset on compaction —
+feeds `getTokenCount`/`getTokenCounts` and the `contextPct` meter) and CUMULATIVE
+(`cumTokensIn`/`cumTokensOut`/`cumTurnCount` + the per-model `usage` ledger, never
+reset — feeds `countersSync()`, the session token/cost totals, and the rollups).
+`resetCounters` zeroes only the window set. Token/cost figures shown anywhere are
+cumulative; only the context meter is window. (Pre-cumulative snapshots back-fill
+the cumulative counters from the flat window value on load — exact for a
+never-compacted session, a floor otherwise.) Caveat: glove-core's compaction
+*input* (the history it summarizes) is billed by the provider but never reaches
+`addTokens` — only the summary's output tokens are added — so cost slightly
+under-counts per compaction.
+
 ### control.ts — live-session control
 Operates on the *live* handle (`session.current()`); returns 409 `not_active` when
 the session isn't in memory. `abort` is a no-op for non-live sessions

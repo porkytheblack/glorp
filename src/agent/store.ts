@@ -29,13 +29,24 @@ export class GlorpStore implements StoreAdapter {
   private messages: Message[] = [];
   private title: string | null = null;
   private titleUpdatedAt: string | null = null;
+  /** Context-WINDOW token counters. glove-core's Observer uses getTokenCount()
+   *  as its compaction gauge and RESETS these on every compaction, so they only
+   *  ever reflect usage since the last compaction — never the session total. */
   private tokensIn = 0;
   private tokensOut = 0;
-  /** Per-(provider, model) usage ledger. Keyed by `modelKey`. */
+  /** Session-CUMULATIVE token counters. Never reset by compaction — the true
+   *  running total of everything the provider billed for this session. */
+  private cumTokensIn = 0;
+  private cumTokensOut = 0;
+  /** Per-(provider, model) usage ledger. Keyed by `modelKey`. Cumulative —
+   *  survives compaction (the source of truth for session cost). */
   private usage = new Map<string, ModelUsage>();
   /** Model that `addTokens` attributes to until the next `setActiveModel`. */
   private activeModel: ActiveModel | null = null;
+  /** Context-window turn count (reset on compaction, drives glove MAX_TURNS). */
   private turnCount = 0;
+  /** Session-cumulative turn count, for display. Never reset by compaction. */
+  private cumTurnCount = 0;
   private plan: PlanDocument | null = null;
   private tasks: Task[] = [];
   private permissions = new Map<string, PermissionStatus>();
@@ -85,8 +96,14 @@ export class GlorpStore implements StoreAdapter {
       this.titleUpdatedAt = snap.titleUpdatedAt ?? null;
       this.tokensIn = snap.tokensIn ?? 0;
       this.tokensOut = snap.tokensOut ?? 0;
+      // Back-fill cumulative from the flat counters for pre-cumulative snapshots:
+      // exact for never-compacted sessions, a floor for compacted ones (the flat
+      // value is the post-compaction remnant) — both beat starting from 0.
+      this.cumTokensIn = snap.cumTokensIn ?? snap.tokensIn ?? 0;
+      this.cumTokensOut = snap.cumTokensOut ?? snap.tokensOut ?? 0;
       this.usage = loadUsage(snap.usage);
       this.turnCount = snap.turnCount ?? 0;
+      this.cumTurnCount = snap.cumTurnCount ?? snap.turnCount ?? 0;
       this.plan = snap.plan ?? null;
       this.tasks = snap.tasks ?? [];
       this.permissions = new Map(Object.entries(snap.permissions ?? {}));
@@ -140,8 +157,11 @@ export class GlorpStore implements StoreAdapter {
       titleUpdatedAt: this.titleUpdatedAt,
       tokensIn: this.tokensIn,
       tokensOut: this.tokensOut,
+      cumTokensIn: this.cumTokensIn,
+      cumTokensOut: this.cumTokensOut,
       usage: Object.fromEntries(this.usage),
       turnCount: this.turnCount,
+      cumTurnCount: this.cumTurnCount,
       plan: this.plan,
       tasks: this.tasks,
       permissions: Object.fromEntries(this.permissions),
@@ -208,9 +228,15 @@ export class GlorpStore implements StoreAdapter {
     }
     this.scheduleFlush();
   }
+  /** WINDOW token total — glove-core's compaction gauge (reset on compaction). */
   async getTokenCount(): Promise<number> { return this.tokensIn + this.tokensOut; }
+  /** WINDOW counts — drives the context-fill meter (reset on compaction). */
   async getTokenCounts(): Promise<{ in: number; out: number }> {
     return { in: this.tokensIn, out: this.tokensOut };
+  }
+  /** CUMULATIVE counts — the session total for display + cost (survives compaction). */
+  cumulativeCounts(): { in: number; out: number } {
+    return { in: this.cumTokensIn, out: this.cumTokensOut };
   }
 
   /**
@@ -228,15 +254,17 @@ export class GlorpStore implements StoreAdapter {
     return [...this.usage.values()].map((u) => ({ ...u }));
   }
 
-  /** Synchronous snapshot of the persisted counters — lets a DTO read a
-   *  dormant (unbuilt) session's totals straight off the loaded store. */
+  /** Synchronous snapshot of the session-CUMULATIVE counters — lets a DTO read a
+   *  dormant (unbuilt) session's running totals straight off the loaded store. */
   countersSync(): { tokensIn: number; tokensOut: number; turnCount: number } {
-    return { tokensIn: this.tokensIn, tokensOut: this.tokensOut, turnCount: this.turnCount };
+    return { tokensIn: this.cumTokensIn, tokensOut: this.cumTokensOut, turnCount: this.cumTurnCount };
   }
 
   async addTokens(args: TokenConsumptionCounter): Promise<void> {
     this.tokensIn += args.tokens_in;
     this.tokensOut += args.tokens_out;
+    this.cumTokensIn += args.tokens_in;
+    this.cumTokensOut += args.tokens_out;
     this.recordModelUsage(args.tokens_in, args.tokens_out);
     this.scheduleFlush();
   }
@@ -260,12 +288,18 @@ export class GlorpStore implements StoreAdapter {
   }
 
   async getTurnCount(): Promise<number> { return this.turnCount; }
-  async incrementTurn(): Promise<void> { this.turnCount++; this.scheduleFlush(); }
+  async incrementTurn(): Promise<void> { this.turnCount++; this.cumTurnCount++; this.scheduleFlush(); }
 
+  /**
+   * Reset the context-WINDOW counters. glove-core's Observer calls this on every
+   * compaction to clear its context gauge — so it must zero the window counters
+   * (and window turn count, which drives MAX_TURNS) but MUST NOT touch the
+   * session-cumulative counters or the per-model usage ledger, or the session's
+   * running token/cost totals would reset on every compaction.
+   */
   async resetCounters(): Promise<void> {
     this.tokensIn = 0;
     this.tokensOut = 0;
-    this.usage.clear();
     this.turnCount = 0;
     this.scheduleFlush();
   }

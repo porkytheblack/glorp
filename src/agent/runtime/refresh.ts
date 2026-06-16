@@ -15,19 +15,21 @@ export function createRefreshers(
   const limitOf = typeof contextLimit === "function" ? contextLimit : () => contextLimit;
   async function stats() {
     try {
-      const counts = await store.getTokenCounts();
-      const turns = await store.getTurnCount();
-      const total = counts.in + counts.out;
-      const usage = storeTotals(counts.in, counts.out, store.getUsage());
+      // Window counts drive the context-fill meter (they reset on compaction);
+      // cumulative counts + the ledger drive the session token/cost totals (they
+      // survive compaction). Showing the window here is what made totals read low.
+      const window = await store.getTokenCounts();
+      const cum = store.countersSync();
+      const totals = storeTotals(cum.tokensIn, cum.tokensOut, store.getUsage());
       bridge.emit({
         type: "stats",
         stats: {
-          turns,
-          tokens_in: counts.in,
-          tokens_out: counts.out,
-          contextPct: Math.min(100, Math.round((total / limitOf()) * 100)),
-          cost_usd: usage.costUsd,
-          cost_known: usage.costKnown,
+          turns: cum.turnCount,
+          tokens_in: totals.tokensIn,
+          tokens_out: totals.tokensOut,
+          contextPct: Math.min(100, Math.round(((window.in + window.out) / limitOf()) * 100)),
+          cost_usd: totals.costUsd,
+          cost_known: totals.costKnown,
         },
       });
     } catch {}

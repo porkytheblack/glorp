@@ -13,17 +13,18 @@ export async function hydrateUiSession(
   bridge: Bridge,
   contextLimit: number,
 ): Promise<void> {
-  const [messages, title, plan, tasks, inboxItems, counts, turns] = await Promise.all([
+  const [messages, title, plan, tasks, inboxItems, window] = await Promise.all([
     store.getDisplayMessages(),
     store.getTitle(),
     store.getPlan(),
     store.getTasks(),
     store.getInboxItems(),
     store.getTokenCounts(),
-    store.getTurnCount(),
   ]);
-  const total = counts.in + counts.out;
-  const usage = storeTotals(counts.in, counts.out, store.getUsage());
+  // Window counts feed the context meter (reset on compaction); cumulative
+  // counts + ledger feed the session token/cost totals (survive compaction).
+  const cum = store.countersSync();
+  const usage = storeTotals(cum.tokensIn, cum.tokensOut, store.getUsage());
   bridge.emit({
     type: "session_hydrate",
     turns: turnsFromMessages(messages),
@@ -46,10 +47,10 @@ export async function hydrateUiSession(
       resolvedAt: i.resolved_at,
     })),
     stats: {
-      turns,
-      tokens_in: counts.in,
-      tokens_out: counts.out,
-      contextPct: Math.min(100, Math.round((total / contextLimit) * 100)),
+      turns: cum.turnCount,
+      tokens_in: usage.tokensIn,
+      tokens_out: usage.tokensOut,
+      contextPct: Math.min(100, Math.round(((window.in + window.out) / contextLimit) * 100)),
       cost_usd: usage.costUsd,
       cost_known: usage.costKnown,
     },

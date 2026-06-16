@@ -91,8 +91,11 @@ export async function listSessions(
         inboxItems?: Array<{ status?: string }>;
         tokensIn?: number;
         tokensOut?: number;
+        cumTokensIn?: number;
+        cumTokensOut?: number;
         usage?: Record<string, unknown>;
         turnCount?: number;
+        cumTurnCount?: number;
         metadata?: { workspace?: string; projectId?: string; kind?: string };
       };
       if (!Array.isArray(snap.messages)) continue; // not a session transcript
@@ -111,6 +114,10 @@ export async function listSessions(
       const usage = Object.values(snap.usage ?? {})
         .map(coerceModelUsage)
         .filter((u): u is ModelUsage => u !== null);
+      // Session-cumulative totals (back-filled from the flat window counters for
+      // pre-cumulative snapshots) — never the post-compaction window remnant.
+      const cumIn = snap.cumTokensIn ?? snap.tokensIn ?? 0;
+      const cumOut = snap.cumTokensOut ?? snap.tokensOut ?? 0;
       results.push({
         id,
         title: typeof snap.title === "string" && snap.title.trim() ? snap.title.trim() : null,
@@ -120,12 +127,12 @@ export async function listSessions(
         totalMessages: msgs.length,
         taskCount: snap.tasks?.length ?? 0,
         pendingInboxCount: (snap.inboxItems ?? []).filter((i) => i.status === "pending").length,
-        tokenCount: (snap.tokensIn ?? 0) + (snap.tokensOut ?? 0),
-        tokensIn: snap.tokensIn ?? 0,
-        tokensOut: snap.tokensOut ?? 0,
+        tokenCount: cumIn + cumOut,
+        tokensIn: cumIn,
+        tokensOut: cumOut,
         usage,
-        usageTotals: storeTotals(snap.tokensIn ?? 0, snap.tokensOut ?? 0, usage),
-        turnCount: snap.turnCount ?? 0,
+        usageTotals: storeTotals(cumIn, cumOut, usage),
+        turnCount: snap.cumTurnCount ?? snap.turnCount ?? 0,
         lastActivity: stat.mtime,
         workspace: snapWorkspace,
         projectId: snapProjectId,

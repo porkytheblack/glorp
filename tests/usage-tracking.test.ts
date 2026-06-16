@@ -110,13 +110,39 @@ describe("GlorpStore usage ledger", () => {
     expect(usage[0]!.costUsd).toBeCloseTo(3, 6);
   });
 
-  test("resetCounters clears the ledger", async () => {
+  test("compaction (resetCounters) zeroes the window but keeps cumulative + ledger", async () => {
     const store = new GlorpStore("s5", dataDir);
     store.setActiveModel({ providerId: "anthropic", model: "opus", cost: { input: 3, output: 15 } });
     await store.addTokens({ tokens_in: 1000, tokens_out: 1000 });
+
+    // glove-core calls resetCounters() on every compaction.
     await store.resetCounters();
+
+    // Window gauge resets (drives the next compaction decision)…
+    expect(await store.getTokenCount()).toBe(0);
+    // …but the session-cumulative totals + per-model ledger survive.
+    expect(store.cumulativeCounts()).toEqual({ in: 1000, out: 1000 });
+    expect(store.getUsage()).toHaveLength(1);
+
+    // A post-compaction turn accrues on top of the cumulative total.
+    await store.addTokens({ tokens_in: 500, tokens_out: 200 });
     await store.flush();
-    expect(store.getUsage()).toHaveLength(0);
+    expect(await store.getTokenCount()).toBe(700); // window: only the new turn
+    expect(store.cumulativeCounts()).toEqual({ in: 1500, out: 1200 }); // cumulative: both
+    expect(totalsOf(store.getUsage()).tokensIn).toBe(1500);
+  });
+
+  test("cumulative totals survive a reload from disk", async () => {
+    const store = new GlorpStore("s6", dataDir);
+    store.setActiveModel({ providerId: "anthropic", model: "opus", cost: { input: 3, output: 15 } });
+    await store.addTokens({ tokens_in: 1000, tokens_out: 1000 });
+    await store.resetCounters(); // compaction
+    await store.flush();
+
+    const reopened = new GlorpStore("s6", dataDir);
+    expect(reopened.cumulativeCounts()).toEqual({ in: 1000, out: 1000 });
+    expect(await reopened.getTokenCount()).toBe(0); // window stays reset across reload
+    expect(reopened.getUsage()).toHaveLength(1);
   });
 });
 
