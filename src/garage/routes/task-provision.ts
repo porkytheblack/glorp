@@ -39,7 +39,9 @@ export function kickProvision(args: ProvisionArgs): void {
           params,
           permissionMode: permissionMode ?? "bypass",
         },
-        { task: { type: record.type } }, // trust-gated: never from a public body
+        // trust-gated: never from a public body. Carries the deliverable
+        // contract so the worker's sink can enforce it at deliver time.
+        { task: { type: record.type, deliverable: record.deliverable ?? null } },
       );
       if (record.callback_url) {
         attachTaskNotifier(

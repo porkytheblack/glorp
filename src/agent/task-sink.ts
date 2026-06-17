@@ -14,6 +14,11 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  validateDeliverable,
+  type DeliverableContract,
+  type DeliverableViolation,
+} from "./task-deliverable.ts";
 
 /** On-disk shape of a declared deliverable (`task-result.json`). */
 export interface DeliveredResult {
@@ -30,9 +35,21 @@ export interface ProgressNote {
   at: string;
 }
 
+/** Outcome of a `deliver_result` call: accepted (result persisted) or rejected
+ *  with the violations the agent must fix before the task can complete. */
+export type DeliverOutcome =
+  | { ok: true; files: string[] }
+  | { ok: false; violations: DeliverableViolation[] };
+
 export interface TaskSink {
-  /** Record the finished deliverable; returns the normalized uploads-relative files. */
-  deliver(input: { summary: string; files?: string[]; data?: unknown }): { files: string[] };
+  /**
+   * Record the finished deliverable. Validates declared files against the task's
+   * deliverable contract (and, always, that they exist): on any violation it
+   * returns `{ ok: false }` and writes NOTHING, so the task stays incomplete
+   * until the real artifact is produced. On success returns the normalized
+   * uploads-relative files.
+   */
+  deliver(input: { summary: string; files?: string[]; data?: unknown }): Promise<DeliverOutcome>;
   /** Post a non-blocking status note (latest wins). */
   progress(message: string): void;
 }
@@ -43,6 +60,8 @@ export interface TaskSinkOptions {
   workspace: string;
   /** Name of the file-exchange folder under the workspace (default "uploads"). */
   uploadsDir?: string;
+  /** The task type's deliverable contract — enforced at deliver time. */
+  deliverable?: DeliverableContract | null;
   now?: () => string;
 }
 
@@ -111,10 +130,34 @@ export function createTaskSink(opts: TaskSinkOptions): TaskSink {
   }
 
   return {
-    deliver(input) {
-      const files = (input.files ?? [])
-        .map((f) => intoUploads(f))
-        .filter((f): f is string => f !== null);
+    async deliver(input) {
+      // Resolve declared files into uploads/, tracking any that don't exist —
+      // never silently drop them (a dropped file is how a "video" task ends up
+      // delivering nothing or a stray JSON).
+      const files: string[] = [];
+      const missing: string[] = [];
+      for (const f of input.files ?? []) {
+        const rel = intoUploads(f);
+        if (rel !== null) files.push(rel);
+        else missing.push(f);
+      }
+
+      const contract = opts.deliverable ?? null;
+      let violations: DeliverableViolation[] = [];
+      if (contract) {
+        violations = await validateDeliverable({ contract, uploadsRoot, files, missing });
+      } else if (missing.length > 0) {
+        // No contract, but a declared file that doesn't exist is still a mistake
+        // the agent should fix rather than have silently swallowed.
+        violations = [{
+          code: "missing_files",
+          message:
+            `these declared deliverable files do not exist: ${missing.join(", ")} — ` +
+            "create them (or remove them from `files`) before delivering.",
+        }];
+      }
+      if (violations.length > 0) return { ok: false, violations };
+
       const result: DeliveredResult = {
         summary: input.summary,
         files,
@@ -122,7 +165,7 @@ export function createTaskSink(opts: TaskSinkOptions): TaskSink {
         delivered_at: now(),
       };
       writeJsonAtomic(opts.resultFile, result);
-      return { files };
+      return { ok: true, files };
     },
     progress(message) {
       writeJsonAtomic(opts.progressFile, { message, at: now() } satisfies ProgressNote);

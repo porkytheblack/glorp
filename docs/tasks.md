@@ -110,6 +110,17 @@ queued ──▶ working ──▶ completed
 `needs_input` takes precedence over `working`: when the agent is mid-turn but
 waiting on you, the task reports `needs_input`.
 
+**Deliverable contracts gate completion.** A task type whose template declares a
+`required` deliverable (see the template `deliverable` field) never projects as
+`completed` on a text reply alone — it stays `working` until the agent declares
+a real artifact that satisfies the contract (right file type, exists, passes the
+optional `verify` check). The worker's `deliver_result` call is rejected, with a
+specific reason, until then; this is what stops a "make a video" task from
+handing back a JSON storyboard or finishing with no file. Such a task remains
+`working` (its session kept alive) if the agent stops without producing the
+artifact, so you can nudge it with a follow-up message — see
+[Following up](#following-up-now-fix-x).
+
 ## Discovering task types
 
 Each type is a template with typed inputs. List them to build a form or to

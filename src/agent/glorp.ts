@@ -76,7 +76,12 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   // Task mode: the agent declares its deliverable through this sink (small JSON
   // files in the session folder), which the Garage Task API reads back.
   const taskSink = opts.task
-    ? createTaskSink({ resultFile: paths.taskResultFile, progressFile: paths.taskProgressFile, workspace: opts.workspace })
+    ? createTaskSink({
+        resultFile: paths.taskResultFile,
+        progressFile: paths.taskProgressFile,
+        workspace: opts.workspace,
+        deliverable: opts.task.deliverable ?? null,
+      })
     : undefined;
 
   const activationDeps: ActivationDeps = {

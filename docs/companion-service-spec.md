@@ -194,7 +194,16 @@ Garage appends `/{name}` (URL-encoded) for single fetches.
     { "provider": "linear", "url": "https://mcp.linear.app/mcp",
       "identities": [ { "name": "default",
         "headers": { "authorization": "Bearer {param:LINEAR_KEY}" } } ] }
-  ]
+  ],
+  "deliverable": {                             // OPTIONAL — what a task MUST yield
+    "required": true,                          // task never "completed" until satisfied
+    "extensions": ["mp4"],                     // accepted file types (dot optional)
+    "minCount": 1,                             // default 1 when required
+    "verify": {                                // OPTIONAL integrity check, run in uploads/
+      "command": "ffprobe -v error -show_entries stream=codec_type -of csv=p=0 {file} | grep -q video",
+      "timeoutMs": 30000 },                    // {file} = the deliverable's absolute path
+    "description": "a single playable .mp4 video"  // shown to the worker + clients
+  }
 }
 ```
 
@@ -215,6 +224,17 @@ Semantics the server must respect when authoring/generating documents:
 - `system_prompt` lands as `GLORP.md`; if a cloned repo already ships one,
   Garage writes `GLORP.override.md` instead (which takes precedence), so your
   prompt always applies without destroying the repo's file.
+- **`deliverable`** declares the artifact a task of this type must produce. It
+  is the deterministic definition of "done": the worker's `deliver_result` call
+  is REJECTED (with a specific reason the agent must fix) when a declared file
+  is missing, the wrong type, too few, or fails `verify` — and a task with a
+  `required` deliverable can never project as `completed` on a text reply alone.
+  Omit it for text-only task types (research / Q&A). `verify` is best-effort: a
+  non-zero exit rejects the file, but a missing toolchain (exit 127 / no `bash`)
+  is treated as "could not verify here" and does not reject a structurally-valid
+  artifact — so write piped verify commands to `set -o pipefail` if you rely on
+  the missing-toolchain distinction. Malformed `deliverable` fields are dropped
+  field-by-field, never failing the whole template.
 - Validation failures (missing required params, path escapes, unknown
   `{param:…}`) surface to the API caller with secret values redacted.
 

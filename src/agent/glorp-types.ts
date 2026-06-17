@@ -7,6 +7,7 @@ import type { CredentialsStore } from "./credentials.ts";
 import type { ModelCatalog } from "./model-catalog.ts";
 import type { ProjectConfig } from "./project-config.ts";
 import type { PermissionMode } from "./runtime/permission-mode.ts";
+import type { TaskContext } from "./task-deliverable.ts";
 import type { Bridge } from "../shared/bridge.ts";
 
 export interface ExtensionCatalogue {
@@ -90,10 +91,10 @@ export interface BuildGlorpOptions {
   permissionMode?: PermissionMode;
   /**
    * Present when this session runs as a Garage task: gives the agent its task
-   * self-knowledge (preamble + env) and the task toolkit (deliver_result,
-   * report_progress).
+   * self-knowledge (preamble + env), the task toolkit (deliver_result,
+   * report_progress), and the deliverable contract enforced at delivery.
    */
-  task?: { type: string };
+  task?: TaskContext;
   /**
    * The session runs inside a disposable, per-session sandbox container (Garage)
    * rather than on the user's own machine. The container is the isolation

@@ -10,6 +10,7 @@ import type { GlorpStore } from "../store.ts";
 import { buildGlorpSystemPrompt, taskWorkerPreamble, COMPACTION_INSTRUCTIONS } from "../persona.ts";
 import { MAIN_AGENT_TOOLS, TASK_TOOLS, createToolRegistry, registerTools } from "../tools/registry.ts";
 import type { TaskSink } from "../task-sink.ts";
+import type { TaskContext } from "../task-deliverable.ts";
 import { plannerSubAgent, researcherSubAgent, reviewerSubAgent } from "../subagents.ts";
 import { makeDiskSubAgent } from "../agents/disk-subagent.ts";
 import { getBridge } from "../../shared/bridge.ts";
@@ -53,7 +54,7 @@ export interface AssembleArgs {
   /** Per-session env injected into bash spawns (e.g. GLORP_SESSION_ID). */
   sessionEnv?: Record<string, string>;
   /** Task context (present only in task mode) — drives the worker preamble + toolkit. */
-  task?: { type: string };
+  task?: TaskContext;
   /** Backs deliver_result / report_progress; present iff `task` is. */
   taskSink?: TaskSink;
 }
@@ -123,7 +124,7 @@ function composeSystemPrompt(args: AssembleArgs): string {
     contextLimit: args.contextLimit,
     extensions: args.diskExtensions,
   });
-  return args.task ? `${taskWorkerPreamble(args.task.type)}\n\n${base}` : base;
+  return args.task ? `${taskWorkerPreamble(args.task.type, args.task.deliverable)}\n\n${base}` : base;
 }
 
 export function wireOrchestratorToBridge(

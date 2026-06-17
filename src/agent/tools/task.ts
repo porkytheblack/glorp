@@ -33,7 +33,21 @@ export function deliverResultTool(sink: TaskSink): GloveFoldArgs<{
       data: z.record(z.string(), z.unknown()).optional().describe("Optional structured result fields"),
     }),
     async do(input) {
-      const { files } = sink.deliver(input);
+      const res = await sink.deliver(input);
+      if (!res.ok) {
+        // Reject, telling the agent exactly what's wrong. The task does NOT
+        // complete on a rejected deliver — the agent must produce the real
+        // artifact and call deliver_result again.
+        return {
+          status: "error",
+          data: null,
+          message:
+            "deliver_result rejected — the task is NOT done:\n" +
+            res.violations.map((v) => `- ${v.message}`).join("\n"),
+          renderData: { violations: res.violations },
+        };
+      }
+      const { files } = res;
       const note = files.length
         ? `Delivered: ${input.summary} (${files.length} file${files.length === 1 ? "" : "s"}: ${files.join(", ")})`
         : `Delivered: ${input.summary}`;

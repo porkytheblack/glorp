@@ -15,6 +15,7 @@ import { loadGarageConfig } from "../src/garage/config.ts";
 import { projectStatus, toQuestion } from "../src/garage/routes/task-project.ts";
 import { coerceAnswer, validCallbackUrl } from "../src/garage/routes/tasks.ts";
 import { createTaskSink, readDeliveredResult, readProgressNote } from "../src/agent/task-sink.ts";
+import { validateDeliverable } from "../src/agent/task-deliverable.ts";
 import { attachTaskNotifier } from "../src/garage/task-notifier.ts";
 import { Bridge } from "../src/shared/bridge.ts";
 import type { DisplaySlotEvent } from "../src/shared/events.ts";
@@ -41,6 +42,8 @@ const base = {
   turnCount: 0,
   hasOutput: false,
   startPending: false,
+  requiresDeliverable: false,
+  deliverableSatisfied: false,
 };
 
 describe("TaskStore", () => {
@@ -89,6 +92,16 @@ describe("projectStatus", () => {
   it("session exists but no output yet → working (first turn in flight)", () => {
     expect(projectStatus({ ...base })).toBe("working");
   });
+  it("a required-deliverable task is NOT completed on text alone → working", () => {
+    // The core fix: chatter (hasOutput) must not complete a task that owes an artifact.
+    expect(projectStatus({ ...base, requiresDeliverable: true, deliverableSatisfied: false, hasOutput: true })).toBe("working");
+  });
+  it("a required-deliverable task with a satisfying artifact → completed", () => {
+    expect(projectStatus({ ...base, requiresDeliverable: true, deliverableSatisfied: true })).toBe("completed");
+  });
+  it("a required-deliverable failure (failed turn) still → failed", () => {
+    expect(projectStatus({ ...base, requiresDeliverable: true, lastError: "boom", turnCount: 1 })).toBe("failed");
+  });
   it("provisioned but holding the first turn (defer_start) → staged", () => {
     expect(projectStatus({ ...base, startPending: true })).toBe("staged");
     // staged wins over a busy/output projection (the turn hasn't run)…
@@ -131,7 +144,7 @@ describe("coerceAnswer", () => {
 });
 
 describe("task sink", () => {
-  it("copies an out-of-uploads deliverable in, and reads it back", () => {
+  it("copies an out-of-uploads deliverable in, and reads it back", async () => {
     const ws = tmp("ws-");
     fs.mkdirSync(path.join(ws, "output"), { recursive: true });
     fs.writeFileSync(path.join(ws, "output", "deck.pptx"), "binary");
@@ -139,40 +152,129 @@ describe("task sink", () => {
     const progressFile = path.join(tmp(), "task-progress.json");
     const sink = createTaskSink({ resultFile, progressFile, workspace: ws, now: () => "2026-01-01T00:00:00.000Z" });
 
-    const { files } = sink.deliver({ summary: "the deck", files: ["output/deck.pptx"], data: { slides: 3 } });
-    expect(files).toEqual(["deck.pptx"]); // normalized into uploads/
+    const res = await sink.deliver({ summary: "the deck", files: ["output/deck.pptx"], data: { slides: 3 } });
+    expect(res).toEqual({ ok: true, files: ["deck.pptx"] }); // normalized into uploads/
     expect(fs.existsSync(path.join(ws, "uploads", "deck.pptx"))).toBe(true);
 
     const read = readDeliveredResult(resultFile);
     expect(read).toMatchObject({ summary: "the deck", files: ["deck.pptx"], data: { slides: 3 } });
   });
 
-  it("keeps an already-uploads file in place and records progress", () => {
+  it("keeps an already-uploads file in place and records progress", async () => {
     const ws = tmp("ws-");
     fs.mkdirSync(path.join(ws, "uploads"), { recursive: true });
     fs.writeFileSync(path.join(ws, "uploads", "out.mp4"), "v");
     const resultFile = path.join(tmp(), "r.json");
     const progressFile = path.join(tmp(), "p.json");
     const sink = createTaskSink({ resultFile, progressFile, workspace: ws });
-    expect(sink.deliver({ summary: "done", files: ["uploads/out.mp4"] }).files).toEqual(["out.mp4"]);
+    expect(await sink.deliver({ summary: "done", files: ["uploads/out.mp4"] })).toEqual({ ok: true, files: ["out.mp4"] });
     sink.progress("rendering 50%");
     expect(readProgressNote(progressFile)?.message).toBe("rendering 50%");
   });
 
-  it("drops a declared file that escapes the workspace", () => {
+  it("rejects (and persists nothing for) a declared file that escapes the workspace", async () => {
     const ws = tmp("ws-");
-    const sink = createTaskSink({ resultFile: path.join(tmp(), "r.json"), progressFile: path.join(tmp(), "p.json"), workspace: ws });
-    expect(sink.deliver({ summary: "x", files: ["../../etc/passwd"] }).files).toEqual([]);
+    const resultFile = path.join(tmp(), "r.json");
+    const sink = createTaskSink({ resultFile, progressFile: path.join(tmp(), "p.json"), workspace: ws });
+    const res = await sink.deliver({ summary: "x", files: ["../../etc/passwd"] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.violations[0]?.code).toBe("missing_files");
+    expect(readDeliveredResult(resultFile)).toBeNull(); // nothing written
   });
 
-  it("refuses a symlink under the workspace that points outside it", () => {
+  it("refuses a symlink under the workspace that points outside it", async () => {
     const ws = tmp("ws-");
     const outside = tmp("outside-");
     fs.writeFileSync(path.join(outside, "secret.txt"), "classified");
     fs.symlinkSync(path.join(outside, "secret.txt"), path.join(ws, "link.txt"));
     const sink = createTaskSink({ resultFile: path.join(tmp(), "r.json"), progressFile: path.join(tmp(), "p.json"), workspace: ws });
-    expect(sink.deliver({ summary: "x", files: ["link.txt"] }).files).toEqual([]);
+    const res = await sink.deliver({ summary: "x", files: ["link.txt"] });
+    expect(res.ok).toBe(false);
     expect(fs.existsSync(path.join(ws, "uploads", "secret.txt"))).toBe(false);
+  });
+
+  it("rejects a declared-but-missing file even with no contract (no silent drop)", async () => {
+    const ws = tmp("ws-");
+    fs.mkdirSync(path.join(ws, "uploads"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "uploads", "real.pdf"), "ok");
+    const resultFile = path.join(tmp(), "r.json");
+    const sink = createTaskSink({ resultFile, progressFile: path.join(tmp(), "p.json"), workspace: ws });
+    const res = await sink.deliver({ summary: "x", files: ["uploads/real.pdf", "uploads/ghost.csv"] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.violations[0]?.message).toContain("ghost.csv");
+    expect(readDeliveredResult(resultFile)).toBeNull();
+  });
+});
+
+describe("task sink with a deliverable contract", () => {
+  const mp4Contract = { required: true, extensions: ["mp4"], description: "a playable .mp4 video" };
+
+  function sinkFor(ws: string, resultFile: string) {
+    return createTaskSink({
+      resultFile, progressFile: path.join(tmp(), "p.json"), workspace: ws, deliverable: mp4Contract,
+    });
+  }
+
+  it("accepts and persists a contract-matching artifact", async () => {
+    const ws = tmp("ws-");
+    fs.mkdirSync(path.join(ws, "uploads"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "uploads", "movie.mp4"), "video-bytes");
+    const resultFile = path.join(tmp(), "r.json");
+    const res = await sinkFor(ws, resultFile).deliver({ summary: "the video", files: ["uploads/movie.mp4"] });
+    expect(res).toEqual({ ok: true, files: ["movie.mp4"] });
+    expect(readDeliveredResult(resultFile)?.files).toEqual(["movie.mp4"]);
+  });
+
+  it("rejects a JSON storyboard for a video task and writes nothing", async () => {
+    const ws = tmp("ws-");
+    fs.mkdirSync(path.join(ws, "uploads"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "uploads", "storyboard.json"), "{}");
+    const resultFile = path.join(tmp(), "r.json");
+    const res = await sinkFor(ws, resultFile).deliver({ summary: "here", files: ["uploads/storyboard.json"] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.violations.some((v) => v.code === "wrong_extension")).toBe(true);
+    expect(readDeliveredResult(resultFile)).toBeNull();
+  });
+
+  it("rejects a deliver with no files when a deliverable is required", async () => {
+    const ws = tmp("ws-");
+    const resultFile = path.join(tmp(), "r.json");
+    const res = await sinkFor(ws, resultFile).deliver({ summary: "all done!" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.violations[0]?.code).toBe("no_files");
+    expect(readDeliveredResult(resultFile)).toBeNull();
+  });
+});
+
+describe("validateDeliverable", () => {
+  it("runs an opt-in verify command and rejects on non-zero exit", async () => {
+    const root = tmp("up-");
+    fs.writeFileSync(path.join(root, "a.mp4"), "x");
+    const v = await validateDeliverable({
+      contract: { required: true, extensions: ["mp4"], verify: { command: "false" } },
+      uploadsRoot: root, files: ["a.mp4"], missing: [],
+    });
+    expect(v.map((x) => x.code)).toEqual(["verify_failed"]);
+  });
+
+  it("passes a verify command that exits zero", async () => {
+    const root = tmp("up-");
+    fs.writeFileSync(path.join(root, "a.mp4"), "x");
+    const v = await validateDeliverable({
+      contract: { required: true, extensions: ["mp4"], verify: { command: "test -f {file}" } },
+      uploadsRoot: root, files: ["a.mp4"], missing: [],
+    });
+    expect(v).toEqual([]);
+  });
+
+  it("treats a missing verify toolchain as 'skipped', not a failure", async () => {
+    const root = tmp("up-");
+    fs.writeFileSync(path.join(root, "a.mp4"), "x");
+    const v = await validateDeliverable({
+      contract: { required: true, extensions: ["mp4"], verify: { command: "definitely-not-a-real-binary-xyz {file}" } },
+      uploadsRoot: root, files: ["a.mp4"], missing: [],
+    });
+    expect(v).toEqual([]); // structural checks stand; verify could not run
   });
 });
 

@@ -11,6 +11,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { DeliverableContract } from "../agent/task-deliverable.ts";
 
 /**
  * The first turn a `defer_start` task holds until POST /tasks/:id/start. Only
@@ -35,6 +36,12 @@ export interface TaskRecord {
   held?: HeldTurn | null;
   /** True once the (held) first turn has been dispatched. */
   started?: boolean;
+  /**
+   * The task type's deliverable contract, resolved from the template at create
+   * time and frozen here so the read-side projection can gate completion without
+   * re-resolving the template. Absent ⇒ no deliverable gating (text-only task).
+   */
+  deliverable?: DeliverableContract | null;
 }
 
 interface TasksFile {

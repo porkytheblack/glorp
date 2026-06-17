@@ -10,6 +10,10 @@
  * valid: every v2 section is optional.
  */
 
+import type { DeliverableContract } from "../../agent/task-deliverable.ts";
+
+export type { DeliverableContract };
+
 export interface GitCloneStep {
   type: "git-clone";
   repo: string;
@@ -117,6 +121,13 @@ export interface Template {
   mcp?: TemplateMcpProvider[];
   /** Declared parameters; required ones are validated before provisioning. */
   params?: TemplateParamDecl[];
+  /**
+   * What artifact a task of this template MUST yield. Enforced at
+   * `deliver_result` and at completion-gating: a task with a `required`
+   * deliverable can never read "completed" until the real artifact exists.
+   * Absent ⇒ a text-only task (research / Q&A).
+   */
+  deliverable?: DeliverableContract;
 }
 
 export class TemplateError extends Error {}
