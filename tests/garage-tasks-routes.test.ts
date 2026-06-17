@@ -113,11 +113,18 @@ describe("Task API routes", () => {
       // surfaces it as a deliverable file — regardless of the turn's outcome
       // (this stays hermetic whether or not a model key is in the environment).
       const dto = await poll(
-        async () => (await fetch(`${base}/tasks/${id}`).then((r) => r.json())) as { status: string; result: { files: Array<{ path: string }> } },
+        async () => (await fetch(`${base}/tasks/${id}`).then((r) => r.json())) as { status: string; result: { files: Array<{ path: string }> }; usage: Record<string, unknown> },
         (d) => d.result.files.some((f) => f.path === "seed.txt"),
       );
       expect(dto.result.files.map((f) => f.path)).toContain("seed.txt");
       expect(["queued", "working", "needs_input", "completed", "failed"]).toContain(dto.status);
+
+      // Every read reports a cumulative token + cost meter (zero here — no model
+      // is configured — but always present, with tokens_total a true sum).
+      const u = dto.usage as { tokens_in: number; tokens_out: number; tokens_total: number; cost_usd: number; cost_known: boolean };
+      expect(u).toMatchObject({ tokens_in: 0, tokens_out: 0, tokens_total: 0, cost_usd: 0 });
+      expect(u.tokens_total).toBe(u.tokens_in + u.tokens_out);
+      expect(typeof u.cost_known).toBe("boolean");
 
       // Open-slots primitive is reachable for the same id.
       const slots = await fetch(`${base}/sessions/${id}/slots`).then((r) => r.json());

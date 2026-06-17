@@ -84,9 +84,44 @@ a queue worker that persists between polls, or a webhook-driven flow).
   "questions": [],                   // pending questions when status is needs_input (see below)
   "progress": "rendering slide 4/5", // latest non-blocking progress note, or null
   "error": null,                     // failure reason when status is failed
+  "usage": {                         // cumulative token + cost meter (see Usage & cost)
+    "tokens_in": 184320,
+    "tokens_out": 12044,
+    "tokens_total": 196364,
+    "cost_usd": 0.7421,
+    "cost_known": true
+  },
   "created_at": "…",
   "updated_at": "…"
 }
+```
+
+### Usage & cost (auditing / billing)
+
+Every read of a task carries a `usage` meter, so an external system can audit
+consumption and price it without a side channel:
+
+| Field | Meaning |
+| --- | --- |
+| `tokens_in` | Cumulative input (prompt) tokens billed over the task's whole life |
+| `tokens_out` | Cumulative output (completion) tokens |
+| `tokens_total` | Convenience sum, `tokens_in + tokens_out` |
+| `cost_usd` | Estimated USD from models.dev catalog **list pricing** |
+| `cost_known` | `false` when any attributed model lacked a catalog price — treat `cost_usd` as a floor, not an exact bill |
+
+The counts are **cumulative over the entire task** — they include every
+follow-up message (`tasks.message`) and, crucially, survive **context
+compaction**: the worker keeps a session-total counter that compaction never
+resets, so a long, repeatedly-compacted task still reports its true lifetime
+usage rather than just the current context window. The figure is monotonic — it
+only ever grows — so you can poll it, diff against your last reading, and charge
+the delta. It's present in every projection: `tasks.get`, `tasks.list`,
+`tasks.wait` updates, and the webhook payload.
+
+```ts
+const task = await glorp.tasks.get(id);
+console.log(task.usage.tokens_total, "tokens", `$${task.usage.cost_usd.toFixed(4)}`);
+if (!task.usage.cost_known) console.warn("cost is a floor — an unpriced model was used");
 ```
 
 ### Status lifecycle
