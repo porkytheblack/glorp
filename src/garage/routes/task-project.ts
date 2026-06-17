@@ -9,8 +9,9 @@ import type { GarageSession } from "../session.ts";
 import type { GarageConfig } from "../config.ts";
 import type { TaskRecord } from "../task-store.ts";
 import type { DisplaySlotEvent } from "../../shared/events.ts";
-import type { TaskDto, TaskStatus, TaskQuestion, TaskFile, TaskResult } from "../contract.ts";
+import type { TaskDto, TaskStatus, TaskQuestion, TaskFile, TaskResult, TaskUsage } from "../contract.ts";
 import { resolveSessionPaths } from "../../agent/session-paths.ts";
+import { sessionUsage } from "../session-dto.ts";
 import { readDeliveredResult, readProgressNote, type DeliveredResult } from "../../agent/task-sink.ts";
 import { turnsFromMessages } from "../../agent/runtime/hydrate.ts";
 import { walk } from "./files.ts";
@@ -167,7 +168,23 @@ export async function buildTaskDto(
     questions,
     progress: progress?.message ?? null,
     error: record.provision_error ?? session?.error ?? session?.stats.lastError ?? null,
+    usage: taskUsage(session),
     created_at: record.created_at,
     updated_at: session ? new Date(session.lastActivity).toISOString() : record.created_at,
+  };
+}
+
+/** Cumulative token + cost meter for a task's worker session — survives
+ *  follow-ups and compactions. Zeroed when no session exists yet (queued). */
+function taskUsage(session: GarageSession | undefined): TaskUsage {
+  const u = session ? sessionUsage(session) : null;
+  const tokensIn = u?.tokensIn ?? 0;
+  const tokensOut = u?.tokensOut ?? 0;
+  return {
+    tokens_in: tokensIn,
+    tokens_out: tokensOut,
+    tokens_total: tokensIn + tokensOut,
+    cost_usd: u?.costUsd ?? 0,
+    cost_known: u?.costKnown ?? true,
   };
 }

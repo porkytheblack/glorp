@@ -314,6 +314,32 @@ export interface TaskResult {
   data?: unknown;
 }
 
+/**
+ * A task's running token + cost meter, reported on every read so an external
+ * system can audit consumption and price it. The counts are **cumulative over
+ * the task's entire life** — across every follow-up message AND across context
+ * compactions (the worker keeps a session-total counter that compaction never
+ * resets), so a long-running, repeatedly-compacted task still reports its true
+ * lifetime usage rather than just the current context window.
+ *
+ * `cost_usd` is an estimate from models.dev catalog **list pricing**;
+ * `cost_known` is false when any attributed model lacked a catalog price (a
+ * custom/local endpoint), in which case treat `cost_usd` as a floor, not an
+ * exact bill.
+ */
+export interface TaskUsage {
+  /** Cumulative input (prompt) tokens billed over the task's whole life. */
+  tokens_in: number;
+  /** Cumulative output (completion) tokens billed over the task's whole life. */
+  tokens_out: number;
+  /** Convenience sum: `tokens_in + tokens_out`. */
+  tokens_total: number;
+  /** Cumulative estimated USD cost (catalog list pricing). */
+  cost_usd: number;
+  /** False when any attributed model lacked a catalog price (cost is a floor). */
+  cost_known: boolean;
+}
+
 /** A task type a consumer can submit — projected 1:1 from a setup template. */
 export interface TaskTypeDto {
   name: string;
@@ -332,6 +358,8 @@ export interface TaskDto {
   /** Latest non-blocking progress note from the agent, if any. */
   progress: string | null;
   error: string | null;
+  /** Cumulative token + cost meter (survives follow-ups and compactions). */
+  usage: TaskUsage;
   created_at: string;
   updated_at: string;
 }

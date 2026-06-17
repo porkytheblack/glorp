@@ -12,7 +12,9 @@ import * as path from "node:path";
 
 import { TaskStore } from "../src/garage/task-store.ts";
 import { loadGarageConfig } from "../src/garage/config.ts";
-import { projectStatus, toQuestion } from "../src/garage/routes/task-project.ts";
+import { projectStatus, toQuestion, buildTaskDto } from "../src/garage/routes/task-project.ts";
+import { SessionManager } from "../src/garage/manager.ts";
+import { GlorpStore } from "../src/agent/store.ts";
 import { coerceAnswer, validCallbackUrl } from "../src/garage/routes/tasks.ts";
 import { createTaskSink, readDeliveredResult, readProgressNote } from "../src/agent/task-sink.ts";
 import { validateDeliverable } from "../src/agent/task-deliverable.ts";
@@ -304,6 +306,45 @@ describe("validCallbackUrl", () => {
     expect(validCallbackUrl("gopher://x")).toBeNull();
     expect(validCallbackUrl("not a url")).toBeNull();
     expect(validCallbackUrl(42)).toBeNull();
+  });
+});
+
+describe("task usage meter (projection)", () => {
+  it("reports cumulative tokens + cost that survive a compaction", async () => {
+    const dataDir = tmp();
+    const workspace = tmp("ws-");
+    const id = "task-usage-1";
+
+    // Seed a dormant worker session: priced usage, then a compaction. The
+    // window counters reset, but the SESSION-cumulative totals + per-model
+    // ledger persist — which is exactly what the meter must report.
+    const store = new GlorpStore(id, dataDir, { workspace });
+    store.setActiveModel({ providerId: "anthropic", model: "opus", label: "anthropic · opus", cost: { input: 3, output: 15 } });
+    await store.addTokens({ tokens_in: 1_000_000, tokens_out: 1_000_000 }); // → $18
+    await store.resetCounters(); // glove-core compaction zeroes the window gauge
+    await store.flush();
+
+    const config = loadGarageConfig({ dataDir, port: 0, hostname: "127.0.0.1", workspaceRoot: path.join(dataDir, "ws") });
+    const manager = new SessionManager(config);
+    const session = manager.getOrRehydrate(id);
+    expect(session).toBeTruthy();
+
+    const record = { id, type: "x", created_at: "2026-01-01T00:00:00.000Z" };
+    const dto = await buildTaskDto(record, session, config, Date.now());
+
+    // Cumulative — NOT the post-compaction window (which is 0).
+    expect(dto.usage.tokens_in).toBe(1_000_000);
+    expect(dto.usage.tokens_out).toBe(1_000_000);
+    expect(dto.usage.tokens_total).toBe(2_000_000);
+    expect(dto.usage.cost_usd).toBeCloseTo(18, 4);
+    expect(dto.usage.cost_known).toBe(true);
+  });
+
+  it("reports a zeroed, well-formed meter for a task with no session yet", async () => {
+    const config = loadGarageConfig({ dataDir: tmp(), port: 0, hostname: "127.0.0.1" });
+    const record = { id: "queued-1", type: "x", created_at: "2026-01-01T00:00:00.000Z" };
+    const dto = await buildTaskDto(record, undefined, config, Date.now());
+    expect(dto.usage).toEqual({ tokens_in: 0, tokens_out: 0, tokens_total: 0, cost_usd: 0, cost_known: true });
   });
 });
 
