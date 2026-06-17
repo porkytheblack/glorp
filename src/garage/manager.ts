@@ -13,6 +13,7 @@ import { GarageSession } from "./session.ts";
 import { snapshotExists, readSnapshotMeta } from "./persistence.ts";
 import { WorkspaceStore } from "./workspace-store.ts";
 import { type ModelUsage, type UsageTotals, emptyTotals, addToTotals, storeTotals, mergeModelUsage } from "../agent/usage.ts";
+import type { TaskContext } from "../agent/task-deliverable.ts";
 import type { CreateSessionInput, CreateWorkspaceInput, SessionDto, Workspace, WorkspaceDto } from "./types.ts";
 
 /** One session's usage with the identity needed for the namespace rollup. */
@@ -90,7 +91,7 @@ export class SessionManager {
    * task context (which arms the task toolkit + worker preamble) is only ever
    * passed here by the Task API, never parsed from a `POST /sessions` body.
    */
-  async create(input: CreateSessionInput, internal: { task?: { type: string } } = {}): Promise<GarageSession> {
+  async create(input: CreateSessionInput, internal: { task?: TaskContext } = {}): Promise<GarageSession> {
     const id = input.sessionId ?? newSessionId();
     if (input.sessionId !== undefined && !SESSION_ID_RE.test(input.sessionId)) {
       throw new WorkspaceError(`Invalid sessionId: must match ${SESSION_ID_RE}`);
@@ -141,7 +142,7 @@ export class SessionManager {
     workspace: string,
     workspaceId: string | null,
     input: CreateSessionInput,
-    internal: { task?: { type: string } } = {},
+    internal: { task?: TaskContext } = {},
   ): GarageSession {
     const session = new GarageSession({
       id,

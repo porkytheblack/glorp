@@ -15,6 +15,7 @@ import type { Context } from "glove-core/core";
 import type { ResourceFsAdapter } from "glove-memory";
 import { GlorpStore } from "../store.ts";
 import type { TaskSink } from "../task-sink.ts";
+import type { TaskContext } from "../task-deliverable.ts";
 import { VerificationTracker } from "./verification-tracker.ts";
 import { createSessionResources } from "./resources.ts";
 import { createRefreshers } from "./refresh.ts";
@@ -54,7 +55,7 @@ export interface ActivationDeps {
   /** Per-session env injected into bash spawns (e.g. GLORP_SESSION_ID). */
   sessionEnv?: Record<string, string>;
   /** Task context (task mode) — applied to the MAIN agent only. */
-  task?: { type: string };
+  task?: TaskContext;
   taskSink?: TaskSink;
 }
 

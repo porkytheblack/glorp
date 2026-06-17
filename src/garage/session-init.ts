@@ -1,4 +1,5 @@
 import type { PermissionMode } from "../agent/runtime/permission-mode.ts";
+import type { TaskContext } from "../agent/task-deliverable.ts";
 import type { SessionCredential } from "./types.ts";
 
 export interface GarageSessionInit {
@@ -20,5 +21,5 @@ export interface GarageSessionInit {
   permissionMode: PermissionMode;
   customCredential?: SessionCredential | null;
   /** Present when this session is the worker for a Garage task. */
-  task?: { type: string } | null;
+  task?: TaskContext | null;
 }

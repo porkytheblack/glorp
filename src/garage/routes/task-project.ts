@@ -32,6 +32,10 @@ export interface StatusSignals {
   hasOutput: boolean;
   /** A deferred-start task is provisioned but its first turn is still withheld. */
   startPending: boolean;
+  /** This task type requires a real artifact — text alone never counts as done. */
+  requiresDeliverable: boolean;
+  /** A declared, contract-satisfying deliverable with at least one file is present. */
+  deliverableSatisfied: boolean;
 }
 
 /** Pure status projection — the single source of truth for a task's lifecycle. */
@@ -45,6 +49,10 @@ export function projectStatus(s: StatusSignals): TaskStatus {
   if (s.openQuestionCount > 0) return "needs_input"; // precedence over busy (G1)
   if (s.busy) return "working";
   if (s.lastError && s.turnCount > 0) return "failed";
+  // A required-deliverable task is never "completed" on chatter alone — it needs
+  // a declared artifact that satisfied the contract. Until then it stays
+  // "working" (the session is kept alive so a follow-up can nudge it).
+  if (s.requiresDeliverable) return s.deliverableSatisfied ? "completed" : "working";
   if (s.hasOutput) return "completed";
   return "working"; // session exists, no output yet — the first turn is in flight
 }
@@ -124,6 +132,10 @@ export async function buildTaskDto(
 
   const dto = session?.toDto();
   const questions = (session?.openSlots() ?? []).filter((s) => !s.isPermissionRequest).map(toQuestion);
+  // The sink only writes task-result.json when the deliverable contract passes,
+  // so a declared result with files on disk IS the satisfied signal.
+  const requiresDeliverable = !!record.deliverable?.required;
+  const deliverableSatisfied = !!declared && files.length > 0;
   const status = projectStatus({
     provisionError: record.provision_error,
     hasSession: !!session,
@@ -135,6 +147,8 @@ export async function buildTaskDto(
     turnCount: session?.stats.turnCount ?? 0,
     hasOutput: !!declared || text !== null,
     startPending: !!record.held && !record.started,
+    requiresDeliverable,
+    deliverableSatisfied,
   });
 
   const result: TaskResult = {

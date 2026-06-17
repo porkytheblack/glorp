@@ -79,7 +79,11 @@ export function taskRoutes(
       }
       const type = body?.type;
       if (!type || typeof type !== "string") return errorJson("bad_request", "Missing 'type'", 400);
-      if (!(await templates.has(type))) return errorJson("bad_request", `Unknown task type '${type}'`, 400);
+      const template = await templates.get(type);
+      if (!template) return errorJson("bad_request", `Unknown task type '${type}'`, 400);
+      // Freeze the type's deliverable contract onto the record so the read-side
+      // can gate completion (and the worker can be told what to produce).
+      const deliverable = template.deliverable ?? null;
       const prompt = body.input?.prompt;
       if (typeof prompt !== "string" || !prompt.trim()) return errorJson("bad_request", "Missing 'input.prompt'", 400);
       const callbackUrl = validCallbackUrl(body.callback_url);
@@ -98,6 +102,7 @@ export function taskRoutes(
         id, type, created_at,
         ...(callbackUrl ? { callback_url: callbackUrl } : {}),
         ...(deferred ? { held: { prompt }, started: false } : {}),
+        ...(deliverable ? { deliverable } : {}),
       });
       kickProvision({
         manager, store, config, record, params,

@@ -1,4 +1,5 @@
 import { GLORP_VERSION, GLORP_CODENAME } from "../shared/version.ts";
+import { describeDeliverable, type DeliverableContract } from "./task-deliverable.ts";
 import type { ExtensionsBundle } from "./extensions-loader.ts";
 import { readPrompt } from "./prompts/loader.ts";
 import { buildProjectInstructionsContext } from "./project-instructions.ts";
@@ -56,17 +57,27 @@ export const COMPACTION_INSTRUCTIONS = readPrompt("compaction.md");
  * result explicitly, report progress on long jobs, and pause for the requester
  * with the ask_* tools when a decision is genuinely needed.
  */
-export function taskWorkerPreamble(taskType: string): string {
-  return [
+export function taskWorkerPreamble(taskType: string, deliverable?: DeliverableContract | null): string {
+  const lines = [
     `# You are a Glorp Garage task worker`,
     `You are running autonomously inside Glorp Garage, fulfilling a single task of type "${taskType}". A requester submitted it and is waiting for the result — they are not watching you work, so do not ask for confirmation you don't truly need.`,
     `The requester may have attached input files in ./inputs — that is their read-only input area. Before you start, list ./inputs and consult anything the prompt refers to (a brief, data, an asset, "the attached file"); resolve a bare filename there first. Treat ./inputs as inputs only — never put deliverables there.`,
     `When the work is done, call **deliver_result** with a short summary and the paths of every deliverable file (place files in ./uploads or ./output — they are made available to the requester automatically). Calling it again after a follow-up change replaces the previous result.`,
     `Before you deliver, VERIFY the work — never ship a file unseen. For a deck/document, render its pages to images (export a PDF via LibreOffice, then \`pdftoppm -png\`) and **view_image** each one; for a video, \`ffprobe\` it and **view_image** a few sampled frames; for an image, **view_image** it directly. Confirm: no text overflowing or clipped off the page, no empty/placeholder-looking sections, consistent layout, and content that matches the request. Fix any real defects and re-check — cap it at two passes, then deliver.`,
+  ];
+  if (deliverable) {
+    const expected = describeDeliverable(deliverable);
+    lines.push(
+      `**Required deliverable:** this task must produce ${expected}. deliver_result will REJECT your call — and the task will NOT complete — if a declared file is missing, the wrong type, or fails verification. Keep working until deliver_result returns success; a rejection tells you exactly what to fix.`,
+      `**Never deliver an intermediate as the final result.** A JSON storyboard, spec, plan, manifest, or a written description of the work is a work product, not a deliverable. Do not hand one back in place of ${expected}. If you have only produced an intermediate representation, you are not done — render it into the real artifact and deliver that (unless the task explicitly asks for the intermediate format).`,
+    );
+  }
+  lines.push(
     `On long jobs, call **report_progress** with a brief note so the requester can follow along; it never pauses you.`,
     `If — and only if — you need a decision or information that you cannot reasonably infer, use **ask_choice** / **ask_text** / **ask_confirm**. These pause the task until the requester answers, so reserve them for genuine forks. Otherwise work to completion on your own.`,
     `Your task id and type are in the environment (GLORP_TASK_ID, GLORP_TASK_TYPE); GLORP_GARAGE=1 marks this runtime.`,
-  ].join("\n\n");
+  );
+  return lines.join("\n\n");
 }
 
 function runtimeContext(workspace: string): string {
