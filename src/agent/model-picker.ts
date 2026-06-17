@@ -34,6 +34,8 @@ const CHEAP_TITLE_MODELS: Record<string, string> = {
   gemini: "gemini-2.5-flash",
   groq: "llama-3.3-70b-versatile",
   mimo: "mimo-v2.5",
+  glm: "glm-4.5-air",
+  kimi: "kimi-k2-turbo-preview",
 };
 
 /** Default output-token budget for the main agent — generous for coding tasks. */
@@ -333,7 +335,7 @@ async function buildAdapter(args: {
   const effectiveId = effectiveProviderId(providerId, provider);
   const known = findKnownProvider(effectiveId);
   const apiKey = provider?.apiKey ?? (known ? process.env[known.envVar] : undefined);
-  const baseURL = provider?.baseURL;
+  const baseURL = resolveAdapterBaseURL(effectiveId, provider);
   const model = modelArg ?? defaultModelFor(effectiveId);
 
   // Anthropic — native and custom `basedOn: "anthropic"` endpoints.
@@ -433,6 +435,19 @@ function defaultModelFor(providerId: string): string {
   return known?.defaultModels[0] ?? "gpt-4.1";
 }
 
+/**
+ * Resolve the base URL an adapter should use: a stored provider config wins,
+ * then the provider's `<PROVIDER>_BASE_URL` env override (so a custom / regional
+ * / coding-plan endpoint can be set with env vars alone — no credentials file),
+ * else undefined so the adapter falls back to {@link defaultBaseURLFor}.
+ */
+export function resolveAdapterBaseURL(effectiveId: string, provider?: ProviderConfig): string | undefined {
+  if (provider?.baseURL) return provider.baseURL;
+  const envVar = findKnownProvider(effectiveId)?.baseUrlEnvVar;
+  const fromEnv = envVar ? process.env[envVar]?.trim() : undefined;
+  return fromEnv || undefined;
+}
+
 /** Default REST base URL per provider. Exported for the Garage's live
  * model-listing endpoint, which needs the same resolution outside an adapter. */
 export function defaultBaseURLFor(providerId: string): string {
@@ -449,6 +464,14 @@ export function defaultBaseURLFor(providerId: string): string {
       return "https://api.groq.com/openai/v1";
     case "mimo":
       return "https://api.xiaomimimo.com/v1";
+    case "glm":
+      // Coding-plan endpoint (coding-plan keys are scoped to it). Set GLM_BASE_URL
+      // for the general (…/paas/v4) or mainland (open.bigmodel.cn) endpoint.
+      return "https://api.z.ai/api/coding/paas/v4";
+    case "kimi":
+      // Set KIMI_BASE_URL for mainland (api.moonshot.cn/v1) or the dedicated
+      // Kimi Code endpoint (api.kimi.com/coding/v1).
+      return "https://api.moonshot.ai/v1";
     case "ollama":
       return process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";
     default:
@@ -463,6 +486,8 @@ function envDetectedProvider(): string | undefined {
   if (process.env.GEMINI_API_KEY) return "gemini";
   if (process.env.GROQ_API_KEY) return "groq";
   if (process.env.MIMO_API_KEY) return "mimo";
+  if (process.env.GLM_API_KEY) return "glm";
+  if (process.env.KIMI_API_KEY) return "kimi";
   return undefined;
 }
 

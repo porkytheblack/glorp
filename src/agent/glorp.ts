@@ -1,9 +1,9 @@
 import { Displaymanager } from "glove-core/display-manager";
-import { pickModel } from "./model-picker.ts";
+import { pickModel, resolveAdapterBaseURL, defaultBaseURLFor } from "./model-picker.ts";
 import { getBridge } from "../shared/bridge.ts";
 import { Orchestrator } from "../orchestrator/orchestrator.ts";
 import { parseBuildCommand, runOrchestratorBuild } from "./runtime/build-flow.ts";
-import { CredentialsStore, effectiveProviderId } from "./credentials.ts";
+import { CredentialsStore, effectiveProviderId, findKnownProvider } from "./credentials.ts";
 import { ModelCatalog } from "./model-catalog.ts";
 import { loadProjectConfig } from "./project-config.ts";
 import { discoverExtensions } from "./extensions-loader.ts";
@@ -336,7 +336,21 @@ function resolveDisplaySlot(dm: Displaymanager, bridge: ReturnType<typeof getBri
   bridge.emit({ type: "display_slot_resolved", slotId });
 }
 
+// Providers whose glorp default endpoint differs from glove-core's built-in (so a
+// spawned subagent must be pinned to glorp's, else a coding-plan key 401s on the
+// wrong endpoint). Safe to force an explicit baseURL for these (OpenAI-compat /
+// MiMo wire format); NOT for anthropic, whose SDK appends its own path.
+const SUBPROC_PIN_BASE_URL = new Set(["glm", "kimi", "mimo"]);
+
 function buildSubprocessModelConfig(picked: PickedModel, creds: CredentialsStore): OrchestratorConfig["subprocessModel"] {
   const p = creds.getProvider(picked.providerId);
-  return { providerId: effectiveProviderId(picked.providerId, p), model: picked.model, baseURL: p?.baseURL, apiKey: p?.apiKey };
+  const effId = effectiveProviderId(picked.providerId, p);
+  const envVar = findKnownProvider(effId)?.envVar;
+  // config baseURL/env override first; else pin glorp's default for coding providers
+  // so subagents hit the same endpoint as the main agent.
+  const baseURL = resolveAdapterBaseURL(effId, p) ?? (SUBPROC_PIN_BASE_URL.has(effId) ? defaultBaseURLFor(effId) : undefined);
+  // In file-less mode there's no stored provider — fall back to the provider's
+  // API-key env var so subagents authenticate too.
+  const apiKey = p?.apiKey ?? (envVar ? process.env[envVar] : undefined);
+  return { providerId: effId, model: picked.model, baseURL, apiKey };
 }

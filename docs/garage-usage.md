@@ -10,10 +10,34 @@ Garage lets you run multiple Glorp agents at once, leave them running, and conne
 
 ```bash
 # Credentials: Garage inherits your global ~/.glorp config (run `glorp` once to onboard),
-# or set an env var: export ANTHROPIC_API_KEY=... (or OPENAI_API_KEY, OPENROUTER_API_KEY, ...)
+# or set an env var: export ANTHROPIC_API_KEY=... (or OPENAI_API_KEY, OPENROUTER_API_KEY,
+#   GEMINI_API_KEY, GROQ_API_KEY, MIMO_API_KEY, GLM_API_KEY, KIMI_API_KEY)
 
 glorp garage                 # REST + WS API on http://127.0.0.1:4271
 ```
+
+### Custom / regional / coding-plan endpoints (env-only, no credentials.json)
+
+Every provider honors a `<PROVIDER>_BASE_URL` override, so you can point it at a
+custom or coding-plan endpoint with env vars alone (resolution: stored
+credentials > `<PROVIDER>_BASE_URL` > built-in default). Xiaomi MiMo, Zhipu GLM,
+and Moonshot Kimi are first-class providers (OpenAI-compatible, `Bearer` auth):
+
+```bash
+# Zhipu GLM coding plan (default base = z.ai coding endpoint)
+GLM_API_KEY=…  glorp garage --provider glm --model glm-5.2
+
+# Moonshot Kimi
+KIMI_API_KEY=…  glorp garage --provider kimi --model kimi-k2.7-code
+
+# Xiaomi MiMo Token Plan — set MIMO_BASE_URL to your regional plan endpoint
+MIMO_API_KEY=tp-…  MIMO_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1 \
+  glorp garage --provider mimo --model mimo-v2.5-pro
+```
+
+> Note: these subscription coding plans are meant for interactive coding; MiMo's
+> Token Plan forbids automated backends, and GLM/Kimi carry similar intent —
+> using them under autonomous Garage tasks may breach the provider's terms.
 
 Then create a session and send it a prompt:
 
