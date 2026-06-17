@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-import { pickModel } from "../src/agent/model-picker.ts";
+import { pickModel, resolveAdapterBaseURL } from "../src/agent/model-picker.ts";
 import { CredentialsStore } from "../src/agent/credentials.ts";
 import { ModelCatalog } from "../src/agent/model-catalog.ts";
 
@@ -17,6 +17,11 @@ const KEY_VARS = [
   "GEMINI_API_KEY",
   "GROQ_API_KEY",
   "MIMO_API_KEY",
+  "GLM_API_KEY",
+  "KIMI_API_KEY",
+  "MIMO_BASE_URL",
+  "GLM_BASE_URL",
+  "KIMI_BASE_URL",
 ];
 
 beforeEach(() => {
@@ -132,8 +137,35 @@ describe("pickModel", () => {
     const credentials = new CredentialsStore(dataDir);
     const picked = await pickModel({ credentials });
     expect(picked.providerId).toBe("mimo");
-    expect(picked.model).toBe("mimo-v2.5");
-    expect(picked.adapter.name).toBe("mimo:mimo-v2.5");
+    expect(picked.model).toBe("mimo-v2.5-pro");
+    expect(picked.adapter.name).toBe("mimo:mimo-v2.5-pro");
+  });
+
+  test("glm env fallback selects the GLM coding provider via OpenAI-compat", async () => {
+    process.env.GLM_API_KEY = "k";
+    const credentials = new CredentialsStore(dataDir);
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("glm");
+    expect(picked.model).toBe("glm-5.2");
+    expect(picked.adapter.name).toBe("openai-compat:glm-5.2");
+  });
+
+  test("kimi env fallback selects the Kimi coding provider via OpenAI-compat", async () => {
+    process.env.KIMI_API_KEY = "k";
+    const credentials = new CredentialsStore(dataDir);
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("kimi");
+    expect(picked.model).toBe("kimi-k2.7-code");
+    expect(picked.adapter.name).toBe("openai-compat:kimi-k2.7-code");
+  });
+
+  test("env precedence keeps glm/kimi below the established providers", async () => {
+    process.env.MIMO_API_KEY = "k";
+    process.env.GLM_API_KEY = "k";
+    process.env.KIMI_API_KEY = "k";
+    const credentials = new CredentialsStore(dataDir);
+    const picked = await pickModel({ credentials });
+    expect(picked.providerId).toBe("mimo");
   });
 
   test("throws when no config and no env", async () => {
@@ -609,5 +641,32 @@ describe("default reasoning capture for default-thinking models", () => {
   test("non-reasoning models keep reasoning disabled entirely", async () => {
     const r = await reasoningFor("llama-3.3-70b-versatile");
     expect(r.enabled).toBe(false);
+  });
+});
+
+describe("resolveAdapterBaseURL (env-only custom endpoints)", () => {
+  test("returns the provider's <PROVIDER>_BASE_URL env override", () => {
+    process.env.GLM_BASE_URL = "https://my-glm/v1";
+    expect(resolveAdapterBaseURL("glm")).toBe("https://my-glm/v1");
+  });
+
+  test("a stored provider baseURL wins over the env override", () => {
+    process.env.GLM_BASE_URL = "https://env-glm/v1";
+    const got = resolveAdapterBaseURL("glm", { type: "custom", id: "x", baseURL: "https://cfg-glm/v1" });
+    expect(got).toBe("https://cfg-glm/v1");
+  });
+
+  test("returns undefined when neither config nor env is set (adapter falls back to default)", () => {
+    expect(resolveAdapterBaseURL("glm")).toBeUndefined();
+  });
+
+  test("an empty/whitespace env value is treated as unset", () => {
+    process.env.KIMI_BASE_URL = "   ";
+    expect(resolveAdapterBaseURL("kimi")).toBeUndefined();
+  });
+
+  test("MIMO_BASE_URL points the MiMo provider at a Token Plan regional endpoint", () => {
+    process.env.MIMO_BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1";
+    expect(resolveAdapterBaseURL("mimo")).toBe("https://token-plan-sgp.xiaomimimo.com/v1");
   });
 });

@@ -63,12 +63,44 @@ The agent's files land in the `glorp-workspaces` volume — inspect them with
 Two ways to give the agent model access:
 
 1. **Env vars** (standard providers): `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-   `OPENROUTER_API_KEY`, … — set them in `docker compose` (already wired).
+   `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `MIMO_API_KEY`,
+   `GLM_API_KEY`, `KIMI_API_KEY` — set them in `docker compose` (already wired).
+   Each provider also honors a `<PROVIDER>_BASE_URL` override
+   (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `MIMO_BASE_URL`, `GLM_BASE_URL`,
+   `KIMI_BASE_URL`, …) so a custom / regional / coding-plan endpoint works with
+   **env vars alone — no `credentials.json` needed**. Resolution order:
+   mounted credentials > `<PROVIDER>_BASE_URL` > the provider's built-in default.
 2. **Mount your `credentials.json`** (for custom providers / your existing
    profiles): uncomment in `docker-compose.yml`:
    ```yaml
    - ${HOME}/.glorp/credentials.json:/data/credentials.json:ro
    ```
+
+### Coding / token plans (Xiaomi MiMo, Zhipu GLM, Moonshot Kimi)
+
+These are first-class providers — pick with `--provider` (or auto-detect from the
+key) and override the endpoint with `<PROVIDER>_BASE_URL`. All speak
+OpenAI-compatible `Authorization: Bearer`:
+
+```bash
+# Zhipu GLM coding plan (default base = z.ai coding endpoint)
+GLM_API_KEY=…  glorp garage --provider glm --model glm-5.2
+#   mainland:  GLM_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4
+
+# Moonshot Kimi (default base = api.moonshot.ai/v1)
+KIMI_API_KEY=…  glorp garage --provider kimi --model kimi-k2.7-code
+#   mainland:  KIMI_BASE_URL=https://api.moonshot.cn/v1
+
+# Xiaomi MiMo Token Plan — point MIMO_BASE_URL at your regional plan endpoint
+MIMO_API_KEY=tp-…  MIMO_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1 \
+  glorp garage --provider mimo --model mimo-v2.5-pro
+```
+
+> ⚠️ These subscription *coding plans* are intended for interactive coding —
+> MiMo's Token Plan ToS forbids backends/automated scripts, and GLM/Kimi carry
+> similar intent. Running them under an autonomous task server may breach the
+> provider's terms; the pay-as-you-go API keys (different endpoints) don't have
+> that restriction.
 
 ## Why it's safe to "let it do stuff"
 

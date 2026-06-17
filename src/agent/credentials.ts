@@ -12,6 +12,8 @@ export type KnownProvider =
   | "gemini"
   | "groq"
   | "mimo"
+  | "glm"
+  | "kimi"
   | "ollama";
 
 export type ProviderId = KnownProvider | string; // "custom-<name>" for user-defined.
@@ -35,6 +37,9 @@ export interface KnownProviderMeta {
   id: KnownProvider;
   label: string;
   envVar: string;
+  /** Env var that overrides the provider's default base URL (region / coding-plan
+   *  endpoint), honored by the model picker. Conventional `<PROVIDER>_BASE_URL`. */
+  baseUrlEnvVar?: string;
   description: string;
   defaultModels: string[];
   needsApiKey: boolean;
@@ -46,6 +51,7 @@ export const KNOWN_PROVIDERS: KnownProviderMeta[] = [
     id: "anthropic",
     label: "Anthropic (Claude)",
     envVar: "ANTHROPIC_API_KEY",
+    baseUrlEnvVar: "ANTHROPIC_BASE_URL",
     description: "Claude — recommended for coding tasks",
     defaultModels: [
       "claude-opus-4-7",
@@ -61,6 +67,7 @@ export const KNOWN_PROVIDERS: KnownProviderMeta[] = [
     id: "openai",
     label: "OpenAI (GPT)",
     envVar: "OPENAI_API_KEY",
+    baseUrlEnvVar: "OPENAI_BASE_URL",
     description: "GPT-5, GPT-4.1, o-series",
     defaultModels: ["gpt-5", "gpt-4.1", "o4-mini", "o3", "o3-mini"],
     needsApiKey: true,
@@ -70,6 +77,7 @@ export const KNOWN_PROVIDERS: KnownProviderMeta[] = [
     id: "openrouter",
     label: "OpenRouter (any model)",
     envVar: "OPENROUTER_API_KEY",
+    baseUrlEnvVar: "OPENROUTER_BASE_URL",
     description: "Routed access to most models via one key",
     defaultModels: [
       "anthropic/claude-sonnet-4",
@@ -99,6 +107,7 @@ export const KNOWN_PROVIDERS: KnownProviderMeta[] = [
     id: "gemini",
     label: "Google Gemini",
     envVar: "GEMINI_API_KEY",
+    baseUrlEnvVar: "GEMINI_BASE_URL",
     description: "Gemini 2.5 family",
     defaultModels: ["gemini-2.5-pro", "gemini-2.5-flash"],
     needsApiKey: true,
@@ -108,6 +117,7 @@ export const KNOWN_PROVIDERS: KnownProviderMeta[] = [
     id: "groq",
     label: "Groq (fast)",
     envVar: "GROQ_API_KEY",
+    baseUrlEnvVar: "GROQ_BASE_URL",
     description: "Fast inference for Llama and DeepSeek-R1 distills",
     defaultModels: [
       "llama-3.3-70b-versatile",
@@ -121,10 +131,31 @@ export const KNOWN_PROVIDERS: KnownProviderMeta[] = [
     id: "mimo",
     label: "Xiaomi MiMo",
     envVar: "MIMO_API_KEY",
-    description: "Xiaomi MiMo reasoning models",
-    defaultModels: ["mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-omni"],
+    baseUrlEnvVar: "MIMO_BASE_URL",
+    description: "Xiaomi MiMo reasoning models (set MIMO_BASE_URL for a Token Plan regional endpoint)",
+    defaultModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni"],
     needsApiKey: true,
     reasoningCapableModelMatchers: [/^mimo/],
+  },
+  {
+    id: "glm",
+    label: "Zhipu GLM (coding plan)",
+    envVar: "GLM_API_KEY",
+    baseUrlEnvVar: "GLM_BASE_URL",
+    description: "Zhipu/Z.ai GLM — defaults to the coding-plan endpoint; set GLM_BASE_URL for the general or mainland (bigmodel.cn) endpoint",
+    defaultModels: ["glm-5.2", "glm-4.7", "glm-4.5-air", "glm-4.6"],
+    needsApiKey: true,
+    reasoningCapableModelMatchers: [/^glm-/],
+  },
+  {
+    id: "kimi",
+    label: "Moonshot Kimi (coding)",
+    envVar: "KIMI_API_KEY",
+    baseUrlEnvVar: "KIMI_BASE_URL",
+    description: "Moonshot Kimi coding models; set KIMI_BASE_URL for the mainland (.cn) or dedicated Kimi Code endpoint",
+    defaultModels: ["kimi-k2.7-code", "kimi-for-coding", "kimi-k2-turbo-preview"],
+    needsApiKey: true,
+    reasoningCapableModelMatchers: [/^kimi-/],
   },
   {
     id: "ollama",
