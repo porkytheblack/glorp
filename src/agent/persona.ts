@@ -72,6 +72,12 @@ export function taskWorkerPreamble(taskType: string, deliverable?: DeliverableCo
       `**Never deliver an intermediate as the final result.** A JSON storyboard, spec, plan, manifest, or a written description of the work is a work product, not a deliverable. Do not hand one back in place of ${expected}. If you have only produced an intermediate representation, you are not done — render it into the real artifact and deliver that (unless the task explicitly asks for the intermediate format).`,
     );
   }
+  if (deliverable?.gitRequired) {
+    const repo = deliverable.gitRequired.repoDir ?? "app";
+    lines.push(
+      `**This is a repository task — your deliverable is a PULL REQUEST, not files in ./${repo}.** This sandbox is ephemeral: anything you don't commit and push is discarded and helps no one. So: work on a feature branch (never the default — \`git switch -c <branch>\`), commit, \`git push -u origin <branch>\`, and open a PR with \`gh pr create\` (credentials are already wired). deliver_result will REJECT until an open PR exists for your branch, telling you exactly which step is missing. If — and only if — the task genuinely needs no code change, call deliver_result with \`data: { "no_change": true }\` and explain why in the summary.`,
+    );
+  }
   lines.push(
     `On long jobs, call **report_progress** with a brief note so the requester can follow along; it never pauses you.`,
     `If — and only if — you need a decision or information that you cannot reasonably infer, use **ask_choice** / **ask_text** / **ask_confirm**. These pause the task until the requester answers, so reserve them for genuine forks. Otherwise work to completion on your own.`,
