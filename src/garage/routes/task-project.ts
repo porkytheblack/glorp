@@ -134,9 +134,13 @@ export async function buildTaskDto(
   const dto = session?.toDto();
   const questions = (session?.openSlots() ?? []).filter((s) => !s.isPermissionRequest).map(toQuestion);
   // The sink only writes task-result.json when the deliverable contract passes,
-  // so a declared result with files on disk IS the satisfied signal.
-  const requiresDeliverable = !!record.deliverable?.required;
-  const deliverableSatisfied = !!declared && files.length > 0;
+  // so a declared result IS the satisfied signal. File contracts also need a
+  // file on disk; a git contract (deliverable is a pushed branch + PR, not
+  // files) is satisfied by the declared result alone — the sink already proved
+  // the PR exists before writing it.
+  const gitContract = !!record.deliverable?.gitRequired;
+  const requiresDeliverable = !!record.deliverable?.required || gitContract;
+  const deliverableSatisfied = !!declared && (files.length > 0 || gitContract);
   const status = projectStatus({
     provisionError: record.provision_error,
     hasSession: !!session,
