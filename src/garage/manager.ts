@@ -77,6 +77,29 @@ export class WorkspaceError extends Error {}
  */
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,120}$/;
 
+/** Why a LOADED session was kept (not reaped) on an idle-GC sweep. */
+export type IdleSkipReason = "busy" | "watched" | "awaiting-input" | "fresh";
+
+/** One kept session and the condition pinning its agent host. */
+export interface IdleSkipEntry {
+  id: string;
+  reason: IdleSkipReason;
+  /** Seconds since the session's last bridge event. */
+  idleSec: number;
+  /** Connected WebSocket clients (the "watched" pin). */
+  clients: number;
+}
+
+/** Outcome of one `reapIdleReport` pass over a namespace's live sessions. */
+export interface IdleSweepReport {
+  /** Loaded sessions examined (dormant ones hold no host and are excluded). */
+  scanned: number;
+  /** Ids whose agent host was unloaded this pass. */
+  reaped: string[];
+  /** Loaded sessions kept, each with the reason it survived. */
+  skipped: IdleSkipEntry[];
+}
+
 export class SessionManager {
   private sessions = new Map<string, GarageSession>();
   private readonly workspaces: WorkspaceStore;
@@ -397,33 +420,52 @@ export class SessionManager {
   /**
    * Reclaim idle live sessions to free the agent host they hold. A session is
    * reaped only when its handle is built (`loaded`), it isn't busy, no WebSocket
-   * client is watching it, and it has been idle for at least `idleMs`. Reaping
-   * flushes + shuts the handle but KEEPS the on-disk snapshot, so the session
-   * goes dormant and rehydrates transparently on the next access — no data loss,
-   * no resurrection surprise. Returns the ids it reclaimed. `idleMs <= 0` is a
-   * no-op (GC disabled). This is the engine behind the garage idle-session GC.
+   * client is watching it, no display slot is awaiting an answer, and it has been
+   * idle for at least `idleMs`. Reaping flushes + shuts the handle but KEEPS the
+   * on-disk snapshot, so the session goes dormant and rehydrates transparently on
+   * the next access — no data loss, no resurrection surprise. Returns the ids it
+   * reclaimed. `idleMs <= 0` is a no-op (GC disabled). This is the engine behind
+   * the garage idle-session GC.
    */
   async reapIdle(idleMs: number, now: number = Date.now()): Promise<string[]> {
-    if (idleMs <= 0) return [];
-    const reaped: string[] = [];
+    return (await this.reapIdleReport(idleMs, now)).reaped;
+  }
+
+  /**
+   * The reaping pass with per-session diagnostics. Identical reclamation to
+   * `reapIdle`, but also reports every LOADED session it KEPT and why — so the
+   * GC sweep can log which condition (busy / watched / awaiting-input / fresh)
+   * is pinning each session's agent host. Dormant sessions hold no host and are
+   * left out of the report entirely.
+   */
+  async reapIdleReport(idleMs: number, now: number = Date.now()): Promise<IdleSweepReport> {
+    const report: IdleSweepReport = { scanned: 0, reaped: [], skipped: [] };
+    if (idleMs <= 0) return report;
     for (const session of [...this.sessions.values()]) {
-      if (!session.loaded) continue; // dormant — holds no agent host
-      if (session.stats.busy || session.state === "destroyed") continue;
-      if (session.stream.size > 0) continue; // a client is actively watching
-      if (session.openSlots().length > 0) continue; // a task/prompt is awaiting an answer (G2)
-      if (now - session.lastActivity < idleMs) continue;
+      const verdict = classifyIdle(session, idleMs, now);
+      if (verdict === "dormant") continue; // no agent host to reclaim
+      report.scanned++;
+      if (verdict !== "reap") {
+        report.skipped.push({
+          id: session.id,
+          reason: verdict,
+          idleSec: Math.round((now - session.lastActivity) / 1000),
+          clients: session.stream.size,
+        });
+        continue;
+      }
       await session.flush().catch(() => {});
       try {
         await session.destroy(); // shuts the handle; snapshot stays on disk
         this.sessions.delete(session.id);
-        reaped.push(session.id);
+        report.reaped.push(session.id);
       } catch (err) {
         // Keep it registered so a later sweep (or shutdown) can retry teardown,
         // and don't let one failure abort reaping the rest of this pass.
         console.warn(`[glorp-garage] gc: failed to unload session ${session.id}:`, err);
       }
     }
-    return reaped;
+    return report;
   }
 
   private resolveWorkspacePath(input: CreateSessionInput, id: string): string {
@@ -467,6 +509,24 @@ export class SessionManager {
       throw new WorkspaceError(`Workspace not usable: ${workspace} (${msg})`);
     }
   }
+}
+
+/**
+ * The idle-GC verdict for one session, mirroring `reapIdleReport`'s guards in
+ * order: "dormant" (no host — skip silently), a skip reason for a kept loaded
+ * session, or "reap" once every condition clears. Pure read; no side effects.
+ */
+function classifyIdle(
+  session: GarageSession,
+  idleMs: number,
+  now: number,
+): IdleSkipReason | "dormant" | "reap" {
+  if (!session.loaded) return "dormant";
+  if (session.stats.busy || session.state === "destroyed") return "busy";
+  if (session.stream.size > 0) return "watched"; // a client is connected
+  if (session.openSlots().length > 0) return "awaiting-input"; // a prompt/permission is open
+  if (now - session.lastActivity < idleMs) return "fresh";
+  return "reap";
 }
 
 function workspaceDto(w: Workspace, sessionCount: number, totals: UsageTotals): WorkspaceDto {

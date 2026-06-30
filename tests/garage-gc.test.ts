@@ -44,7 +44,7 @@ interface FakeSession {
 
 function fakeLoaded(
   id: string,
-  opts: { busy?: boolean; clients?: number; ageMs?: number; state?: string } = {},
+  opts: { busy?: boolean; clients?: number; ageMs?: number; state?: string; slots?: number } = {},
 ): FakeSession {
   return {
     id,
@@ -54,7 +54,7 @@ function fakeLoaded(
     stream: { size: opts.clients ?? 0 },
     lastActivity: Date.now() - (opts.ageMs ?? 0),
     destroyed: false,
-    openSlots: () => [],
+    openSlots: () => Array.from({ length: opts.slots ?? 0 }, () => ({})),
     async flush() {},
     async destroy() {
       this.destroyed = true;
@@ -116,5 +116,46 @@ describe("SessionManager.reapIdle", () => {
     inject(mgr, f);
     expect(await mgr.reapIdle(60_000)).toEqual([]);
     expect(mgr.get("boom")).toBeDefined();
+  });
+});
+
+describe("SessionManager.reapIdleReport (GC observability)", () => {
+  it("reports the reaped ids, the scanned count, and why each session was kept", async () => {
+    const mgr = manager(tmp());
+    inject(mgr, fakeLoaded("busy", { busy: true, ageMs: 10 * 60_000 }));
+    inject(mgr, fakeLoaded("watched", { clients: 2, ageMs: 10 * 60_000 }));
+    inject(mgr, fakeLoaded("asking", { slots: 1, ageMs: 10 * 60_000 }));
+    inject(mgr, fakeLoaded("fresh", { ageMs: 1_000 }));
+    inject(mgr, fakeLoaded("old", { ageMs: 10 * 60_000 }));
+
+    const report = await mgr.reapIdleReport(60_000);
+
+    expect(report.reaped).toEqual(["old"]);
+    expect(report.scanned).toBe(5); // every loaded session, reaped or kept
+    const byReason = Object.fromEntries(report.skipped.map((s) => [s.id, s.reason]));
+    expect(byReason).toEqual({
+      busy: "busy",
+      watched: "watched",
+      asking: "awaiting-input",
+      fresh: "fresh",
+    });
+    // The "watched" entry carries its connected-client count for the log.
+    expect(report.skipped.find((s) => s.id === "watched")?.clients).toBe(2);
+  });
+
+  it("excludes dormant (unloaded) sessions — they hold no agent host", async () => {
+    const mgr = manager(tmp());
+    const dormant = fakeLoaded("dormant", { ageMs: 10 * 60_000 });
+    dormant.loaded = false;
+    inject(mgr, dormant);
+
+    const report = await mgr.reapIdleReport(60_000);
+    expect(report).toEqual({ scanned: 0, reaped: [], skipped: [] });
+  });
+
+  it("scans nothing when the TTL is disabled (<= 0)", async () => {
+    const mgr = manager(tmp());
+    inject(mgr, fakeLoaded("old", { ageMs: 10 * 60_000 }));
+    expect(await mgr.reapIdleReport(0)).toEqual({ scanned: 0, reaped: [], skipped: [] });
   });
 });
