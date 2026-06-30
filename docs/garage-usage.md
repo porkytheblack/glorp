@@ -449,6 +449,9 @@ A template's **`env`** map is exported into the worker's runtime, so the agent
   even see, use operator-managed params (`GLORP_GARAGE_TASK_PARAM_*`, see
   [tasks.md](./tasks.md)) and reference them the same way.
 
+> Integrating `env` into a template? See the focused
+> [template `env` quick guide](./template-env.md) — shape, rules, guarantees, and gotchas.
+
 Create from a template:
 
 ```bash
