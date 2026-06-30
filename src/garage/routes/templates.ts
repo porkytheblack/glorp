@@ -19,6 +19,7 @@ function summarize(t: Template): TemplateSummaryDto {
     repo_count: t.repos?.length ?? 0,
     skill_count: t.skills?.length ?? 0,
     mcp_count: t.mcp?.length ?? 0,
+    env_count: Object.keys(t.env ?? {}).length,
     has_system_prompt: typeof t.system_prompt === "string",
     params: (t.params ?? []).map(paramDto),
   };

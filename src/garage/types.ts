@@ -145,6 +145,7 @@ export interface TemplateSummaryDto {
   repo_count: number;
   skill_count: number;
   mcp_count: number;
+  env_count: number;
   has_system_prompt: boolean;
   params: TemplateParamDto[];
 }

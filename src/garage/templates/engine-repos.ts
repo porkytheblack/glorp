@@ -9,7 +9,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { TemplateError, type Template, type TemplateRepo } from "./types.ts";
-import { isWithin, type Interpolator, type SectionSpawn } from "./engine-shared.ts";
+import { isWithin, shq, type Interpolator, type SectionSpawn } from "./engine-shared.ts";
 import type { ProvisionContext } from "./engine.ts";
 
 /**
@@ -84,11 +84,6 @@ async function cloneRepo(
       writeGhAuthBridge(workspace, target, slug);
     }
   }
-}
-
-/** Single-quote a value for safe inlining into a generated shell script. */
-function shq(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 /**
