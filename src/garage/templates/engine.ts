@@ -1,7 +1,8 @@
 /**
  * Executes a v2 template into a target workspace. Sections run in a fixed order
- *   params validation → repos → steps → skills → system_prompt → mcp
- * so files land before the skills/prompt/MCP that may reference them. Every
+ *   params validation → repos → env → steps → skills → system_prompt → mcp
+ * so files land before the skills/prompt/MCP that may reference them. `env`
+ * runs after repos so it appends to (never clobbers) the gh-auth bridge. Every
  * template-author string is interpolated (`{param:NAME}` / `{env:VAR}`) just
  * before use; substituted values may be secrets, so they are collected and
  * scrubbed out of any error message surfaced to the API caller — nothing
@@ -14,6 +15,7 @@ import { TemplateError, type Template, type TemplateStep, type TemplateMcpProvid
 import type { GitTokenSource } from "../git-tokens.ts";
 import { isWithin } from "./engine-shared.ts";
 import { provisionRepos } from "./engine-repos.ts";
+import { provisionEnv } from "./engine-env.ts";
 import { provisionSkills, provisionSystemPrompt, provisionMcp } from "./engine-sections.ts";
 
 export { gitAuthEnv } from "./engine-repos.ts";
@@ -72,6 +74,7 @@ export async function provision(
   validateParams(template, params, secrets);
 
   await provisionRepos(template, workspace, ctx, interp, secrets, spawn);
+  provisionEnv(template, workspace, interp);
   await runSteps(template.steps ?? [], params, workspace, secrets);
   provisionSkills(template, workspace, ctx, interp);
   provisionSystemPrompt(template, workspace, interp);

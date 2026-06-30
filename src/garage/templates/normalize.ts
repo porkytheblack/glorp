@@ -37,16 +37,32 @@ function normalizeDeliverable(raw: unknown): DeliverableContract | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/**
+ * Coerce a raw `env` into a string→string map, dropping any non-string value
+ * (one bad entry never disables the whole template). Returns undefined when
+ * nothing usable remains.
+ */
+function normalizeEnv(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function normalizeTemplate(raw: Partial<Template>, fallbackName?: string): Template | undefined {
   const name = typeof raw.name === "string" && raw.name ? raw.name : fallbackName;
   if (!name) return undefined;
+  const env = normalizeEnv(raw.env);
   // A template must provision SOMETHING — any v1 or v2 section qualifies.
   const hasContent =
     Array.isArray(raw.steps) ||
     Array.isArray(raw.repos) ||
     Array.isArray(raw.skills) ||
     Array.isArray(raw.mcp) ||
-    typeof raw.system_prompt === "string";
+    typeof raw.system_prompt === "string" ||
+    env !== undefined;
   if (!hasContent) return undefined;
   return {
     name,
@@ -56,6 +72,7 @@ export function normalizeTemplate(raw: Partial<Template>, fallbackName?: string)
     skills: Array.isArray(raw.skills) ? raw.skills : undefined,
     system_prompt: typeof raw.system_prompt === "string" ? raw.system_prompt : undefined,
     mcp: Array.isArray(raw.mcp) ? raw.mcp : undefined,
+    env,
     params: Array.isArray(raw.params) ? raw.params : undefined,
     deliverable: normalizeDeliverable(raw.deliverable),
   };

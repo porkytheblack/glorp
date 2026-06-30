@@ -386,6 +386,24 @@ point a task at its own infrastructure — and they are **removed from
 param the operator manages no longer needs to be passed at submit time even if
 the template declares it `required`.
 
+### Prefilled, isolated environment variables
+
+To hand a task **environment variables** the agent reads at runtime — whether
+from a submitted param or an operator-managed one — declare a template `env` map.
+Each value is interpolated (`{param:NAME}` / `{env:VAR}`) and exported into that
+task's own workspace, cleanly isolated from every other task and never written
+to the shared host environment:
+
+```jsonc
+{
+  "params": [{ "name": "STRIPE_KEY", "required": true, "secret": true }],
+  "env": { "STRIPE_KEY": "{param:STRIPE_KEY}", "RENDERER_URL": "{param:RENDERER_URL}" }
+}
+```
+
+The submitting app just passes `params`; secrets are scrubbed from errors. See
+[garage-usage.md → Runtime environment variables](./garage-usage.md#runtime-environment-variables-env).
+
 ## REST reference
 
 All paths are under `/api/v1` (and the bare root), `Authorization: Bearer <key>`,

@@ -418,6 +418,40 @@ Templates provision a fresh workspace before the agent starts. Put JSON files in
 - Interpolation: `{param:NAME}` from the create request's `params`, `{env:VAR}` from Garage's environment. Interpolated values (potential secrets) are scrubbed from error messages.
 - Steps run sequentially; on any failure the workspace is cleaned up and creation fails.
 
+### Runtime environment variables (`env`)
+
+A template's **`env`** map is exported into the worker's runtime, so the agent
+(and every `bash` command it runs) reads them as ordinary environment variables
+— no `export` boilerplate, no shell step. Each value is interpolated
+(`{param:NAME}` / `{env:VAR}`) and written, shell-quoted, into the workspace's
+`.glorp/gh-env.sh` script, which `BASH_ENV` sources before every command.
+
+```json
+{
+  "description": "A task with prefilled, isolated env",
+  "params": [{ "name": "STRIPE_KEY", "required": true, "secret": true }],
+  "env": {
+    "STRIPE_KEY": "{param:STRIPE_KEY}",
+    "API_BASE": "https://api.example.com",
+    "DEPLOY_REGION": "{env:DEPLOY_REGION}"
+  }
+}
+```
+
+- **Cleanly isolated** — the script lives in *this* task's workspace and nowhere
+  else, so one task's env can never leak into another's (the host process env is
+  never mutated).
+- **Secret-safe** — a value's secrecy is inherited from any `secret` param it
+  references; interpolated values are scrubbed from error messages and never
+  logged. Names must be valid shell identifiers (`[A-Za-z_][A-Za-z0-9_]*`).
+- An external service that submits a task just passes the values as `params`;
+  the template maps them into `env`. For infra secrets the submitter shouldn't
+  even see, use operator-managed params (`GLORP_GARAGE_TASK_PARAM_*`, see
+  [tasks.md](./tasks.md)) and reference them the same way.
+
+> Integrating `env` into a template? See the focused
+> [template `env` quick guide](./template-env.md) — shape, rules, guarantees, and gotchas.
+
 Create from a template:
 
 ```bash

@@ -285,6 +285,98 @@ describe("Template v2 — mcp", () => {
   });
 });
 
+describe("Template v2 — env", () => {
+  /** Read VAR exactly the way the worker would: bash sources BASH_ENV before -c. */
+  function sourced(ghEnvFile: string, varName: string): string {
+    const r = Bun.spawnSync(["bash", "-c", `printf '%s' "$${varName}"`], {
+      env: { ...process.env, BASH_ENV: ghEnvFile },
+    });
+    return r.stdout.toString();
+  }
+
+  it("exports declared env vars into the BASH_ENV script the agent sources", async () => {
+    const ws = tmp("ws-");
+    process.env.GLORP_TEST_HOST = "host.internal";
+    try {
+      const t: Template = {
+        name: "t",
+        params: [{ name: "tok", secret: true }],
+        env: { API_TOKEN: "{param:tok}", API_HOST: "{env:GLORP_TEST_HOST}", REGION: "eu-west-1" },
+      };
+      await provision(t, { tok: "sekret-123" }, ws, ctx());
+      const file = path.join(ws, ".glorp", "gh-env.sh");
+      expect(sourced(file, "API_TOKEN")).toBe("sekret-123");
+      expect(sourced(file, "API_HOST")).toBe("host.internal");
+      expect(sourced(file, "REGION")).toBe("eu-west-1");
+    } finally {
+      delete process.env.GLORP_TEST_HOST;
+    }
+  });
+
+  it("shell-quotes values so spaces/quotes/`$`/`;` are literal, never expanded or injected", async () => {
+    const ws = tmp("ws-");
+    const tricky = "hi $USER; echo OWNED > owned.txt $(date) it's";
+    await provision({ name: "t", env: { TRICKY: tricky } }, {}, ws, ctx());
+    const file = path.join(ws, ".glorp", "gh-env.sh");
+    expect(sourced(file, "TRICKY")).toBe(tricky); // verbatim — no expansion
+    expect(fs.existsSync(path.join(ws, "owned.txt"))).toBe(false); // no injection
+  });
+
+  it("appends to the gh-auth bridge without clobbering it (both survive)", async () => {
+    const ws = tmp("ws-");
+    const fixture = gitFixture();
+    const gitTokens = { getToken: async () => "ghs_FAKE_TOKEN" } as unknown as NonNullable<ProvisionContext["gitTokens"]>;
+    const t: Template = {
+      name: "t",
+      repos: [{ url: fixture, dest: "repo", auth: "github" }],
+      env: { DEPLOY_ENV: "staging" },
+    };
+    await provision(t, {}, ws, ctx({ gitTokens }));
+    const file = path.join(ws, ".glorp", "gh-env.sh");
+    const body = fs.readFileSync(file, "utf-8");
+    expect(body).toContain("export GH_TOKEN"); // gh bridge still present
+    expect(body).toContain("export DEPLOY_ENV="); // env appended after it
+    expect(sourced(file, "DEPLOY_ENV")).toBe("staging");
+  });
+
+  it("creates the script even when no authed repo wrote one", async () => {
+    const ws = tmp("ws-");
+    await provision({ name: "t", env: { ONLY: "value" } }, {}, ws, ctx());
+    expect(sourced(path.join(ws, ".glorp", "gh-env.sh"), "ONLY")).toBe("value");
+  });
+
+  it("rejects an env var name that is not a valid shell identifier", async () => {
+    const ws = tmp("ws-");
+    await expect(
+      provision({ name: "t", env: { "BAD NAME": "x" } }, {}, ws, ctx()),
+    ).rejects.toThrow(/not a valid shell identifier/);
+    const ws2 = tmp("ws-");
+    await expect(
+      provision({ name: "t", env: { "1LEADING": "x" } }, {}, ws2, ctx()),
+    ).rejects.toThrow(/not a valid shell identifier/);
+  });
+
+  it("registers an interpolated env value as a secret, scrubbing it from later errors", async () => {
+    // `host` isn't declared secret, so only the env section's interpolation can
+    // put its value into the secrets set — proving env values are collected.
+    const ws = tmp("ws-");
+    const t: Template = {
+      name: "t",
+      params: [{ name: "host" }],
+      env: { API_HOST: "{param:host}" },
+      steps: [{ type: "shell", command: "echo SECRET_HOST >&2; exit 1" }],
+    };
+    let msg = "";
+    try {
+      await provision(t, { host: "SECRET_HOST" }, ws, ctx());
+    } catch (e) {
+      msg = e instanceof Error ? e.message : String(e);
+    }
+    expect(msg).not.toContain("SECRET_HOST");
+    expect(msg).toContain("***");
+  });
+});
+
 describe("Template v2 — ordering", () => {
   it("runs repos before steps before system_prompt (a step sees the clone)", async () => {
     const ws = tmp("ws-");
@@ -369,6 +461,7 @@ describe("Template v2 — GET /templates wire shape", () => {
         skills: [{ name: "s", content: "body" }],
         system_prompt: "prompt",
         mcp: [{ provider: "linear", url: "https://x/mcp" }],
+        env: { DEPLOY_ENV: "prod" },
         params: [{ name: "tok", secret: true, required: true }],
       }),
     );
@@ -387,6 +480,7 @@ describe("Template v2 — GET /templates wire shape", () => {
         repo_count: 1,
         skill_count: 1,
         mcp_count: 1,
+        env_count: 1,
         has_system_prompt: true,
       });
       expect(rich.params).toEqual([

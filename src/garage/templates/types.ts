@@ -119,6 +119,16 @@ export interface Template {
   system_prompt?: string;
   /** MCP providers provisioned after files land. */
   mcp?: TemplateMcpProvider[];
+  /**
+   * Environment variables exported into the worker's runtime. Each value is
+   * interpolated (`{param:NAME}` / `{env:VAR}`) and written, shell-quoted, into
+   * the per-workspace `.glorp/gh-env.sh` script that `BASH_ENV` sources before
+   * every command — so the agent reads them as ordinary env vars. Names must be
+   * valid shell identifiers (`[A-Za-z_][A-Za-z0-9_]*`); a value's secrecy is
+   * inherited from any `secret` param it references (scrubbed from errors).
+   * Cleanly isolated: the script lives in this task's workspace, nowhere else.
+   */
+  env?: Record<string, string>;
   /** Declared parameters; required ones are validated before provisioning. */
   params?: TemplateParamDecl[];
   /**

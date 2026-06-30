@@ -22,3 +22,8 @@ export function isWithin(root: string, target: string): boolean {
   const rel = path.relative(root, target);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
+
+/** Single-quote a value for safe inlining into a generated shell script. */
+export function shq(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
