@@ -53,6 +53,27 @@ dormant and rehydrates on the next access. A background sweep
   `GLORP_GARAGE_IDLE_TTL_MS` / `GLORP_GARAGE_GC_INTERVAL_MS`. Set the TTL to
   `0` to disable.
 
+**Seeing why a session wasn't reclaimed.** Every sweep logs one summary line per
+namespace plus a line per *kept* loaded session and the exact condition pinning
+it — so "GC isn't reclaiming my sessions" becomes answerable from the log:
+
+```text
+[glorp-garage] gc: ns=default scanned=4 reaped=1 kept=3 (watched=2, fresh=1)
+[glorp-garage] gc:   keep s_abc: watched — 1 connected client (idle 5421s)
+[glorp-garage] gc:   keep s_def: fresh — idle 12s < ttl 1800s
+[glorp-garage] gc:   keep s_ghi: watched — 2 connected clients (idle 80s)
+```
+
+A session is reaped only when **all** of these clear: it's loaded, not `busy`,
+has **no connected WebSocket client** (`watched`), has no open prompt/permission
+(`awaiting-input`), and has been idle past the TTL (`fresh` until then).
+`watched` is the common surprise — an open dashboard tab or a poller holding the
+event-stream socket keeps a session loaded no matter how idle, because
+`reapIdle` treats a connected client as "in use". A sweep with `scanned=0` logs
+nothing (no loaded host to reclaim), and remember the count in `GET /sessions`
+doesn't drop on reap: the host is freed but the snapshot stays, so the session
+just flips to `loaded:false`.
+
 This is the *preventative* for the persistent wedge: the wedge develops under
 **churn** (many sessions created while a constrained slot is held). Stopping idle
 hosts from piling up removes the pressure that produces it. Combine with the
