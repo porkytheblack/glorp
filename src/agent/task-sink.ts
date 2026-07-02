@@ -19,6 +19,7 @@ import {
   type DeliverableContract,
   type DeliverableViolation,
 } from "./task-deliverable.ts";
+import { validateGitDeliverable } from "./task-git-deliverable.ts";
 
 /** On-disk shape of a declared deliverable (`task-result.json`). */
 export interface DeliveredResult {
@@ -146,6 +147,16 @@ export function createTaskSink(opts: TaskSinkOptions): TaskSink {
       let violations: DeliverableViolation[] = [];
       if (contract) {
         violations = await validateDeliverable({ contract, uploadsRoot, files, missing });
+        // Repo tasks deliver a pushed branch + open PR, not files: enforce it
+        // against the live git/gh state once the file checks (if any) pass.
+        if (violations.length === 0 && contract.gitRequired) {
+          violations = await validateGitDeliverable({
+            workspace: realWorkspace,
+            gitRequired: contract.gitRequired,
+            noChange:
+              (input.data as Record<string, unknown> | undefined)?.no_change === true,
+          });
+        }
       } else if (missing.length > 0) {
         // No contract, but a declared file that doesn't exist is still a mistake
         // the agent should fix rather than have silently swallowed.

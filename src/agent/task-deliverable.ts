@@ -20,6 +20,20 @@ import * as path from "node:path";
  * artifact must never be lost on a misconfigured host. Authors of piped verify
  * commands should `set -o pipefail` or test tool presence themselves.
  */
+/**
+ * A repo-task deliverable: the artifact is a PUSHED feature branch with an open
+ * pull request, not files. Enforced against git/gh state in the cloned repo at
+ * deliver time (see task-git-deliverable.ts) — the sandbox is ephemeral, so work
+ * that is never committed/pushed/proposed reaches no one.
+ */
+export interface GitDeliverable {
+  /** Workspace-relative dir of the cloned repo (default "app"). */
+  repoDir?: string;
+  /** Require an open PR for the pushed branch (default true). When false, a
+   *  pushed feature branch satisfies the contract without a PR. */
+  requirePr?: boolean;
+}
+
 export interface DeliverableContract {
   /** When true, the task is not "completed" until a satisfying deliverable is declared. */
   required?: boolean;
@@ -30,6 +44,8 @@ export interface DeliverableContract {
   /** Shell check run in uploads/ per accepted file; non-zero ⇒ rejected.
    *  `{file}` interpolates the file's absolute path (omit it to run once). */
   verify?: { command: string; timeoutMs?: number };
+  /** Repo-task contract: deliver a pushed branch + open PR (not files). */
+  gitRequired?: GitDeliverable;
   /** Human description, injected into the worker preamble and surfaced to clients. */
   description?: string;
 }
@@ -41,7 +57,8 @@ export interface TaskContext {
 }
 
 export type DeliverableViolationCode =
-  | "missing_files" | "no_files" | "wrong_extension" | "too_few" | "verify_failed";
+  | "missing_files" | "no_files" | "wrong_extension" | "too_few" | "verify_failed"
+  | "git_not_repo" | "git_on_default" | "git_not_pushed" | "git_no_pr";
 
 export interface DeliverableViolation {
   code: DeliverableViolationCode;
@@ -63,6 +80,11 @@ function fileExt(rel: string): string {
 /** A human phrase for what the contract expects, for prompts + error messages. */
 export function describeDeliverable(contract: DeliverableContract): string {
   if (contract.description) return contract.description;
+  if (contract.gitRequired) {
+    return contract.gitRequired.requirePr === false
+      ? "a pushed feature branch"
+      : "a pushed feature branch with an open pull request";
+  }
   if (contract.extensions?.length) {
     return `a ${contract.extensions.map(normExt).map((e) => "." + e).join(" / ")} file`;
   }
