@@ -24,9 +24,11 @@ export function deliverResultTool(sink: TaskSink): GloveFoldArgs<{
     description:
       "Declare the finished deliverable for this task — the authoritative result the requester receives. " +
       "Call it when the work is done (and again after a follow-up change, which replaces the prior result). " +
-      "`summary` is a short human-readable description of what you produced. List every deliverable file in " +
-      "`files` (paths relative to the workspace, e.g. 'uploads/deck.pptx' or 'output/video.mp4' — they are " +
-      "made available to the requester automatically). Use `data` for any structured result fields.",
+      "`summary` is a short human-readable description of what you produced. List EVERY finished document/" +
+      "artifact in `files` (paths relative to the workspace, e.g. 'uploads/deck.pptx' or 'output/video.mp4' — " +
+      "they are made available to the requester automatically); a task asked for several documents delivers " +
+      "them ALL in this one call. `files` is what the requester receives: the finished artifacts ONLY — never " +
+      "your generator scripts, drafts, logs, or other intermediates. Use `data` for any structured result fields.",
     inputSchema: z.object({
       summary: z.string().min(1).describe("Short description of what was produced"),
       files: z.array(z.string()).optional().describe("Deliverable file paths, relative to the workspace"),

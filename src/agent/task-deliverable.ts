@@ -9,6 +9,7 @@
  */
 
 import * as path from "node:path";
+import { sniffDeliverableFile } from "./deliverable-sniff.ts";
 
 /**
  * What artifact a task of a given template MUST yield. Absent ⇒ a text-only
@@ -41,7 +42,7 @@ export interface TaskContext {
 }
 
 export type DeliverableViolationCode =
-  | "missing_files" | "no_files" | "wrong_extension" | "too_few" | "verify_failed";
+  | "missing_files" | "no_files" | "wrong_extension" | "too_few" | "corrupt_file" | "verify_failed";
 
 export interface DeliverableViolation {
   code: DeliverableViolationCode;
@@ -129,6 +130,24 @@ export async function validateDeliverable(args: ValidateDeliverableArgs): Promis
       code: "too_few",
       message: `this task requires at least ${minCount} ${expected}; got ${accepted.length}.`,
     });
+  }
+
+  // Built-in structural check (magic bytes, PDF trailer) on every accepted
+  // file — toolchain-free, so unlike `verify` it can never be skipped. This is
+  // what stops an unopenable "pdf" or a text file named .mp4 from ever
+  // reading "completed".
+  if (violations.length === 0) {
+    for (const rel of accepted) {
+      const verdict = sniffDeliverableFile(uploadsRoot, rel);
+      if (!verdict.ok) {
+        violations.push({
+          code: "corrupt_file",
+          message:
+            `the deliverable '${rel}' is not a well-formed file: ${verdict.reason}. ` +
+            "Rebuild the artifact properly and verify it opens before delivering again.",
+        });
+      }
+    }
   }
 
   if (violations.length === 0 && contract.verify?.command) {

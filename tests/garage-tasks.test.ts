@@ -210,6 +210,8 @@ describe("task sink", () => {
 
 describe("task sink with a deliverable contract", () => {
   const mp4Contract = { required: true, extensions: ["mp4"], description: "a playable .mp4 video" };
+  // Minimal bytes that pass the built-in structural sniff (ftyp box at offset 4).
+  const mp4Bytes = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypisom-minimal")]);
 
   function sinkFor(ws: string, resultFile: string) {
     return createTaskSink({
@@ -220,7 +222,7 @@ describe("task sink with a deliverable contract", () => {
   it("accepts and persists a contract-matching artifact", async () => {
     const ws = tmp("ws-");
     fs.mkdirSync(path.join(ws, "uploads"), { recursive: true });
-    fs.writeFileSync(path.join(ws, "uploads", "movie.mp4"), "video-bytes");
+    fs.writeFileSync(path.join(ws, "uploads", "movie.mp4"), mp4Bytes);
     const resultFile = path.join(tmp(), "r.json");
     const res = await sinkFor(ws, resultFile).deliver({ summary: "the video", files: ["uploads/movie.mp4"] });
     expect(res).toEqual({ ok: true, files: ["movie.mp4"] });
@@ -238,6 +240,17 @@ describe("task sink with a deliverable contract", () => {
     expect(readDeliveredResult(resultFile)).toBeNull();
   });
 
+  it("rejects a corrupt 'mp4' (text bytes) with corrupt_file", async () => {
+    const ws = tmp("ws-");
+    fs.mkdirSync(path.join(ws, "uploads"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "uploads", "movie.mp4"), "just a storyboard in disguise");
+    const resultFile = path.join(tmp(), "r.json");
+    const res = await sinkFor(ws, resultFile).deliver({ summary: "the video", files: ["uploads/movie.mp4"] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.violations.map((v) => v.code)).toEqual(["corrupt_file"]);
+    expect(readDeliveredResult(resultFile)).toBeNull();
+  });
+
   it("rejects a deliver with no files when a deliverable is required", async () => {
     const ws = tmp("ws-");
     const resultFile = path.join(tmp(), "r.json");
@@ -251,7 +264,7 @@ describe("task sink with a deliverable contract", () => {
 describe("validateDeliverable", () => {
   it("runs an opt-in verify command and rejects on non-zero exit", async () => {
     const root = tmp("up-");
-    fs.writeFileSync(path.join(root, "a.mp4"), "x");
+    fs.writeFileSync(path.join(root, "a.mp4"), Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypisom-minimal")]));
     const v = await validateDeliverable({
       contract: { required: true, extensions: ["mp4"], verify: { command: "false" } },
       uploadsRoot: root, files: ["a.mp4"], missing: [],
@@ -261,7 +274,7 @@ describe("validateDeliverable", () => {
 
   it("passes a verify command that exits zero", async () => {
     const root = tmp("up-");
-    fs.writeFileSync(path.join(root, "a.mp4"), "x");
+    fs.writeFileSync(path.join(root, "a.mp4"), Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypisom-minimal")]));
     const v = await validateDeliverable({
       contract: { required: true, extensions: ["mp4"], verify: { command: "test -f {file}" } },
       uploadsRoot: root, files: ["a.mp4"], missing: [],
@@ -269,9 +282,40 @@ describe("validateDeliverable", () => {
     expect(v).toEqual([]);
   });
 
+  it("rejects an unopenable 'pdf' (no %PDF- header) with corrupt_file", async () => {
+    const root = tmp("up-");
+    fs.writeFileSync(path.join(root, "report.pdf"), "#!/usr/bin/env python\nprint('hi')\n");
+    const v = await validateDeliverable({
+      contract: { required: true, extensions: ["pdf"] },
+      uploadsRoot: root, files: ["report.pdf"], missing: [],
+    });
+    expect(v.map((x) => x.code)).toEqual(["corrupt_file"]);
+  });
+
+  it("rejects a truncated pdf (missing %%EOF trailer)", async () => {
+    const root = tmp("up-");
+    fs.writeFileSync(path.join(root, "report.pdf"), "%PDF-1.7\nhalf a document");
+    const v = await validateDeliverable({
+      contract: { required: true, extensions: ["pdf"] },
+      uploadsRoot: root, files: ["report.pdf"], missing: [],
+    });
+    expect(v.map((x) => x.code)).toEqual(["corrupt_file"]);
+  });
+
+  it("accepts a structurally sound pdf and office zip", async () => {
+    const root = tmp("up-");
+    fs.writeFileSync(path.join(root, "report.pdf"), "%PDF-1.7\ncontent\n%%EOF\n");
+    fs.writeFileSync(path.join(root, "deck.pptx"), Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0]));
+    const v = await validateDeliverable({
+      contract: { required: true, extensions: ["pdf", "pptx"] },
+      uploadsRoot: root, files: ["report.pdf", "deck.pptx"], missing: [],
+    });
+    expect(v).toEqual([]);
+  });
+
   it("treats a missing verify toolchain as 'skipped', not a failure", async () => {
     const root = tmp("up-");
-    fs.writeFileSync(path.join(root, "a.mp4"), "x");
+    fs.writeFileSync(path.join(root, "a.mp4"), Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypisom-minimal")]));
     const v = await validateDeliverable({
       contract: { required: true, extensions: ["mp4"], verify: { command: "definitely-not-a-real-binary-xyz {file}" } },
       uploadsRoot: root, files: ["a.mp4"], missing: [],

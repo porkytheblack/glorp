@@ -148,10 +148,14 @@ waiting on you, the task reports `needs_input`.
 **Deliverable contracts gate completion.** A task type whose template declares a
 `required` deliverable (see the template `deliverable` field) never projects as
 `completed` on a text reply alone — it stays `working` until the agent declares
-a real artifact that satisfies the contract (right file type, exists, passes the
-optional `verify` check). The worker's `deliver_result` call is rejected, with a
+a real artifact that satisfies the contract (right file type, exists, passes a
+built-in structural check, passes the optional `verify` check). The built-in
+check sniffs magic bytes per extension — a "pdf" without a `%PDF-` header or
+`%%EOF` trailer, an office file that isn't a zip, or a text file named `.mp4`
+is rejected as `corrupt_file` even when no `verify` command is configured. The
+worker's `deliver_result` call is rejected, with a
 specific reason, until then; this is what stops a "make a video" task from
-handing back a JSON storyboard or finishing with no file. Such a task remains
+handing back a JSON storyboard, an unopenable render, or finishing with no file. Such a task remains
 `working` (its session kept alive) if the agent stops without producing the
 artifact, so you can nudge it with a follow-up message — see
 [Following up](#following-up-now-fix-x).
