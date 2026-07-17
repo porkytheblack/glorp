@@ -1,6 +1,6 @@
 ---
 name: glorp
-description: Guide for downstream coding agents driving Glorp — especially Glorp Garage (the remote multi-session control plane) and its sandboxes (Garage-provisioned workspaces). Use when programmatically creating sessions, running coding agents over the REST/WebSocket API, the @porkytheblack/glorp-client SDK, or the @porkytheblack/glorp-mcp MCP server, provisioning tenant namespaces, sandboxes from templates, exchanging files, or wiring Glorp into CI/orchestration.
+description: Guide for downstream coding agents driving Glorp — especially Glorp Garage (the remote multi-session control plane) and its sandboxes (Garage-provisioned workspaces). Use when programmatically creating sessions, running coding agents over the REST/WebSocket API, the @porkytheblack/glorp-client SDK, or the @porkytheblack/glorp-mcp MCP server, provisioning tenant namespaces, sandboxes from templates, exchanging files, or wiring Glorp into CI/orchestration. Also use for the higher-level Task API — the black-box surface where you submit a typed job (make a video, build a deck, review a PR, fix a bug) and poll one object for the result, without managing sessions, templates, or the event stream.
 ---
 
 # Driving Glorp & Glorp Garage
@@ -21,6 +21,17 @@ a mesh for fan-out). You can run it three ways:
 > **Don't conflate two subsystems.** "Glorp **Garage**" (this skill) is the multi-session
 > HTTP/WS control plane. It is *not* the `station-signal` fleet runner (a separate async
 > fan-out framework). Garage was formerly named "Station", so older notes may use that name.
+
+### Two surfaces — pick the altitude you need
+
+Garage exposes the same runtime at two levels. Choose deliberately:
+
+| Surface | You manage | Reach for it when |
+|---|---|---|
+| **Sessions** (most of this skill) | sessions, workspaces, permission modes, the event stream | you want fine-grained control — multi-turn conversations, live streaming, custom orchestration |
+| **Task API** ([jump](#task-api--typed-jobs-one-object-to-poll)) | *one object* — submit an `input`, poll a `result` | you just want a typed job done (a deck, a video, a PR fix) and a deliverable back, with no session/stream bookkeeping |
+
+Tasks are built **on top of** sessions (a task *is* a worker session under the hood), so the two coexist — you can start with the Task API and drop to the session layer only if you outgrow it.
 
 ---
 
@@ -307,6 +318,93 @@ cleanly if the configured key isn't admin. Full guide: [`docs/mcp.md`](./docs/mc
 
 ---
 
+## Task API — typed jobs, one object to poll
+
+The **black-box surface**: hand Garage a job and get a result, without touching
+sessions, templates, or the event stream. **A task is one object** — an `input`
+you submit and a `result` you poll (or receive via webhook) until it's
+`completed`/`failed`. **A task type is a template name**, so the catalog is
+self-extending: a new capability is a new template server-side, no app change.
+
+```ts
+import { createClient } from "@porkytheblack/glorp-client";
+const glorp = createClient({ endpoint, apiKey });   // or GLORP_ENDPOINT / GLORP_API_KEY
+
+// 1. Submit — returns immediately; the work runs in the background.
+const { id } = await glorp.tasks.create({
+  type: "slide-deck",
+  input: { prompt: "A 5-slide deck on our Q3 results" },
+  // permission_mode defaults to "bypass" (a task's worker runs in a fresh sandbox)
+});
+
+// 2. Wait — polls to completion, answering any questions the agent asks.
+const task = await glorp.tasks.wait(id, {
+  onQuestion: (q) => (q.kind === "confirm" ? true : q.options?.[0]?.value ?? ""),
+  onProgress: (note) => console.log("…", note),
+});
+
+// 3. Use the result.
+if (task.status === "completed") {
+  console.log(task.result.summary);
+  for (const f of task.result.files) {                 // deliverables
+    await fs.writeFile(f.path, await glorp.tasks.downloadFile(id, f.path));
+  }
+} else console.error("task failed:", task.error);
+```
+
+**Lifecycle** (projected live on every read, never stored):
+`queued → working ⇄ needs_input → completed | failed`, with `failed` reachable
+from any state. A `defer_start` submit adds a `staged` step —
+`queued → staged → (upload inputs, then start) → working` — so you can attach
+input files before the first turn runs.
+
+**What makes tasks different from a raw session:**
+
+- **Deliverable contracts gate completion.** A task type whose template declares
+  a `required` deliverable never reads `completed` on a text reply alone — it
+  stays `working` until the agent produces an artifact that satisfies the
+  contract (right file type, exists, passes a structural magic-byte check, passes
+  any `verify` command). This is the model-independent lever that stops a
+  "make a video" task from handing back a JSON storyboard or finishing with no
+  file. Nudge a stuck task with `tasks.message(id, "…")`.
+- **A cumulative usage meter** rides every read (`task.usage`: `tokens_in/out/total`,
+  `cost_usd`, `cost_known`). It's monotonic and **survives context compaction**,
+  so you can poll it, diff against your last reading, and bill the delta.
+  `cost_known: false` means an unpriced model was used — treat `cost_usd` as a floor.
+
+**The methods you'll actually call:**
+
+| Call | Does |
+|---|---|
+| `tasks.types()` | list submittable types + their typed inputs (build a form / validate) |
+| `tasks.create({ type, input:{ prompt, params? }, permission_mode?, callback_url?, defer_start? })` | submit; returns `{ id }` |
+| `tasks.wait(id, { onQuestion, onProgress })` | poll to a terminal state, answering questions |
+| `tasks.get(id)` / `tasks.list()` | read one / all task objects (own the loop yourself if you prefer) |
+| `tasks.answer(id, questionId, value)` | answer a `needs_input` question (`choice`→value, `confirm`→bool, `text`→string, `info`→null) |
+| `tasks.message(id, "now fix X")` | follow up; the task keeps its workspace + context and re-delivers |
+| `tasks.files(id)` / `tasks.downloadFile(id, path)` | list / fetch deliverables (in `uploads/`) |
+| `tasks.createWithInputs(input, files)` | the files-first path: create deferred, upload into `inputs/`, start — one call |
+| `tasks.delete(id)` | cancel + remove the session and workspace |
+
+**Webhooks (skip polling):** pass `callback_url` at submit time and Garage POSTs
+the full task object on every transition into `needs_input`/`completed`/`failed`.
+Delivery is fire-and-forget (5s timeout, **not retried**), so keep `tasks.get()`
+as the source of truth and reconcile on a timer.
+
+**Operator note:** infra secrets (a render key/URL) are **managed params** set
+once on the host (`GLORP_GARAGE_TASK_PARAM_<NAME>=…` or `taskParams` in
+`garage.json`). They're authoritative, applied to every task, and hidden from
+`tasks.types()`, so a submitting app never sees or supplies them. To hand a task
+runtime **env vars**, declare a template `env` map (`{env}`/`{param}`
+interpolated, isolated per task).
+
+Raw REST mirrors all of this under `/tasks…` (`Authorization: Bearer <key>`,
+optional `X-Glorp-Namespace`). **Full walkthrough — happy path, the task object,
+input files, answering questions, webhooks, and the REST table — is bundled at
+[`docs/tasks.md`](./docs/tasks.md).**
+
+---
+
 ## Gotchas & safety
 
 - **Don't `bypass` against a real repo.** Reserve `bypass` for sandboxes you'll delete.
@@ -324,6 +422,7 @@ cleanly if the configured key isn't admin. Full guide: [`docs/mcp.md`](./docs/mc
 
 Reference docs are bundled with this skill under [`./docs/`](./docs/):
 
+- [`docs/tasks.md`](./docs/tasks.md) — the Task API integration guide (the black-box typed-job surface)
 - [`docs/garage-usage.md`](./docs/garage-usage.md) — full usage guide (CLI, REST, WS, templates)
 - [`docs/openapi.yaml`](./docs/openapi.yaml) — the machine-readable contract
 - [`docs/remote-orchestration.md`](./docs/remote-orchestration.md) — driving Garage remotely

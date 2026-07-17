@@ -412,8 +412,10 @@ to the shared host environment:
 }
 ```
 
-The submitting app just passes `params`; secrets are scrubbed from errors. See
-[garage-usage.md → Runtime environment variables](./garage-usage.md#runtime-environment-variables-env).
+The submitting app just passes `params`; secrets are scrubbed from errors. The
+template `env` map is exported into the worker's runtime (interpolated and
+shell-quoted), so the agent and every `bash` command it runs read the values as
+ordinary environment variables — no `export` boilerplate.
 
 ## REST reference
 
