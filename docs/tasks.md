@@ -73,7 +73,7 @@ a queue worker that persists between polls, or a webhook-driven flow).
 {
   "id": "task_…",
   "type": "slide-deck",
-  "status": "completed",            // queued | working | needs_input | completed | failed
+  "status": "completed",            // queued | staged | working | needs_input | completed | failed
   "title": "Q3 deck",               // a short auto-generated label, or null
   "result": {
     "summary": "5-slide deck on Q3 results",   // the agent's own description (or null)
@@ -127,11 +127,18 @@ if (!task.usage.cost_known) console.warn("cost is a floor — an unpriced model 
 ### Status lifecycle
 
 ```
-queued ──▶ working ──▶ completed
-               │  ▲
-               ▼  │
-           needs_input ──(you answer)──┘        any state ──▶ failed
+  ┌─(defer_start)─▶ staged ─(upload inputs, then start)─┐
+queued                                                   ├─▶ working ──▶ completed
+  └──────────────────(immediate)───────────────────────┘      │  ▲
+                                                               ▼  │
+                                                           needs_input ──(you answer)──┘
+
+any state ──▶ failed
 ```
+
+An immediate submit goes `queued → working`; a `defer_start` submit settles in
+`staged` and waits for you to upload inputs and call `start` before it runs (see
+[Attaching input files](#attaching-input-files)).
 
 | Status | Meaning | What your app does |
 | --- | --- | --- |
