@@ -55,5 +55,8 @@ export function dispatchCommand(msg: ClientMessage, handle: GlorpHandle): void {
     case "remove_agent":
       void handle.removeAgent(msg.agent_id);
       break;
+    case "set_mcp_server":
+      void handle.setMcpServer(msg.server_id, msg.active);
+      break;
   }
 }

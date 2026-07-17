@@ -6,6 +6,7 @@ import { parseBuildCommand, runOrchestratorBuild } from "./runtime/build-flow.ts
 import { CredentialsStore, effectiveProviderId, findKnownProvider } from "./credentials.ts";
 import { ModelCatalog } from "./model-catalog.ts";
 import { loadProjectConfig } from "./project-config.ts";
+import { McpManager } from "./mcp/manager.ts";
 import { discoverExtensions } from "./extensions-loader.ts";
 import { bridgeDisplaySlots } from "./runtime/display-bridge.ts";
 import { continueOpenTasks, continueIfIntentOnly } from "./runtime/continuation.ts";
@@ -62,6 +63,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
   const diskExtensions = discoverExtensions(opts.workspace);
 
   const slotBridge = bridgeDisplaySlots(rawDM, bridge);
+  const mcpManager = new McpManager(projectConfig.mcp ?? {}, paths.mcpFile, bridge, opts.sessionId);
   const meshDir = paths.meshDir;
   const loopRefresh = { stats: async () => {}, plan: async () => {}, tasks: async () => {}, inbox: async () => {} };
   const wsPrompt = (await discoverWorkspaceContext(opts.workspace)).promptBlock;
@@ -106,6 +108,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     },
     task: opts.task,
     taskSink,
+    mcp: mcpManager,
   };
 
   const roster = loadRoster(paths.rosterFile, opts.sessionId);
@@ -174,6 +177,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
         bridge.emit({ type: "display_slot_pushed", slot });
       }
       hydrateAgentRecords(await orchestrator.loadPersistedAgents(), bridge);
+      mcpManager.emitStatus();
       await state.active.titleScheduler.refreshTitle();
       state.active.titleScheduler.schedule();
       emitRoster(activationDeps, state, busy);
@@ -197,6 +201,15 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     },
     async stopAgent(id, reason) { await orchestrator.stopAgent(toAgentId(id), reason); },
     promoteAgent(id) { return orchestrator.promoteAgent(toAgentId(id)); },
+    listMcpServers() { return mcpManager.list(); },
+    async setMcpServer(serverId, active) {
+      if (!mcpManager.setActive(serverId, active)) return;
+      // Rebuild the live agent so the bridged tool set matches the new active
+      // set (glove-mcp v1 can't unfold tools from a running agent). Same
+      // teardown/re-assemble path as swapProfile.
+      abortController?.abort();
+      await setActiveSpec(activationDeps, state, state.active.spec, true);
+    },
     clearPermission(toolName) { return state.active.store.clearAllPermissionsFor(toolName); },
     clearPermissionKey(key) { return state.active.store.clearPermissionKey(key); },
     listPermissions() { return state.active.store.listPermissions(); },
@@ -311,6 +324,7 @@ export async function buildGlorp(opts: BuildGlorpOptions): Promise<GlorpHandle> 
     async shutdown() {
       abortController?.abort();
       await state.active.titleScheduler.cancel();
+      await mcpManager.closeAll().catch(() => {});
       await teardownAgentMesh(state.active.meshAdapter).catch(() => {});
       await orchestrator.shutdown();
       unsubErrorLog();

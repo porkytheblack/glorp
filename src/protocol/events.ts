@@ -14,6 +14,7 @@ import type {
   ChatTurn,
   DisplaySlotEvent,
   InboxEntry,
+  McpServerStatus,
   OrchestratorAgentEvent,
   OrchestratorPhase,
   PlanDocument,
@@ -29,6 +30,7 @@ export type {
   ChatTurn,
   DisplaySlotEvent,
   InboxEntry,
+  McpServerStatus,
   OrchestratorAgentEvent,
   OrchestratorPhase,
   PlanDocument,
@@ -109,6 +111,7 @@ export interface WsOrchestratorSlot extends Envelope { type: "orchestrator_slot"
 export interface WsAgentRoster extends Envelope { type: "agent_roster"; agents: AgentInfo[]; activeId: string }
 export interface WsRunnerAgentStats extends Envelope { type: "runner_agent_stats"; agent: RunnerAgentStats }
 export interface WsTransmission extends Envelope { type: "transmission"; payload: string; severity: "low" | "medium" | "high" }
+export interface WsMcpStatus extends Envelope { type: "mcp_status"; servers: McpServerStatus[] }
 export interface WsError extends Envelope { type: "error"; message: string; detail?: string }
 
 // ── Server-only events ────────────────────────────────────────────
@@ -135,5 +138,5 @@ export type ServerMessage =
   | WsDisplaySlotPushed | WsDisplaySlotResolved
   | WsOrchestratorPhase | WsOrchestratorVerdict | WsOrchestratorAgent
   | WsOrchestratorPlan | WsOrchestratorSlot | WsAgentRoster | WsRunnerAgentStats
-  | WsTransmission | WsError
+  | WsTransmission | WsMcpStatus | WsError
   | WsModelLabelChanged | WsCommandRejected | WsProtocolError;

@@ -37,6 +37,7 @@ const BRIDGE_TYPES: ReadonlySet<string> = new Set([
   "agent_roster",
   "runner_agent_stats",
   "transmission",
+  "mcp_status",
   "permission_mode_changed",
   "error",
 ]);

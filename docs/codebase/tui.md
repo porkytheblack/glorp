@@ -180,6 +180,7 @@ Mounted by `App` based on `overlay` state, all built on `MenuList`/`OverlayHost`
 - **`ModelSwitcher`** (`model-switcher.tsx`) — `^M` pick a model/provider profile.
 - **`SessionPicker`** (`session-picker.tsx`) — `^S` switch/create sessions.
 - **`TransmissionsLog`** (`transmissions-log.tsx`) — `^T` the homeworld-comms / signals log.
+- **`McpPanel`** (`mcp-panel.tsx`) — `^E` / `/mcp` MCP server roster: connection state, tool counts, enter toggles a server (rebuilds the agent). Data flows from `mcp_status` bridge events into `state.mcpServers`; toggles go out as the `set_mcp_server` command.
 - **`PermissionsList`** (`permissions-list.tsx`) — `^P` review/revoke remembered permissions.
 - **`HelpDialog`** (`help-dialog.tsx`) — `^?` grouped, searchable keybinding reference.
 - **`OverlayHost`/`OverlayPanel`** (`overlay-host.tsx`) — shared centered-over-dimmed-content scaffolding.

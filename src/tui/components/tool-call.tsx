@@ -22,6 +22,7 @@ export function ToolCallRow({ tool }: { tool: ToolEvent }) {
     ? (tool.renderData as { old?: string; new?: string }) : null;
   const patchData = tool.name === "apply_patch" && tool.renderData
     ? (tool.renderData as { patch?: string }) : null;
+  const duration = formatDuration(tool);
 
   return (
     <box flexDirection="column" marginBottom={0}>
@@ -31,11 +32,21 @@ export function ToolCallRow({ tool }: { tool: ToolEvent }) {
         </box>
         <text fg={COLORS[tool.status]}>{glyph} </text>
         <text fg={theme.toolName}>{summarise(tool)}</text>
+        {duration && <text fg={theme.textDim}> ({duration})</text>}
       </box>
       {editData && <EditDiff editData={editData} />}
       {patchData?.patch && <PatchDiff patch={patchData.patch} />}
     </box>
   );
+}
+
+/** Elapsed time for finished tools, shown from 1s up so quick calls stay quiet. */
+function formatDuration(tool: ToolEvent): string | null {
+  if (tool.status === "running" || !tool.endedAt) return null;
+  const ms = tool.endedAt - tool.startedAt;
+  if (ms < 1000) return null;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+  return `${Math.floor(ms / 60_000)}m${Math.round((ms % 60_000) / 1000)}s`;
 }
 
 function EditDiff({ editData }: { editData: { old?: string; new?: string } }) {
@@ -71,6 +82,8 @@ function PatchDiff({ patch }: { patch: string }) {
 
 function summarise(tool: ToolEvent): string {
   const input = tool.input as Record<string, unknown> | undefined;
+  const mcp = splitMcpName(tool.name);
+  if (mcp) return `⌁ ${mcp.server} · ${mcp.tool}${input ? ` ${clip(safeStr(input), 48)}` : ""}`;
   if (!input) return tool.name;
   switch (tool.name) {
     case "read": {
@@ -88,10 +101,21 @@ function summarise(tool: ToolEvent): string {
     case "glob": return `glob ${input.pattern as string}`;
     case "grep": return `grep /${clip(input.pattern as string, 40)}/`;
     case "ls": return `ls ${(input.path as string) ?? "."}`;
+    case "web_fetch": return `fetch ${clip(input.url as string, 60)}`;
     case "glove_invoke_subagent": return `@${input.name} ${clip(input.prompt as string, 50)}`;
     case "glove_invoke_skill": return `/${input.name as string}`;
+    case "glove_update_tasks": return "update task list";
+    case "glove_post_to_inbox": return `inbox ← ${clip((input.tag as string) ?? "", 40)}`;
     default: return `${tool.name} ${clip(safeStr(input), 60)}`;
   }
+}
+
+/** Bridged MCP tools are named `<server>__<tool>` (glove-mcp namespace). */
+function splitMcpName(name: string): { server: string; tool: string } | null {
+  const sep = name.indexOf("__");
+  if (sep <= 0 || sep + 2 >= name.length) return null;
+  if (name.startsWith("glove_")) return null;
+  return { server: name.slice(0, sep), tool: name.slice(sep + 2) };
 }
 
 function clip(s: string | undefined, n: number): string {

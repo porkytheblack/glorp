@@ -1,6 +1,6 @@
 import type { IGloveRunnable } from "glove-core/glove";
 import type { PermissionStatus, ContentPart } from "glove-core/core";
-import type { AgentInfo, DisplaySlotEvent } from "../shared/events.ts";
+import type { AgentInfo, DisplaySlotEvent, McpServerStatus } from "../shared/events.ts";
 import type { Orchestrator } from "../orchestrator/orchestrator.ts";
 import type { GlorpStore } from "./store.ts";
 import type { CredentialsStore } from "./credentials.ts";
@@ -67,6 +67,13 @@ export interface GlorpHandle {
   readonly permissionMode: PermissionMode;
   /** Change the permission mode at runtime. Emits a bridge event. */
   setPermissionMode(mode: PermissionMode): void;
+  /** Configured MCP servers with live connection state. */
+  listMcpServers(): McpServerStatus[];
+  /**
+   * Connect or disconnect a configured MCP server. Persists the choice and
+   * rebuilds the live agent so the bridged tool set matches the new active set.
+   */
+  setMcpServer(serverId: string, active: boolean): Promise<void>;
 }
 
 export interface BuildGlorpOptions {

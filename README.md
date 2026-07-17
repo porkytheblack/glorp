@@ -91,7 +91,8 @@ Login exchanges the admin credentials for a short-lived JWT; from the dashboard 
 - `/compact` — force a context compaction now.
 - `/clear` — compact and reset the working slate.
 - `/concise` — be terser this turn.
-- `/transmissions` — ask glorp about the homeworld-comms panel. (Glorp will deflect.)
+- `/mcp` — manage custom MCP servers (connect / disconnect). Also `ctrl-e`.
+- `/model`, `/agents`, `/sessions`, `/permissions`, `/transmissions` — open the matching panel.
 - `/quit` — exit cleanly.
 
 - `@planner <request>` — route to the planner subagent (design, no code).
@@ -102,6 +103,29 @@ Login exchanges the admin credentials for a short-lived JWT; from the dashboard 
 - `↑/↓` — input history.
 - `esc` — abort a running request.
 - `ctrl-c` — abort if busy, quit on empty input.
+
+## Custom MCP servers
+
+Declare streamable-HTTP MCP servers in the `mcp` section of `glorp.json` (any
+config layer) and glorp bridges their tools onto the agent via
+[`glove-mcp`](https://github.com/porkytheblack/glove) — namespaced as
+`<id>__<tool>`, with a live TUI panel (`ctrl-e` / `/mcp`), per-session
+connect/disconnect, and a `discovermcp` subagent the model can use to activate
+servers mid-conversation:
+
+```jsonc
+{
+  "mcp": {
+    "linear": {
+      "url": "https://mcp.linear.app/mcp",
+      "auth": "{env:LINEAR_MCP_TOKEN}",
+      "description": "Linear issues and projects"
+    }
+  }
+}
+```
+
+See [`docs/mcp-servers.md`](docs/mcp-servers.md) for all fields and behavior.
 
 ## Custom skills and subagents
 

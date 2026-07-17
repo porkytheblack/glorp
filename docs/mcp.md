@@ -1,5 +1,8 @@
 # Glorp MCP server
 
+> Looking for the other direction — plugging *external* MCP servers into a
+> glorp coding session? See [`mcp-servers.md`](./mcp-servers.md).
+
 [`@porkytheblack/glorp-mcp`](../packages/glorp-mcp/README.md) is an
 [MCP](https://modelcontextprotocol.io) server that exposes a remote Glorp Garage
 — **namespaces, workspaces, sessions, and the multi-agent roster** — as tools any

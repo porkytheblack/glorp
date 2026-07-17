@@ -11,6 +11,9 @@ interface Props {
   width: number; slashCommands?: SlashCommand[]; skillHints?: SlashCommand[];
   subagentMentions?: SlashCommand[]; modelLabel?: string; variant?: "default" | "hero";
   onHeightChange?: (height: number) => void;
+  /** Intercept bare slash commands that act on the TUI (e.g. `/mcp` opens the
+   *  MCP panel). Return true when handled — the text is then NOT sent. */
+  onLocalCommand?: (command: string) => boolean;
 }
 const MIN_LINES = 1;
 const MAX_LINES = 8;
@@ -19,7 +22,7 @@ export function InputBar({
   busy, onSubmit, onAbort, onQuit, width,
   slashCommands = SLASH_COMMANDS, skillHints = SKILL_HINTS,
   subagentMentions = SUBAGENT_MENTIONS, modelLabel, variant = "default",
-  onHeightChange,
+  onHeightChange, onLocalCommand,
 }: Props) {
   const [value, setValue] = useState("");
   const [cursorOffset, setCursorOffset] = useState(0);
@@ -62,8 +65,9 @@ export function InputBar({
     setHistoryIdx(null);
     if (t) setHistory((h) => (h.at(-1) === t ? h : [...h, t]).slice(-50));
     if (t === "/quit" || t === "/exit") { onQuit(); return; }
+    if (t.startsWith("/") && onLocalCommand?.(t)) return;
     onSubmit(t === "/help" ? "/help — list commands and tools available in this session" : t || "What's in this image?", imgs);
-  }, [busy, clearBuffer, onQuit, onSubmit, skillHints, pendingImages]);
+  }, [busy, clearBuffer, onQuit, onSubmit, onLocalCommand, skillHints, pendingImages]);
 
   const syncText = useCallback(() => {
     const next = readText();

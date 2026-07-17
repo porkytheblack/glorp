@@ -12,6 +12,7 @@ export const KEYBINDS: Keybind[] = [
   { key: "ctrl+s", label: "^S", description: "Session picker", context: "global" },
   { key: "ctrl+b", label: "^B", description: "Toggle context rail", context: "global" },
   { key: "ctrl+t", label: "^T", description: "Transmissions log", context: "global" },
+  { key: "ctrl+e", label: "^E", description: "MCP servers panel", context: "global" },
   { key: "ctrl+p", label: "^P", description: "Permissions list", context: "global" },
   { key: "ctrl+y", label: "^Y", description: "Cycle permission mode", context: "global" },
   { key: "ctrl+?", label: "^?", description: "Help dialog", context: "global" },

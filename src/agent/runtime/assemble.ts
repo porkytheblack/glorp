@@ -26,6 +26,7 @@ import { createRefreshers } from "./refresh.ts";
 import { wrapGlorpModel } from "./model-guards.ts";
 import { withVerificationEnforcement } from "./verification-guard.ts";
 import { VerificationTracker } from "./verification-tracker.ts";
+import type { McpManager } from "../mcp/manager.ts";
 import type { DisplayManagerAdapter } from "glove-core/display-manager";
 import type { IGloveRunnable } from "glove-core/glove";
 import type { Context } from "glove-core/core";
@@ -57,6 +58,8 @@ export interface AssembleArgs {
   task?: TaskContext;
   /** Backs deliver_result / report_progress; present iff `task` is. */
   taskSink?: TaskSink;
+  /** Session MCP runtime — bridges configured servers' tools onto the agent. */
+  mcp?: McpManager;
 }
 
 export interface AssembleResult {
@@ -111,6 +114,10 @@ export async function assembleAgent(args: AssembleArgs): Promise<AssembleResult>
   const agent = builder.build();
   (agent as any).promptMachine.enableToolResultSummary = true;
   foldContextTools(agent, args.inboxContext);
+  // Bridge configured MCP servers' tools onto the agent (`<id>__<tool>`) and
+  // register the discovermcp subagent. Per-server failures degrade to an
+  // error status on the MCP panel — they never block activation.
+  if (args.mcp) await args.mcp.mount(agent);
 
   const caps = ["orchestrate", "plan", "interact", "generate"];
   const meshAdapter = await mountAgentMesh(agent, args.meshName ?? "main", args.meshDir, caps);
