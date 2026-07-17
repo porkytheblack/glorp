@@ -1,7 +1,9 @@
-import type { Message, ModelAdapter, ModelPromptResult, SubscriberAdapter } from "glove-core/core";
+import type { Message, ModelAdapter, ModelPromptResult } from "glove-core/core";
 import { isAgentSender, isIntentOnlyText } from "./intent-detect.ts";
 import { withToolArgRepair } from "./tool-arg-repair.ts";
 import { withImageToolResults } from "./image-tool-results.ts";
+import { withRepetitionGuard } from "./repetition-guard.ts";
+import { wrap, internalUser, streamingBuffer } from "./model-wrap-shared.ts";
 
 const TASK_UPDATE_TOOL_NAME = "glove_update_tasks";
 const EMPTY_RESPONSE_RETRY_PROMPT =
@@ -151,45 +153,15 @@ export function withTaskUpdateContinuation(model: ModelAdapter): ModelAdapter {
 }
 
 export function wrapGlorpModel(model: ModelAdapter): ModelAdapter {
-  return withIntentOnlyContinuation(
-    withTaskUpdateContinuation(
-      withTrailingToolResultGuard(
-        withEmptyResponseRetry(withToolArgRepair(withImageToolResults(model))),
+  return withRepetitionGuard(
+    withIntentOnlyContinuation(
+      withTaskUpdateContinuation(
+        withTrailingToolResultGuard(
+          withEmptyResponseRetry(withToolArgRepair(withImageToolResults(model))),
+        ),
       ),
     ),
   );
-}
-
-function wrap(model: ModelAdapter, prompt: ModelAdapter["prompt"]): ModelAdapter {
-  return {
-    get name() { return model.name; },
-    setSystemPrompt(systemPrompt: string) { model.setSystemPrompt(systemPrompt); },
-    prompt,
-  };
-}
-
-function internalUser(text: string): Message {
-  return { sender: "user", text, is_skill_injection: true };
-}
-
-/** Forward text_delta immediately for real-time streaming; buffer the rest. */
-function streamingBuffer(notify: SubscriberAdapter["record"]): {
-  buffered: SubscriberAdapter["record"];
-  replayStructural: () => Promise<void>;
-} {
-  const structural: Array<{ eventType: string; data: unknown }> = [];
-  return {
-    buffered: async (eventType, data) => {
-      if (eventType === "text_delta") {
-        await notify(eventType, data);
-      } else {
-        structural.push({ eventType: eventType as string, data });
-      }
-    },
-    async replayStructural() {
-      for (const e of structural) await notify(e.eventType as any, e.data as any);
-    },
-  };
 }
 
 export { isIntentOnlyText } from "./intent-detect.ts";
