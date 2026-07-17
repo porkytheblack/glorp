@@ -54,6 +54,22 @@ safely cascade-delete a sandbox without risking a user's real repo.
 
 ---
 
+## Set up glorp
+
+Needs [Bun](https://bun.sh) ≥ 1.3. Build the binary (or run from source), then give it
+a model provider key:
+
+```bash
+git clone https://github.com/porkytheblack/glorp && cd glorp
+bun install
+bun run build                          # → dist/glorp (single binary); or: bun run src/cli.ts
+export ANTHROPIC_API_KEY=sk-ant-…      # or OPENAI_API_KEY / OPENROUTER_API_KEY / GEMINI_API_KEY / GROQ_API_KEY
+```
+
+The provider key is what the *agents* run on; the Garage API key (below) is separate and
+gates *access to the control plane*. Persistent config lives in a `garage.json` under the
+data dir (CLI flags override it). Full setup guide: [`docs/garage-usage.md`](./docs/garage-usage.md).
+
 ## Start a Garage
 
 ```bash
@@ -291,21 +307,80 @@ curl -s $EP/api/v1/sessions -H "authorization: Bearer $ADMIN" -H 'x-glorp-namesp
 curl -sX DELETE "$EP/api/v1/namespaces/ns_acme?data=true" -H "authorization: Bearer $ADMIN"
 ```
 
+Same flow with the SDK (needs an **admin** key):
+
+```ts
+const glorp = createClient({ endpoint, apiKey: ADMIN_KEY });
+const ns = await glorp.namespaces.create("acme");                   // -> { id: "ns_acme", … }
+await glorp.namespaces.createKey(ns.id, "acme-bot");                // raw glsk_… returned once
+// The tenant then drives its OWN namespace with that key: createClient({ endpoint, apiKey: <it> }).
+```
+
 Requests with no namespace resolve to the built-in `default` namespace (the legacy
 single-tenant layout) — existing setups keep working unchanged. Each namespace can
-hold its own model credentials, falling back to the garage's defaults when unset.
+hold its own model credentials, falling back to the garage's defaults when unset — and
+its own **template library** (see [Companions](#companions), below).
 
 **Per-namespace template libraries.** Beyond the garage-global catalog in
 `<dataDir>/templates/`, a namespace can have its own templates two ways: on-disk files
 under its subtree (`<dataDir>/namespaces/<id>/templates/*.json`), and/or its own
-**companion registry** — set `template_registry: { url, headers }` on `POST /namespaces`
-so its catalog is served by its own companion identity (its own key; headers are stored
-server-side and never returned). Resolution is **inherit-and-override**, newest-wins:
+**companion registry**. Resolution is **inherit-and-override**, newest-wins:
 `tenant disk > tenant companion > garage disk > garage companion`. So a tenant's
 `GET /templates`, `/templates/:name`, and `/tasks/types` all reflect *its* effective
-catalog — it can offer task/setup types no one else has, or shadow a shared one, without
-touching the global library. A namespace with neither its own dir nor companion just
-inherits the garage catalog unchanged.
+catalog. A namespace with neither its own dir nor companion inherits the garage catalog
+unchanged. The companion route is covered next.
+
+---
+
+## Companions
+
+A **companion** is a small external service Garage talks to for two things it
+deliberately doesn't own (full wire spec: [`docs/companion-service-spec.md`](./docs/companion-service-spec.md)):
+
+1. **Git tokens** — it holds the GitHub App key and mints short-lived install tokens;
+   Garage *pulls* one when a template clone needs auth (never stores it).
+2. **A template registry** — it hosts Template v2 documents; Garage **only GETs** them
+   and provisions workspaces from them. The service can generate/rotate templates however
+   it likes.
+
+Garage only ever issues `GET`s with static headers, and the companion is **optional at
+runtime**: if it's down, Garage serves the last-known-good catalog and keeps working.
+
+**Global companion** — one registry for the whole Garage. Set it via env (or `garage.json`):
+
+```bash
+export GLORP_GARAGE_TEMPLATE_REGISTRY_URL=https://companion.example/v1/templates
+export GLORP_GARAGE_TEMPLATE_REGISTRY_HEADERS='{"authorization":"Bearer <garage-key>"}'
+```
+
+**Per-namespace companion** — give a tenant its **own** registry (its own key → its own
+library) at provision time. This is how each client gets a different catalog:
+
+```bash
+curl -sX POST $EP/api/v1/namespaces -H "authorization: Bearer $ADMIN" -H 'content-type: application/json' -d '{
+  "name": "acme",
+  "template_registry": {
+    "url": "https://companion.example/v1/templates",
+    "headers": { "authorization": "Bearer <acme-tenant-key>" }
+  }
+}'
+```
+
+```ts
+// SDK equivalent — third arg is the per-namespace registry.
+await glorp.namespaces.create("acme", undefined, {
+  url: "https://companion.example/v1/templates",
+  headers: { authorization: "Bearer <acme-tenant-key>" },
+});
+```
+
+- The `url` must be **http(s)**. The `headers` (the tenant's key) are stored server-side
+  and **never returned** — `GET /namespaces/:id` exposes only `template_registry_url`.
+- The tenant's companion templates layer in as `tenant disk > **tenant companion** > garage
+  disk > garage companion`, so they beat the garage catalog but yield to the tenant's own
+  on-disk overrides. Everything the tenant reads (`/templates`, `/tasks/types`) reflects this.
+- Companion templates inline their skill files, so a tenant needs no on-disk assets — the
+  whole catalog can live in the companion.
 
 ---
 
@@ -436,6 +511,7 @@ Reference docs are bundled with this skill under [`./docs/`](./docs/):
 
 - [`docs/tasks.md`](./docs/tasks.md) — the Task API integration guide (the black-box typed-job surface)
 - [`docs/garage-usage.md`](./docs/garage-usage.md) — full usage guide (CLI, REST, WS, templates)
+- [`docs/companion-service-spec.md`](./docs/companion-service-spec.md) — the companion wire spec (git tokens + template registry)
 - [`docs/openapi.yaml`](./docs/openapi.yaml) — the machine-readable contract
 - [`docs/remote-orchestration.md`](./docs/remote-orchestration.md) — driving Garage remotely
 - [`docs/mcp.md`](./docs/mcp.md) — the MCP server (drive Glorp from any MCP agent)
