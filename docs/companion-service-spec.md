@@ -38,6 +38,10 @@ JSON object, e.g. `{"authorization": "Bearer <key>"}`). The service should:
   the standard error body (§4) when absent/invalid.
 - Treat the key as identifying one Garage deployment. If you want per-tenant
   scoping later, mint distinct keys — don't add request parameters.
+  Garage supports this directly: a namespace can be provisioned with its own
+  registry URL + headers (`template_registry` on `POST /namespaces`), so each
+  tenant's requests carry its own key and you return that tenant's library.
+  See [garage-usage.md → Per-namespace companions](./garage-usage.md#per-namespace-companions).
 
 TLS is required in production. Garage will happily speak plain HTTP to
 loopback for development.

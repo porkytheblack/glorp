@@ -15,12 +15,15 @@ import { startGarage, type GarageHandle } from "../src/garage/server.ts";
 import { loadGarageConfig } from "../src/garage/config.ts";
 import { KeyStore } from "../src/garage/auth/key-store.ts";
 import { MemoryKeyStorage } from "../src/garage/auth/memory-key-storage.ts";
+import { NamespaceStore } from "../src/garage/namespace-store.ts";
 import { TemplateStore } from "../src/garage/templates/store.ts";
 import { compositeTemplateSource } from "../src/garage/templates/source.ts";
-import { namespaceTemplateSource } from "../src/garage/templates/namespace-source.ts";
+import { namespaceTemplateSource, type RemoteLike } from "../src/garage/templates/namespace-source.ts";
+import type { Template } from "../src/garage/templates/types.ts";
 
 const tmpDirs: string[] = [];
 const garages: GarageHandle[] = [];
+const stubs: Array<{ stop: () => void }> = [];
 
 function tmp(): string {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "ns-tmpl-"));
@@ -30,8 +33,27 @@ function tmp(): string {
 
 afterEach(async () => {
   for (const s of garages.splice(0)) await s.stop().catch(() => {});
+  for (const s of stubs.splice(0)) s.stop();
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
+
+/** An in-memory companion registry — the read surface a real one exposes. */
+function fakeRemote(templates: Record<string, string>): RemoteLike {
+  const mk = (name: string, description: string): Template =>
+    ({ name, description, system_prompt: "x" }) as Template;
+  return {
+    list: async () => Object.entries(templates).map(([n, d]) => mk(n, d)),
+    get: async (name) => (templates[name] ? mk(name, templates[name]!) : undefined),
+  };
+}
+
+/** A stub companion HTTP service returning a fixed template list. */
+function startStubCompanion(templates: Array<Record<string, unknown>>): { url: string; stop: () => void } {
+  const server = Bun.serve({ port: 0, fetch: () => Response.json({ templates }) });
+  const stub = { url: `http://127.0.0.1:${server.port}/v1/templates`, stop: () => server.stop(true) };
+  stubs.push(stub);
+  return stub;
+}
 
 // A template is skipped by the loader unless it provisions SOMETHING, so every
 // fixture carries a `system_prompt` section; `body` still supplies description/etc.
@@ -155,5 +177,79 @@ describe("per-namespace templates over HTTP", () => {
 
     const list = await call("GET", "/templates", { key: tenant });
     expect(list.body.templates.map((t: { name: string }) => t.name)).toContain("garage-deck");
+  });
+});
+
+describe("per-namespace companion registry", () => {
+  it("layers tenant disk > tenant companion > garage catalog", async () => {
+    const garageDir = tmp();
+    const tenantDir = tmp();
+    writeTemplate(garageDir, "shared", { description: "garage shared" });
+    writeTemplate(garageDir, "garage-only", { description: "garage only" });
+    writeTemplate(garageDir, "co-vs-garage", { description: "garage version" });
+    writeTemplate(tenantDir, "shared", { description: "tenant disk shared" }); // disk override
+    const remote = fakeRemote({
+      shared: "companion shared",
+      "companion-only": "from companion",
+      "co-vs-garage": "companion version",
+    });
+    const src = namespaceTemplateSource(tenantDir, compositeTemplateSource(new TemplateStore(garageDir)), garageDir, remote);
+
+    expect((await src.get("shared"))?.description).toBe("tenant disk shared"); // disk beats companion + garage
+    expect((await src.get("co-vs-garage"))?.description).toBe("companion version"); // companion beats garage
+    expect((await src.get("companion-only"))?.description).toBe("from companion"); // companion-only surfaces
+    expect((await src.get("garage-only"))?.description).toBe("garage only"); // inherited
+    expect((await src.list()).map((t) => t.name)).toEqual(["co-vs-garage", "companion-only", "garage-only", "shared"]);
+    // A companion template with no disk override resolves `skill.from` under the garage dir, not the tenant's.
+    expect((await src.resolve("companion-only"))?.templatesDir).toBe(garageDir);
+    expect((await src.resolve("shared"))?.templatesDir).toBe(tenantDir);
+  });
+
+  it("persists and reloads a namespace's companion registry (headers kept, path re-derived)", () => {
+    const dataDir = tmp();
+    const store = new NamespaceStore(dataDir, path.join(dataDir, "ws"));
+    const ns = store.create({
+      name: "acme",
+      template_registry: { url: "https://svc.example/v1/templates", headers: { authorization: "Bearer sekret" } },
+    });
+    expect(ns.templateRegistry?.url).toBe("https://svc.example/v1/templates");
+
+    const reloaded = new NamespaceStore(dataDir, path.join(dataDir, "ws"));
+    expect(reloaded.get(ns.id)?.templateRegistry?.headers?.authorization).toBe("Bearer sekret");
+  });
+
+  it("rejects a non-http(s) companion registry URL at create", () => {
+    const dataDir = tmp();
+    const store = new NamespaceStore(dataDir, path.join(dataDir, "ws"));
+    expect(() => store.create({ name: "x", template_registry: { url: "ftp://nope" } })).toThrow();
+  });
+
+  it("serves a namespace's companion templates over HTTP, layered with garage; headers stay secret", async () => {
+    const { base, admin, config } = await startAuthed();
+    const call = caller(base);
+    writeTemplate(config.templatesDir, "garage-deck", { description: "garage deck" }); // garage-global
+
+    const stub = startStubCompanion([
+      { name: "companion-report", description: "from companion", system_prompt: "x" },
+      { name: "garage-deck", description: "companion deck override", system_prompt: "x" }, // beats garage
+    ]);
+
+    const created = await call("POST", "/namespaces", {
+      key: admin,
+      body: { name: "acme", template_registry: { url: stub.url, headers: { authorization: "Bearer k" } } },
+    });
+    expect(created.body.template_registry_url).toBe(stub.url); // URL surfaced...
+    expect(JSON.stringify(created.body)).not.toContain("Bearer k"); // ...headers never are
+    const tenant = (await call("POST", "/namespaces/ns_acme/keys", { key: admin, body: { name: "bot" } })).body.data.key;
+
+    const byName = nameMap((await call("GET", "/templates", { key: tenant })).body.templates);
+    expect(byName["companion-report"]).toBe("from companion"); // companion template surfaced
+    expect(byName["garage-deck"]).toBe("companion deck override"); // companion beats garage
+    const types = await call("GET", "/tasks/types", { key: tenant });
+    expect(types.body.types.map((t: { name: string }) => t.name)).toContain("companion-report");
+
+    // The default namespace never sees the tenant's companion catalog.
+    const def = await call("GET", "/templates", { key: admin });
+    expect(def.body.templates.map((t: { name: string }) => t.name)).not.toContain("companion-report");
   });
 });

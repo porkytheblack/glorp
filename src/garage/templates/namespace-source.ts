@@ -1,17 +1,21 @@
 /**
- * A single namespace's template library: the tenant's own on-disk templates
- * layered over the garage-global catalog. A tenant template WINS on a name
- * collision, so every namespace inherits the whole garage catalog and may add
- * to it or override an entry by name — "inherit-and-override".
+ * A single namespace's template library, layered newest-wins:
+ *
+ *   tenant disk  >  tenant companion  >  garage catalog (disk > garage companion)
+ *
+ * A namespace inherits the whole garage catalog and may add to it — or override
+ * an entry by name — with its own on-disk templates and/or its own companion
+ * registry (its own key/library). Within the namespace, an explicit on-disk
+ * template wins over the dynamic companion one.
  *
  * `resolve()` also reports which directory a template came from, so the engine
  * resolves a template's bundled `skill.from` sources under the right root: the
- * tenant's dir for tenant-owned templates, the garage dir for inherited ones.
+ * tenant's dir for tenant-owned disk templates, the garage dir otherwise
+ * (companion templates inline their files and don't use `skill.from`).
  *
- * Backward compatible by construction: pass `tenantDir: null` (the default
+ * Backward compatible: pass `tenantDir: null` and no `tenantRemote` (the default
  * namespace) and this degenerates to the garage source unchanged; a tenant with
- * no templates dir yet lists an empty local set and so inherits the full garage
- * catalog exactly as before the per-namespace layer existed.
+ * neither a templates dir nor a companion inherits the full garage catalog.
  */
 
 import type { Template } from "./types.ts";
@@ -24,6 +28,12 @@ export interface ResolvedTemplate {
   templatesDir: string;
 }
 
+/** The read surface a companion registry exposes (see RemoteTemplateRegistry). */
+export interface RemoteLike {
+  list(): Promise<Template[]>;
+  get(name: string): Promise<Template | undefined>;
+}
+
 export interface NamespaceTemplateSource extends TemplateSource {
   /** The template plus its origin dir, or undefined when the name is unknown. */
   resolve(name: string): Promise<ResolvedTemplate | undefined>;
@@ -31,37 +41,52 @@ export interface NamespaceTemplateSource extends TemplateSource {
 
 /**
  * Build a namespace's template source. `tenantDir` is the namespace's own
- * `<dataDir>/templates` (or null for the default namespace, which owns the
- * garage library directly). `garage` is the shared garage-global source and
- * `garageDir` its on-disk root — the origin reported for inherited templates.
+ * `<dataDir>/templates` (or null for the default namespace). `garage` is the
+ * shared garage-global source and `garageDir` its on-disk root — the origin
+ * reported for inherited and companion templates. `tenantRemote` is the
+ * namespace's own companion registry, when configured.
  */
 export function namespaceTemplateSource(
   tenantDir: string | null,
   garage: TemplateSource,
   garageDir: string,
+  tenantRemote?: RemoteLike | null,
 ): NamespaceTemplateSource {
   const tenant = tenantDir ? new TemplateStore(tenantDir) : null;
 
   return {
     async list(): Promise<Template[]> {
-      if (!tenant) return garage.list();
-      const local = tenant.list();
-      const own = new Set(local.map((t) => t.name));
-      const inherited = (await garage.list()).filter((t) => !own.has(t.name));
-      return [...local, ...inherited].sort((a, b) => a.name.localeCompare(b.name));
+      if (!tenant && !tenantRemote) return garage.list();
+      const seen = new Set<string>();
+      const out: Template[] = [];
+      const add = (templates: Template[]) => {
+        for (const t of templates) {
+          if (seen.has(t.name)) continue;
+          seen.add(t.name);
+          out.push(t);
+        }
+      };
+      add(tenant?.list() ?? []); // tenant disk wins
+      if (tenantRemote) add(await tenantRemote.list()); // then tenant companion
+      add(await garage.list()); // then the inherited garage catalog
+      return out.sort((a, b) => a.name.localeCompare(b.name));
     },
 
     async get(name: string): Promise<Template | undefined> {
-      return tenant?.get(name) ?? (await garage.get(name));
+      return tenant?.get(name) ?? (tenantRemote ? await tenantRemote.get(name) : undefined) ?? (await garage.get(name));
     },
 
     async has(name: string): Promise<boolean> {
-      return (tenant?.has(name) ?? false) || (await garage.has(name));
+      if (tenant?.has(name)) return true;
+      if (tenantRemote && (await tenantRemote.get(name))) return true;
+      return garage.has(name);
     },
 
     async resolve(name: string): Promise<ResolvedTemplate | undefined> {
-      const local = tenant?.get(name);
-      if (local && tenantDir) return { template: local, templatesDir: tenantDir };
+      const disk = tenant?.get(name);
+      if (disk && tenantDir) return { template: disk, templatesDir: tenantDir };
+      const remote = tenantRemote ? await tenantRemote.get(name) : undefined;
+      if (remote) return { template: remote, templatesDir: garageDir };
       const inherited = await garage.get(name);
       return inherited ? { template: inherited, templatesDir: garageDir } : undefined;
     },

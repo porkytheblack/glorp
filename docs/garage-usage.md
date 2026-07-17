@@ -444,6 +444,30 @@ namespace's own `templates/` dir (garage templates still resolve under the garag
 These files are operator-managed on disk, same as the global ones — there is no
 tenant-facing API to upload a template, since template steps run shell commands on the host.
 
+#### Per-namespace companions
+
+A namespace can also draw its templates from **its own [companion](./companion-service-spec.md)**
+— a template registry served by an external service under the namespace's own key — instead of
+(or on top of) local files. Configure it when you provision the namespace:
+
+```bash
+curl -sX POST $EP/api/v1/namespaces -H "authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"name":"acme","template_registry":{"url":"https://companion.example/v1/templates",
+       "headers":{"authorization":"Bearer <acme-tenant-key>"}}}'
+```
+
+The full precedence for a namespace, newest-wins, is:
+
+```
+tenant disk  >  tenant companion  >  garage disk  >  garage companion
+```
+
+So a tenant's own on-disk override beats its companion, its companion beats the garage
+catalog, and everything falls back to the garage-global sources. The `url` must be
+http(s); the `headers` (the tenant's key) are stored server-side (`namespaces.json`,
+mode `0600`) and **never returned** by the API — `GET /namespaces/:id` exposes only
+`template_registry_url`. See the [companion service spec](./companion-service-spec.md).
+
 ### Runtime environment variables (`env`)
 
 A template's **`env`** map is exported into the worker's runtime, so the agent

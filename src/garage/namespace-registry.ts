@@ -15,6 +15,7 @@ import { NamespaceCredentialsStore } from "./credentials.ts";
 import { buildRouteGroups, type RouteGroups } from "./route-groups.ts";
 import { provision, type ProvisionContext } from "./templates/engine.ts";
 import { namespaceTemplateSource } from "./templates/namespace-source.ts";
+import { RemoteTemplateRegistry } from "./templates/remote.ts";
 import { TemplateError } from "./templates/types.ts";
 import { selectNamespaceId } from "./auth/middleware.ts";
 import { gitTokenSourceFor } from "./git-tokens.ts";
@@ -112,13 +113,16 @@ export class NamespaceRegistry {
   private build(ns: Namespace): NamespaceBundle {
     const workspaces = new WorkspaceStore(ns.dataDir);
     const tasks = new TaskStore(ns.dataDir);
-    // A tenant's own templates (under its data subtree) layered over the garage
-    // catalog — inherit-and-override. The default namespace owns the garage
-    // library directly (tenantDir null), so its behavior is unchanged.
+    // A tenant's own templates — its on-disk library plus (optionally) its own
+    // companion registry — layered over the garage catalog (inherit-and-override).
+    // The default namespace owns the garage library directly (tenantDir null and
+    // no per-namespace companion), so its behavior is unchanged.
+    const tenantRemote = ns.templateRegistry ? new RemoteTemplateRegistry(ns.templateRegistry) : null;
     const nsTemplates = namespaceTemplateSource(
       this.store.isDefault(ns.id) ? null : path.join(ns.dataDir, "templates"),
       this.templates,
       this.config.templatesDir,
+      tenantRemote,
     );
     // The default namespace shares the garage credentials instance outright so
     // its writes and the tenant fallback reads never see a stale in-memory copy.

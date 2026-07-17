@@ -296,13 +296,16 @@ single-tenant layout) — existing setups keep working unchanged. Each namespace
 hold its own model credentials, falling back to the garage's defaults when unset.
 
 **Per-namespace template libraries.** Beyond the garage-global catalog in
-`<dataDir>/templates/`, an operator can drop templates under a namespace's own subtree
-(`<dataDir>/namespaces/<id>/templates/*.json`). Resolution is **inherit-and-override**:
-the namespace sees every garage template plus its own, and a same-named tenant template
-wins. So a tenant's `GET /templates`, `/templates/:name`, and `/tasks/types` all reflect
-*its* effective catalog — it can offer task/setup types no one else has, or shadow a
-shared one, without touching the global library. A namespace with no `templates/` dir
-just inherits the garage catalog unchanged.
+`<dataDir>/templates/`, a namespace can have its own templates two ways: on-disk files
+under its subtree (`<dataDir>/namespaces/<id>/templates/*.json`), and/or its own
+**companion registry** — set `template_registry: { url, headers }` on `POST /namespaces`
+so its catalog is served by its own companion identity (its own key; headers are stored
+server-side and never returned). Resolution is **inherit-and-override**, newest-wins:
+`tenant disk > tenant companion > garage disk > garage companion`. So a tenant's
+`GET /templates`, `/templates/:name`, and `/tasks/types` all reflect *its* effective
+catalog — it can offer task/setup types no one else has, or shadow a shared one, without
+touching the global library. A namespace with neither its own dir nor companion just
+inherits the garage catalog unchanged.
 
 ---
 
