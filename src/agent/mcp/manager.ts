@@ -21,6 +21,7 @@ import type { McpServerStatus } from "../../shared/events.ts";
 import { GLORP_VERSION } from "../../shared/version.ts";
 import { McpActiveStore } from "./active-store.ts";
 import { autoConnectIds, mcpCatalogue, mcpToken, type McpSection } from "./config.ts";
+import { withResultClamp } from "../tools/result-clamp.ts";
 
 const CONNECT_TIMEOUT_MS = 10_000;
 const MAX_TOOL_NAMES = 24;
@@ -93,7 +94,11 @@ export class McpManager {
         const tools = await withTimeout(conn.listTools(), CONNECT_TIMEOUT_MS, `${id}: listTools timed out`);
         // glove-mcp pins glove-core@3.0.0; glorp runs ^3.0.6. The shapes are
         // runtime-compatible — the casts paper over the nested-install types.
-        for (const tool of tools) agent.fold(bridgeMcpTool(conn, tool, true) as unknown as GloveFoldArgs<unknown>);
+        // MCP servers can return arbitrarily large payloads — clamp them so a
+        // single response can't flood the context window.
+        for (const tool of tools) {
+          agent.fold(withResultClamp(bridgeMcpTool(conn, tool, true) as unknown as GloveFoldArgs<unknown>));
+        }
         this.patch(id, {
           active: true, state: "connected", toolCount: tools.length,
           tools: tools.slice(0, MAX_TOOL_NAMES).map((t) => t.name),

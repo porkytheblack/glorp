@@ -3,13 +3,14 @@ import type { GloveFoldArgs, IGloveRunnable } from "glove-core/glove";
 import { createTaskTool } from "glove-core/tools/task-tool";
 import { createInboxTool } from "glove-core/tools/inbox-tool";
 import { inboxManageTool } from "../tools/inbox-manage.ts";
+import { withResultClamp } from "../tools/result-clamp.ts";
 
 const TASK_UPDATE_CONTINUATION_NOTE =
   "Task updates are bookkeeping only: if any task is still pending or in_progress, continue immediately with the next concrete tool call.";
 
 export function foldContextTools(agent: IGloveRunnable, context: Context): void {
   const taskTool = toolToFoldArgs(createTaskTool(context));
-  agent.fold({
+  agent.fold(withResultClamp({
     ...taskTool,
     description: `${taskTool.description}\n\nImportant: ${TASK_UPDATE_CONTINUATION_NOTE}`,
     async do(input, display, glove, signal) {
@@ -22,9 +23,9 @@ export function foldContextTools(agent: IGloveRunnable, context: Context): void 
       }
       return result;
     },
-  });
-  agent.fold(toolToFoldArgs(createInboxTool(context)));
-  agent.fold(inboxManageTool(context));
+  }));
+  agent.fold(withResultClamp(toolToFoldArgs(createInboxTool(context))));
+  agent.fold(withResultClamp(inboxManageTool(context)));
 }
 
 function hasOpenTasks(data: unknown): boolean {

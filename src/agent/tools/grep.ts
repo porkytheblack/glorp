@@ -15,6 +15,15 @@ interface GrepSummaryArgs {
   files: Array<{ path: string; count: number; firstLine: number }>;
 }
 
+// One minified match line can carry hundreds of KB — clip what the model sees.
+const MAX_LINE_CHARS = 500;
+
+function clipLine(line: string): string {
+  return line.length > MAX_LINE_CHARS
+    ? `${line.slice(0, MAX_LINE_CHARS)}... [+${line.length - MAX_LINE_CHARS} chars]`
+    : line;
+}
+
 async function* walk(root: string): AsyncGenerator<string> {
   const entries = await fs.promises.readdir(root, { withFileTypes: true });
   for (const e of entries) {
@@ -96,7 +105,7 @@ export function grepTool(workspace: string): SummaryTool<{
             const end = Math.min(lines.length, i + ctx + 1);
             if (ctx > 0) out.push(`--- ${rel}`);
             for (let j = start; j < end; j++) {
-              out.push(`${rel}:${j + 1}:${lines[j]}`);
+              out.push(`${rel}:${j + 1}:${clipLine(lines[j]!)}`);
             }
             total++;
             if (total >= max) break;
