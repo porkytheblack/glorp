@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { ModelInfo } from "./model-catalog.ts";
+import { mergeMcpSections, type McpSection } from "./mcp/config.ts";
 
 /**
  * Optional, file-backed configuration that the user controls directly.
@@ -26,6 +27,11 @@ export interface ProjectConfig {
   small_model?: string;
   /** Per-provider overrides keyed by provider id. */
   provider?: Record<string, ProviderOverride>;
+  /**
+   * Custom MCP servers keyed by id (also the tool namespace: `<id>__<tool>`).
+   * Bridged onto the agent via glove-mcp. See src/agent/mcp/config.ts.
+   */
+  mcp?: McpSection;
 }
 
 export interface ProviderOverride {
@@ -121,6 +127,7 @@ function shallowMergeLayers(layers: ProjectConfig[]): ProjectConfig {
   for (const layer of [...layers].reverse()) {
     if (layer.model !== undefined) merged.model = layer.model;
     if (layer.small_model !== undefined) merged.small_model = layer.small_model;
+    if (layer.mcp) merged.mcp = mergeMcpSections(merged.mcp, layer.mcp);
     if (layer.provider) {
       merged.provider ??= {};
       for (const [pid, providerOverride] of Object.entries(layer.provider)) {

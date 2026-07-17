@@ -34,6 +34,8 @@ export interface SessionPaths {
   taskResultFile: string;
   /** The agent's latest non-blocking progress note (task mode). */
   taskProgressFile: string;
+  /** Persisted active MCP server ids for this session. */
+  mcpFile: string;
 }
 
 function statKind(p: string): "file" | "dir" | null {
@@ -61,6 +63,7 @@ export function resolveSessionPaths(dataDir: string, sessionId: string): Session
       subagentsDir: path.join(base, `${id}.subagents`),
       taskResultFile: path.join(base, `${id}.task-result.json`),
       taskProgressFile: path.join(base, `${id}.task-progress.json`),
+      mcpFile: path.join(base, `${id}.mcp.json`),
     };
   }
   return {
@@ -74,6 +77,7 @@ export function resolveSessionPaths(dataDir: string, sessionId: string): Session
     subagentsDir: path.join(root, "subagents"),
     taskResultFile: path.join(root, "task-result.json"),
     taskProgressFile: path.join(root, "task-progress.json"),
+    mcpFile: path.join(root, "mcp.json"),
   };
 }
 
@@ -106,6 +110,7 @@ export function removeSessionStorage(dataDir: string, sessionId: string): void {
     path.join(base, `${id}.subagents`),
     path.join(base, `${id}.task-result.json`),   // legacy task deliverable
     path.join(base, `${id}.task-progress.json`),
+    path.join(base, `${id}.mcp.json`),           // legacy MCP active set
     path.join(dataDir, "mesh", sessionId),     // legacy mesh
   ];
   for (const t of targets) { try { fs.rmSync(t, { recursive: true, force: true }); } catch { /* ignore */ } }

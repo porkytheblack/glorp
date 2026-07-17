@@ -15,6 +15,7 @@ interface Props {
   slashCommands?: SlashCommand[];
   skillHints?: SlashCommand[];
   subagentMentions?: SlashCommand[];
+  onLocalCommand?: (command: string) => boolean;
 }
 
 /**
@@ -24,7 +25,7 @@ interface Props {
 export function EmptyHero({
   width, height, modelLabel, workspace, busy,
   onSubmit, onAbort, onQuit,
-  slashCommands, skillHints, subagentMentions,
+  slashCommands, skillHints, subagentMentions, onLocalCommand,
 }: Props) {
   const inputWidth = Math.min(96, Math.max(40, Math.floor(width * 0.7)));
   return (
@@ -42,6 +43,7 @@ export function EmptyHero({
             variant="hero" slashCommands={slashCommands}
             skillHints={skillHints} subagentMentions={subagentMentions}
             onSubmit={onSubmit} onAbort={onAbort} onQuit={onQuit}
+            onLocalCommand={onLocalCommand}
           />
         </box>
       </box>

@@ -40,6 +40,7 @@ function bridgeEventToAction(ev: BridgeEvent): UiAction | null {
     case "runner_agent_stats": return { kind: "runner_agent_stats", agent: ev.agent };
     case "display_slot_pushed": return { kind: "display_slot_pushed", slot: ev.slot };
     case "display_slot_resolved": return { kind: "display_slot_resolved", slotId: ev.slotId };
+    case "mcp_status": return { kind: "mcp_status", servers: ev.servers };
     case "permission_mode_changed": return { kind: "permission_mode_changed", mode: ev.mode as UiState["permissionMode"] };
     case "session_reset": return { kind: "session_reset" };
     case "error": return { kind: "error", message: ev.message };

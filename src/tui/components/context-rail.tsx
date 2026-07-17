@@ -29,6 +29,7 @@ export function ContextRail({ state, width }: Props) {
         count={activeAgents}
         lane={lane}
       />
+      {state.mcpServers.length > 0 && <McpSection servers={state.mcpServers} lane={lane} />}
       {pendingInbox.length > 0 && <InboxSection items={pendingInbox} lane={lane} />}
       <SignalsSection signals={state.transmissions} lane={lane} />
     </box>
@@ -99,6 +100,36 @@ function AgentsSection({ subagents, spawned, foreground, count, lane }: {
       ))}
     </box>
   );
+}
+
+function McpSection({ servers, lane }: { servers: UiState["mcpServers"]; lane: number }) {
+  const connected = servers.filter((s) => s.state === "connected");
+  const errored = servers.filter((s) => s.state === "error").length;
+  const tools = connected.reduce((n, s) => n + s.toolCount, 0);
+  return (
+    <box flexDirection="column">
+      <text fg={connected.length > 0 ? theme.transmission : theme.textMuted}>
+        <strong>MCP</strong> {connected.length}/{servers.length}{tools > 0 ? ` · ${tools}t` : ""}
+      </text>
+      {servers.slice(0, 3).map((s) => (
+        <box key={s.id} flexDirection="row">
+          <text fg={mcpColor(s.state)}>{mcpMark(s.state)} </text>
+          <text fg={s.state === "connected" ? theme.text : theme.textMuted}>
+            {clip(s.name, lane - 7)}{s.state === "connected" ? ` ${s.toolCount}t` : ""}
+          </text>
+        </box>
+      ))}
+      {servers.length > 3 && <text fg={theme.textDim}>+{servers.length - 3} more{errored > 0 ? ` · ${errored} err` : ""}</text>}
+    </box>
+  );
+}
+
+function mcpMark(state: "connected" | "error" | "inactive"): string {
+  return state === "connected" ? "●" : state === "error" ? "✗" : "○";
+}
+
+function mcpColor(state: "connected" | "error" | "inactive"): string {
+  return state === "connected" ? theme.success : state === "error" ? theme.error : theme.textMuted;
 }
 
 function InboxSection({ items, lane }: { items: UiState["inbox"]; lane: number }) {

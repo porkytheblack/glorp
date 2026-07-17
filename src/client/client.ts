@@ -122,6 +122,7 @@ export class GlorpClient {
   switchAgent(id: string): void { this.sendCmd({ type: "switch_agent", agent_id: id }); }
   addAgent(role: string, label?: string): void { this.sendCmd({ type: "add_agent", role, label }); }
   removeAgent(id: string): void { this.sendCmd({ type: "remove_agent", agent_id: id }); }
+  setMcpServer(id: string, active: boolean): void { this.sendCmd({ type: "set_mcp_server", server_id: id, active }); }
 
   // ── Internal: WebSocket ───────────────────────────────────
   private doConnect(): void {

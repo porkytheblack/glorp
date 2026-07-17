@@ -37,6 +37,8 @@ export function ChromeBar({ modelLabel, contextPct, peerCount, width, permission
         <span fg={theme.textDim}> · </span>
         <span fg={theme.text}>^M</span> model
         <span fg={theme.textDim}> · </span>
+        <span fg={theme.text}>^E</span> mcp
+        <span fg={theme.textDim}> · </span>
         <span fg={theme.text}>^R</span> reasoning
         <span fg={theme.textDim}> · </span>
         <span fg={theme.text}>^B</span> rail

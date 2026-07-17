@@ -1,6 +1,6 @@
 import type {
-  AgentInfo, AgentStats, ChatTurn, DisplaySlotEvent, InboxEntry, OrchestratorAgentEvent,
-  OrchestratorPhase, PlanDocument, RunnerAgentStats, TaskItem, ToolEvent,
+  AgentInfo, AgentStats, ChatTurn, DisplaySlotEvent, InboxEntry, McpServerStatus,
+  OrchestratorAgentEvent, OrchestratorPhase, PlanDocument, RunnerAgentStats, TaskItem, ToolEvent,
 } from "../shared/events.ts";
 
 export interface UiState {
@@ -28,6 +28,8 @@ export interface UiState {
   lastExtension?: { kind: "hook" | "skill"; name: string; at: number };
   runnerStats: Record<string, RunnerAgentStats & { updatedAt: number }>;
   displaySlots: DisplaySlotEvent[];
+  /** Configured MCP servers with live connection state (empty = none configured). */
+  mcpServers: McpServerStatus[];
   lastError?: string;
   mood: "idle" | "thinking" | "working" | "speaking" | "glitched" | "error";
   peerCount: number;
@@ -62,6 +64,7 @@ export type UiAction =
   | { kind: "runner_agent_stats"; agent: RunnerAgentStats }
   | { kind: "display_slot_pushed"; slot: DisplaySlotEvent }
   | { kind: "display_slot_resolved"; slotId: string }
+  | { kind: "mcp_status"; servers: McpServerStatus[] }
   | { kind: "session_reset" }
   | { kind: "error"; message: string }
   | { kind: "peer_count"; count: number }
@@ -74,7 +77,7 @@ export const initialUiState: UiState = {
   loopVerdicts: [], foregroundAgent: null, planStatus: null,
   stats: { turns: 0, tokens_in: 0, tokens_out: 0, contextPct: 0 },
   compacting: false, activeSubagents: [], transmissions: [], runnerStats: {},
-  displaySlots: [], mood: "idle", peerCount: 0, modelLabel: "", permissionMode: "normal",
+  displaySlots: [], mcpServers: [], mood: "idle", peerCount: 0, modelLabel: "", permissionMode: "normal",
 };
 
 export function reduceUiState(state: UiState, action: UiAction): UiState {
@@ -143,8 +146,11 @@ export function reduceUiState(state: UiState, action: UiAction): UiState {
       next = { ...state, displaySlots: [...state.displaySlots.filter((r) => r.slotId !== action.slot.slotId), action.slot] }; break;
     case "display_slot_resolved":
       next = { ...state, displaySlots: state.displaySlots.filter((r) => r.slotId !== action.slotId) }; break;
+    case "mcp_status":
+      next = { ...state, mcpServers: action.servers }; break;
     case "session_reset":
-      next = { ...initialUiState, transmissions: state.transmissions, runnerStats: {}, peerCount: state.peerCount, modelLabel: state.modelLabel }; break;
+      // MCP roster is session-level config; keep it (hydrate re-emits anyway).
+      next = { ...initialUiState, transmissions: state.transmissions, runnerStats: {}, peerCount: state.peerCount, modelLabel: state.modelLabel, mcpServers: state.mcpServers }; break;
     case "error":
       next = { ...state, lastError: action.message }; break;
     case "peer_count":

@@ -14,6 +14,7 @@ import { TransmissionsLog } from "./transmissions-log.tsx";
 import { PermissionsList } from "./permissions-list.tsx";
 import { HelpDialog } from "./help-dialog.tsx";
 import { AgentManager } from "./agent-manager.tsx";
+import { McpPanel } from "./mcp-panel.tsx";
 import { CommandPalette, type PaletteCommand } from "./command-palette.tsx";
 import { getSlotRenderer, UnknownSlot } from "./slot-renderers/index.tsx";
 import { EmptyHero } from "./empty-hero.tsx";
@@ -23,7 +24,7 @@ const NARROW = 90;
 const MEDIUM = 140;
 const WIDE = 200;
 
-type Overlay = null | "model" | "session" | "transmissions" | "permissions" | "help" | "agents" | "palette";
+type Overlay = null | "model" | "session" | "transmissions" | "permissions" | "help" | "agents" | "palette" | "mcp";
 
 const QUICK_ADD_ROLES = ["researcher", "reviewer", "planner", "builder"] as const;
 
@@ -84,6 +85,7 @@ export function App({
     if (key.name === "m" && key.ctrl) { setOverlay("model"); return; }
     if (key.name === "s" && key.ctrl && onSwapSession) { setOverlay("session"); return; }
     if (key.name === "t" && key.ctrl) { setOverlay("transmissions"); return; }
+    if (key.name === "e" && key.ctrl) { setOverlay("mcp"); return; }
     if (key.name === "p" && key.ctrl) { setOverlay("permissions"); return; }
     if (key.name === "y" && key.ctrl) { client.setPermissionMode(nextPermissionMode(state.permissionMode)); return; }
     if (key.name === "r" && key.ctrl) { setShowReasoning((v) => !v); return; }
@@ -110,6 +112,19 @@ export function App({
       cmds.push({ id: `add:${role}`, label: `Add ${role} agent`, group: "Agents", icon: "+", keywords: ["new", "spawn"], run: () => client.addAgent(role) });
     }
     cmds.push(
+      { id: "mcp", label: "MCP servers", detail: "^E", group: "MCP", icon: "⌁", keywords: ["mcp", "tools", "connect"], run: () => setOverlay("mcp") },
+    );
+    for (const s of state.mcpServers) {
+      cmds.push({
+        id: `mcp:${s.id}`,
+        label: `${s.active ? "Disconnect" : "Connect"} ${s.name}`,
+        detail: s.state === "connected" ? `${s.toolCount} tools` : s.state,
+        group: "MCP", icon: s.state === "connected" ? "●" : "○",
+        keywords: ["mcp", s.id, ...(s.tags ?? [])],
+        run: () => client.setMcpServer(s.id, !s.active),
+      });
+    }
+    cmds.push(
       { id: "model", label: "Switch model", detail: "^M", group: "Model", icon: "◈", run: () => setOverlay("model") },
       { id: "perm-mode", label: `Permission mode: ${state.permissionMode} → ${nextPermissionMode(state.permissionMode)}`, detail: "^Y", group: "Permissions", icon: "⚑", keywords: ["auto", "bypass", "normal"], run: () => client.setPermissionMode(nextPermissionMode(state.permissionMode)) },
       { id: "perms", label: "Manage permissions", detail: "^P", group: "Permissions", icon: "○", run: () => setOverlay("permissions") },
@@ -126,7 +141,23 @@ export function App({
       );
     }
     return cmds;
-  }, [state.agents, state.activeAgentId, state.permissionMode, railOpen, showReasoning, client, onSwapSession, onQuit]);
+  }, [state.agents, state.activeAgentId, state.mcpServers, state.permissionMode, railOpen, showReasoning, client, onSwapSession, onQuit]);
+
+  // Bare slash commands that act on the TUI itself instead of going to the
+  // agent (e.g. `/mcp` opens the MCP panel). Returns true when handled.
+  const handleLocalCommand = useCallback((cmd: string): boolean => {
+    switch (cmd) {
+      case "/mcp": setOverlay("mcp"); return true;
+      case "/model": setOverlay("model"); return true;
+      case "/agents": setOverlay("agents"); return true;
+      case "/permissions": setOverlay("permissions"); return true;
+      case "/transmissions": setOverlay("transmissions"); return true;
+      case "/sessions": case "/resume":
+        if (onSwapSession) { setOverlay("session"); return true; }
+        return false;
+      default: return false;
+    }
+  }, [onSwapSession]);
 
   // Non-permission display slots render as full-screen overlays
   const nonPermSlot = state.displaySlots.find((s) => !s.isPermissionRequest);
@@ -172,6 +203,9 @@ export function App({
   if (overlay === "agents") {
     return <AgentManager client={client} state={state} onClose={() => setOverlay(null)} />;
   }
+  if (overlay === "mcp") {
+    return <McpPanel client={client} state={state} onClose={() => setOverlay(null)} />;
+  }
 
   // Empty state
   if (state.turns.length === 0 && !state.streamingText) {
@@ -179,6 +213,7 @@ export function App({
       <EmptyHero width={width} height={height}
         modelLabel={state.modelLabel} workspace={workspace} busy={state.busy}
         onSubmit={(t: string) => client.send(t)}
+        onLocalCommand={handleLocalCommand}
         onAbort={() => client.abort()} onQuit={onQuit} />
     );
   }
@@ -213,6 +248,7 @@ export function App({
       <InputBar busy={state.busy} width={width}
         modelLabel={state.modelLabel}
         onSubmit={(t, imgs) => client.send(t, imgs)}
+        onLocalCommand={handleLocalCommand}
         onAbort={() => client.abort()} onQuit={onQuit}
         onHeightChange={handleInputHeight} />
       <ChromeBar modelLabel={state.modelLabel}

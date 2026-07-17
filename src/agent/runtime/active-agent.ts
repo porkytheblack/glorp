@@ -32,6 +32,7 @@ import {
 import { agentStoreFile, agentResourcesFile, type SessionPaths } from "../session-paths.ts";
 import type { Orchestrator } from "../../orchestrator/orchestrator.ts";
 import type { ExtensionsBundle } from "../extensions-loader.ts";
+import type { McpManager } from "../mcp/manager.ts";
 import type { PickedModel } from "../model-picker.ts";
 import type { getBridge } from "../../shared/bridge.ts";
 import type { AgentInfo } from "../../shared/events.ts";
@@ -57,6 +58,8 @@ export interface ActivationDeps {
   /** Task context (task mode) — applied to the MAIN agent only. */
   task?: TaskContext;
   taskSink?: TaskSink;
+  /** Session MCP runtime — re-mounted onto every (re)assembled agent. */
+  mcp?: McpManager;
 }
 
 export interface ActiveAgent {
@@ -123,6 +126,7 @@ export async function activateAgent(
     // Task self-knowledge + toolkit go to the MAIN worker only, not spawned agents.
     task: isMain ? deps.task : undefined,
     taskSink: isMain ? deps.taskSink : undefined,
+    mcp: deps.mcp,
   });
   return {
     spec, store, agent: assembled.agent, meshAdapter: assembled.meshAdapter,

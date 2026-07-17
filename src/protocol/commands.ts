@@ -121,6 +121,13 @@ export interface CmdRemoveAgent extends Envelope {
   agent_id: string;
 }
 
+/** Connect/disconnect a configured MCP server. Maps to GlorpHandle.setMcpServer(). */
+export interface CmdSetMcpServer extends Envelope {
+  type: "set_mcp_server";
+  server_id: string;
+  active: boolean;
+}
+
 export type ClientMessage =
   | ClientHello
   | CmdSendMessage
@@ -138,4 +145,5 @@ export type ClientMessage =
   | CmdSetPermissionMode
   | CmdSwitchAgent
   | CmdAddAgent
-  | CmdRemoveAgent;
+  | CmdRemoveAgent
+  | CmdSetMcpServer;

@@ -105,6 +105,24 @@ export interface RunnerAgentStats {
   tokensOut: number;
 }
 
+/** Snapshot of one configured MCP server, rendered by the TUI MCP panel. */
+export interface McpServerStatus {
+  /** Config id — also the tool namespace prefix (`<id>__<tool>`). */
+  id: string;
+  name: string;
+  url: string;
+  description?: string;
+  tags?: string[];
+  /** In the session's active set (connected at mount, or activated later). */
+  active: boolean;
+  /** Live state: connected (tools bridged), error (connect failed), inactive. */
+  state: "connected" | "error" | "inactive";
+  toolCount: number;
+  /** Un-namespaced tool names (capped) for display. */
+  tools?: string[];
+  error?: string;
+}
+
 export interface DisplaySlotEvent {
   slotId: string;
   renderer: string;
@@ -162,6 +180,8 @@ export type BridgeEvent =
   | { type: "queue_depth"; depth: number }
   | { type: "hook"; name: string }
   | { type: "skill"; name: string; source: "user" | "agent" }
+  /** Full MCP server roster snapshot (config + live connection state). */
+  | { type: "mcp_status"; servers: McpServerStatus[] }
   | { type: "display_slot_pushed"; slot: DisplaySlotEvent }
   | { type: "display_slot_resolved"; slotId: string }
   | { type: "permission_mode_changed"; mode: string }
