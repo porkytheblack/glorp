@@ -13,6 +13,7 @@ import type {
   AgentInfo,
   ApiKeyPublic,
   BridgeEvent,
+  CreateNamespaceInput,
   CreateSessionInput,
   CreateTaskInput,
   CreateWorkspaceInput,
@@ -250,7 +251,8 @@ function buildClient(cfg: GlorpConfig) {
     // Multi-tenancy admin control plane (requires an admin key).
     namespaces: {
       list: () => req<{ namespaces: NamespaceDto[]; total: number }>("GET", "/namespaces"),
-      create: (name: string, slug?: string) => req<NamespaceDto>("POST", "/namespaces", { name, slug }),
+      create: (name: string, slug?: string, templateRegistry?: CreateNamespaceInput["template_registry"]) =>
+        req<NamespaceDto>("POST", "/namespaces", { name, slug, template_registry: templateRegistry }),
       get: (id: string) => req<NamespaceDto>("GET", `/namespaces/${encodeURIComponent(id)}`),
       /** Deprovision; `removeData` also wipes the namespace's data subtree + sandboxes. */
       delete: (id: string, removeData = false) =>

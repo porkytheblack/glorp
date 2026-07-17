@@ -13,7 +13,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Namespace } from "./types.ts";
+import type { Namespace, NamespaceTemplateRegistry } from "./types.ts";
 
 /** The reserved, always-present namespace mapped to the garage's legacy roots. */
 export const DEFAULT_NAMESPACE_ID = "default";
@@ -26,6 +26,41 @@ export class NamespaceError extends Error {}
 interface NamespacesFile {
   version: 1;
   namespaces: Record<string, Namespace>;
+}
+
+/**
+ * Validate/normalize a companion registry config from an untrusted source. In
+ * `strict` mode (a create request) a malformed URL throws so the caller learns
+ * their config is bad; when loading persisted data it's lenient (drop a corrupt
+ * registry, keep the namespace) — a bad companion must never orphan a tenant.
+ * Non-string header values are dropped either way.
+ */
+export function normalizeRegistry(raw: unknown, strict: boolean): NamespaceTemplateRegistry | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object") {
+    if (strict) throw new NamespaceError("'template_registry' must be an object");
+    return undefined;
+  }
+  const r = raw as Record<string, unknown>;
+  const url = typeof r.url === "string" ? r.url.trim() : "";
+  let ok = false;
+  try {
+    const u = new URL(url);
+    ok = u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    ok = false;
+  }
+  if (!ok) {
+    if (strict) throw new NamespaceError("'template_registry.url' must be an http(s) URL");
+    return undefined;
+  }
+  const headers: Record<string, string> = {};
+  if (r.headers && typeof r.headers === "object" && !Array.isArray(r.headers)) {
+    for (const [k, v] of Object.entries(r.headers as Record<string, unknown>)) {
+      if (typeof v === "string") headers[k] = v;
+    }
+  }
+  return { url, ...(Object.keys(headers).length ? { headers } : {}) };
 }
 
 /** Lowercase, hyphenate, and trim a name into a path-safe slug. */
@@ -88,6 +123,7 @@ export class NamespaceStore {
       // id (ignore any persisted slug), and validate createdAt is a real ISO
       // date — so list()/sort and callers always get well-typed fields.
       const createdAt = ns?.createdAt;
+      const registry = normalizeRegistry((ns as { templateRegistry?: unknown })?.templateRegistry, false);
       namespaces[id] = {
         id,
         name: typeof ns?.name === "string" ? ns.name : id,
@@ -98,6 +134,7 @@ export class NamespaceStore {
             : new Date(0).toISOString(),
         dataDir: paths.dataDir,
         workspaceRoot: paths.workspaceRoot,
+        ...(registry ? { templateRegistry: registry } : {}),
       };
     }
     return { version: 1, namespaces };
@@ -137,11 +174,14 @@ export class NamespaceStore {
   }
 
   /** Register a new tenant namespace. Throws on bad slug / reserved id / collision. */
-  create(input: { name: string; slug?: string }): Namespace {
+  create(input: { name: string; slug?: string; template_registry?: unknown }): Namespace {
     const name = input.name?.trim();
     if (!name) throw new NamespaceError("A namespace 'name' is required");
     const base = slugify(input.slug ?? name);
     if (!base) throw new NamespaceError("Could not derive a valid slug from the name");
+    // Validate the companion registry up front (strict) so a bad URL is a 400,
+    // not a silently-dropped config discovered only on the next provision.
+    const templateRegistry = normalizeRegistry(input.template_registry, true);
     const slug = this.uniqueSlug(base);
     const id = `ns_${slug}`;
     if (!ID_RE.test(id)) throw new NamespaceError(`Invalid namespace id: ${id}`);
@@ -151,6 +191,7 @@ export class NamespaceStore {
       slug,
       createdAt: new Date().toISOString(),
       ...this.tenantPaths(id),
+      ...(templateRegistry ? { templateRegistry } : {}),
     };
     this.data.namespaces[id] = ns;
     this.flush();

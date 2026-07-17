@@ -157,7 +157,8 @@ WebSocket, which can't set headers from a browser). `/health` stays open.
 ### Multi-tenant namespaces
 
 Run one Garage for many users by giving each an isolated **namespace** (its own
-sessions, workspaces, sandboxes, and model credentials). An admin key provisions
+sessions, workspaces, sandboxes, model credentials, and — optionally — its own
+[template library](#per-namespace-template-libraries)). An admin key provisions
 namespaces and mints namespace-bound keys; a tenant key transparently scopes every
 call to its own namespace. Requests with no namespace use the built-in `default`
 namespace, so single-tenant setups are unchanged. Namespaces require auth on.
@@ -417,6 +418,55 @@ Templates provision a fresh workspace before the agent starts. Put JSON files in
 - Step types: `git-clone` (`repo`, optional `dest`, `ref`), `shell` (`command`), `copy` (`from`, `to`).
 - Interpolation: `{param:NAME}` from the create request's `params`, `{env:VAR}` from Garage's environment. Interpolated values (potential secrets) are scrubbed from error messages.
 - Steps run sequentially; on any failure the workspace is cleaned up and creation fails.
+
+### Per-namespace template libraries
+
+`<data-dir>/templates/` is the **garage-global** catalog — every namespace inherits
+it. A [tenant namespace](#multi-tenant-namespaces) can also have its **own** library
+by dropping JSON files under its data subtree:
+
+```
+<data-dir>/templates/*.json                        # garage-global (inherited by all)
+<data-dir>/namespaces/<ns-id>/templates/*.json     # one namespace's own templates
+```
+
+Resolution is **inherit-and-override**: a namespace sees every garage template plus
+its own, and a same-named tenant template **wins** over the garage one. So a namespace
+can add task/setup types no one else has, or shadow a shared type with its own variant,
+without touching the global catalog. This is reflected everywhere the catalog is read —
+`GET /templates`, `GET /templates/:name`, and `GET /tasks/types` all return the calling
+namespace's effective library. A namespace with no `templates/` dir simply inherits the
+garage catalog unchanged, and the `default` namespace *is* the garage library — so
+existing single-tenant setups behave exactly as before.
+
+A tenant template that bundles a skill via `skill.from` resolves that source under the
+namespace's own `templates/` dir (garage templates still resolve under the garage dir).
+These files are operator-managed on disk, same as the global ones — there is no
+tenant-facing API to upload a template, since template steps run shell commands on the host.
+
+#### Per-namespace companions
+
+A namespace can also draw its templates from **its own [companion](./companion-service-spec.md)**
+— a template registry served by an external service under the namespace's own key — instead of
+(or on top of) local files. Configure it when you provision the namespace:
+
+```bash
+curl -sX POST $EP/api/v1/namespaces -H "authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"name":"acme","template_registry":{"url":"https://companion.example/v1/templates",
+       "headers":{"authorization":"Bearer <acme-tenant-key>"}}}'
+```
+
+The full precedence for a namespace, newest-wins, is:
+
+```
+tenant disk  >  tenant companion  >  garage disk  >  garage companion
+```
+
+So a tenant's own on-disk override beats its companion, its companion beats the garage
+catalog, and everything falls back to the garage-global sources. The `url` must be
+http(s); the `headers` (the tenant's key) are stored server-side (`namespaces.json`,
+mode `0600`) and **never returned** by the API — `GET /namespaces/:id` exposes only
+`template_registry_url`. See the [companion service spec](./companion-service-spec.md).
 
 ### Runtime environment variables (`env`)
 

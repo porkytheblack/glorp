@@ -40,12 +40,21 @@ export interface NamespaceDto {
   cost_usd?: number;
   /** False when any contributing model lacked a catalog price. */
   cost_known?: boolean;
+  /** This namespace's own companion registry URL, if configured (headers never returned). */
+  template_registry_url?: string | null;
 }
 
 /** Body accepted by `POST /namespaces`. */
 export interface CreateNamespaceInput {
   name: string;
   slug?: string;
+  /**
+   * Optional companion template registry scoped to this namespace, so its
+   * catalog is served by its own companion identity. `url` must be http(s);
+   * `headers` (typically the tenant's bearer key) are stored server-side and
+   * never returned by the API.
+   */
+  template_registry?: { url: string; headers?: Record<string, string> };
 }
 
 /** Body accepted by `POST /namespaces/:id/keys` (mints a namespace-bound key). */

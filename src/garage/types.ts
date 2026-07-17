@@ -54,6 +54,20 @@ export interface Namespace {
   dataDir: string;
   /** Absolute sandbox root. For "default" this IS the garage's workspaceRoot. */
   workspaceRoot: string;
+  /**
+   * This namespace's OWN companion template registry — its templates come from
+   * its own companion identity (its own key), layered over the garage-global
+   * catalog. Absent ⇒ the namespace inherits only the garage-global sources.
+   */
+  templateRegistry?: NamespaceTemplateRegistry;
+}
+
+/** A namespace-scoped companion registry: a base URL + static auth headers. */
+export interface NamespaceTemplateRegistry {
+  /** Companion base list URL, e.g. `https://svc/v1/templates`. */
+  url: string;
+  /** Static headers sent on every GET — typically the tenant's bearer key. */
+  headers?: Record<string, string>;
 }
 
 /** Public view of a namespace returned by the admin control-plane API. */
@@ -74,6 +88,8 @@ export interface NamespaceDto {
   cost_usd?: number;
   /** False when any contributing model lacked a catalog price. */
   cost_known?: boolean;
+  /** This namespace's own companion registry URL, if configured (headers never returned). */
+  template_registry_url?: string | null;
 }
 
 /** Body accepted by `POST /namespaces`. */
@@ -81,6 +97,12 @@ export interface CreateNamespaceInput {
   name: string;
   /** Optional explicit slug; otherwise derived from `name`. */
   slug?: string;
+  /**
+   * Optional companion template registry scoped to this namespace, so its
+   * template catalog is served by its own companion identity. `url` must be
+   * http(s); `headers` are stored server-side and never returned by the API.
+   */
+  template_registry?: { url: string; headers?: Record<string, string> };
 }
 
 /** Body accepted by `POST /namespaces/:id/keys` (mints a namespace-bound key). */

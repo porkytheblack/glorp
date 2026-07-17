@@ -41,7 +41,7 @@ JSON object, e.g. `{"authorization": "Bearer <key>"}`). The service should:
   Garage supports this directly: a namespace can be provisioned with its own
   registry URL + headers (`template_registry` on `POST /namespaces`), so each
   tenant's requests carry its own key and you return that tenant's library.
-  See [garage-usage.md → Per-namespace companions](./garage-usage.md#per-namespace-companions).
+  See the **Companions** section of the skill ([../SKILL.md](../SKILL.md)).
 
 TLS is required in production. Garage will happily speak plain HTTP to
 loopback for development.

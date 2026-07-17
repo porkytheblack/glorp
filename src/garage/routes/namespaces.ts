@@ -37,6 +37,9 @@ function toDto(store: NamespaceStore, ns: Namespace, usage?: NsUsage): Namespace
     slug: ns.slug,
     created_at: ns.createdAt,
     is_default: store.isDefault(ns.id),
+    // The URL is an endpoint, not a secret; the headers (the tenant's key) are
+    // stored server-side and deliberately never surfaced.
+    ...(ns.templateRegistry ? { template_registry_url: ns.templateRegistry.url } : {}),
     ...(usage
       ? {
           session_count: usage.count,

@@ -63,7 +63,7 @@ export async function startGarage(config: GarageConfig): Promise<GarageHandle> {
   const startedAt = Date.now();
   const keyStore = new KeyStore(config.auth?.keyStorage ?? path.join(config.dataDir, "glorp-keys.json"));
   const namespaceCtl = namespaceControlRoutes(namespaceStore, registry, keyStore, config);
-  const router = createGarageRouter(templates, keyStore, namespaceCtl, storageConfig);
+  const router = createGarageRouter(keyStore, namespaceCtl, storageConfig);
 
   const { app, websocket } = buildGarageApp({ registry, router, keyStore, authOn, startedAt });
 

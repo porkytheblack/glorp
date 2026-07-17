@@ -1,17 +1,16 @@
 /**
- * REST route dispatch for Garage. Global admin routes (`keys`, `namespaces`)
- * and `templates` are wired once here; the per-namespace data-plane routes
- * (sessions, workspaces, models, state, control, credentials, files) come from
- * the request's already-resolved NamespaceBundle, so a request only ever touches
- * its own namespace's data. Health + WebSocket upgrades are handled in server.ts.
+ * REST route dispatch for Garage. Global admin routes (`keys`, `namespaces`,
+ * `storage`) are wired once here; the per-namespace data-plane routes (sessions,
+ * workspaces, models, state, control, credentials, files, tasks, and `templates`
+ * — each namespace's own catalog plus the inherited garage one) come from the
+ * request's already-resolved NamespaceBundle, so a request only ever touches its
+ * own namespace's data. Health + WebSocket upgrades are handled in server.ts.
  */
 
-import { templateRoutes } from "./routes/templates.ts";
 import { keyRoutes } from "./routes/keys.ts";
 import { storageRoutes } from "./routes/storage.ts";
 import type { StorageConfigStore } from "./storage/config-store.ts";
 import type { KeyStore } from "./auth/key-store.ts";
-import type { TemplateSource } from "./templates/source.ts";
 import type { NamespaceControlRoutes } from "./routes/namespaces.ts";
 import type { NamespaceBundle } from "./namespace-registry.ts";
 import type { RouteGroups } from "./route-groups.ts";
@@ -37,12 +36,10 @@ export interface GarageRouter {
 }
 
 export function createGarageRouter(
-  templates: TemplateSource,
   keyStore: KeyStore,
   namespaceCtl: NamespaceControlRoutes,
   storageConfig?: StorageConfigStore,
 ): GarageRouter {
-  const tmpl = templateRoutes(templates);
   const keys = keyRoutes(keyStore);
   const storage = storageConfig ? storageRoutes(storageConfig) : null;
 
@@ -94,10 +91,10 @@ export function createGarageRouter(
       const profDel = pathname.match(MODEL_PROFILE);
       if (profDel && m === "DELETE") return g.models.deleteProfile(profDel[1]!);
 
-      // --- Templates (global) ---
-      if (pathname === "/templates" && m === "GET") return tmpl.list();
+      // --- Templates (per-namespace: the namespace's own catalog + inherited) ---
+      if (pathname === "/templates" && m === "GET") return g.templates.list();
       const tm = pathname.match(TEMPLATE);
-      if (tm && m === "GET") return tmpl.get(tm[1]!);
+      if (tm && m === "GET") return g.templates.get(tm[1]!);
 
       // --- Remote storage settings (global, admin-gated upstream) ---
       if (storage && pathname === "/storage") {
