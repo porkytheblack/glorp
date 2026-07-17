@@ -6,6 +6,10 @@ import type { SummaryTool } from "./summaries.ts";
 const MAX_BYTES = 1024 * 1024; // 1 MB cap before we truncate.
 const DEFAULT_LINES = 500;
 const MAX_LINES = 2000;
+// Minified/generated files can pack the whole 1 MB into one "line" — without
+// these caps a single read could dump ~250k tokens into the context window.
+const MAX_LINE_CHARS = 2000;
+const MAX_READ_CHARS = 80_000;
 
 interface ReadSummaryArgs {
   path: string;
@@ -69,14 +73,28 @@ export function readTool(workspace: string): SummaryTool<{
       }
       const lines = body.split("\n");
       const start = (input.offset ?? 1) - 1;
-      const end = Math.min(lines.length, start + (input.limit ?? DEFAULT_LINES));
-      const slice = lines.slice(start, end);
-      const numbered = slice
-        .map((line, i) => `${String(start + i + 1).padStart(5, " ")}→${line}`)
-        .join("\n");
+      const requestedEnd = Math.min(lines.length, start + (input.limit ?? DEFAULT_LINES));
+      const numberedLines: string[] = [];
+      let budget = MAX_READ_CHARS;
+      let end = start;
+      for (let i = start; i < requestedEnd; i++) {
+        const raw = lines[i]!;
+        const line = raw.length > MAX_LINE_CHARS
+          ? `${raw.slice(0, MAX_LINE_CHARS)}... [line truncated, ${raw.length} chars total]`
+          : raw;
+        const row = `${String(i + 1).padStart(5, " ")}→${line}`;
+        if (numberedLines.length > 0 && row.length + 1 > budget) break;
+        numberedLines.push(row);
+        budget -= row.length + 1;
+        end = i + 1;
+      }
+      const numbered = numberedLines.join("\n");
+      const charClamped = end < requestedEnd;
       const more =
         end < lines.length
-          ? `\n... [${lines.length - end} more lines — call read again with offset=${end + 1}]`
+          ? `\n... [${lines.length - end} more lines${
+              charClamped ? ` — output clamped at ~${MAX_READ_CHARS} chars` : ""
+            } — call read again with offset=${end + 1}]`
           : "";
       return {
         status: "success",
@@ -93,7 +111,7 @@ export function readTool(workspace: string): SummaryTool<{
         renderData: {
           path: relPath(workspace, abs),
           lines: lines.length,
-          shown: slice.length,
+          shown: numberedLines.length,
           start: start + 1,
         },
       };

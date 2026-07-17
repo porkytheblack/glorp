@@ -26,6 +26,7 @@ import {
   writeTool,
 } from "./index.ts";
 import { deliverResultTool, reportProgressTool } from "./task.ts";
+import { withResultClamp } from "./result-clamp.ts";
 import type { TaskSink } from "../task-sink.ts";
 
 export const MAIN_AGENT_TOOLS = [
@@ -133,7 +134,7 @@ export function registerTools<T extends { fold<I>(args: GloveFoldArgs<I>): T }>(
 ): T {
   for (const name of names) {
     const factory = registry[name as ToolName];
-    if (factory) glove.fold(factory());
+    if (factory) glove.fold(withResultClamp(factory()));
   }
   return glove;
 }

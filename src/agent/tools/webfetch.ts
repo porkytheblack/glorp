@@ -3,6 +3,9 @@ import { compactText } from "./summaries.ts";
 import type { SummaryTool } from "./summaries.ts";
 
 const MAX_BYTES = 512 * 1024;
+// A 512 KB body is ~128k tokens — enough to flood most context windows on its
+// own. Cap the text handed to the model far below the fetch cap.
+const MAX_TEXT_CHARS = 100_000;
 
 interface WebFetchSummaryArgs {
   url: string;
@@ -59,22 +62,28 @@ export const webFetchTool: SummaryTool<{
         truncated ? buf.slice(0, MAX_BYTES) : buf,
       );
       const out = (input.mode ?? "text") === "raw" ? body : stripTags(body);
+      const clamped = out.length > MAX_TEXT_CHARS;
+      const text = clamped ? out.slice(0, MAX_TEXT_CHARS) : out;
+      const notes = [
+        truncated ? `\n... [fetch truncated at ${MAX_BYTES} bytes]` : "",
+        clamped ? `\n... [output clamped at ${MAX_TEXT_CHARS} of ${out.length} chars]` : "",
+      ].join("");
       return {
         status: "success",
-        data: out + (truncated ? `\n... [truncated at ${MAX_BYTES} bytes]` : ""),
+        data: text + notes,
         generateSummaryArgs: {
           url: input.url,
           mode: input.mode ?? "text",
           contentType: res.headers.get("content-type"),
           bytes: buf.byteLength,
-          truncated,
-          preview: compactText(out, 24, 4000),
+          truncated: truncated || clamped,
+          preview: compactText(text, 24, 4000),
         } satisfies WebFetchSummaryArgs,
         renderData: {
           url: input.url,
           contentType: res.headers.get("content-type"),
           bytes: buf.byteLength,
-          truncated,
+          truncated: truncated || clamped,
         },
       };
     } catch (err: any) {
