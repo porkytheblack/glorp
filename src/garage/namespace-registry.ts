@@ -7,12 +7,14 @@
  * single-tenant Garage into a multi-tenant one.
  */
 
+import * as path from "node:path";
 import { SessionManager } from "./manager.ts";
 import { WorkspaceStore } from "./workspace-store.ts";
 import { TaskStore } from "./task-store.ts";
 import { NamespaceCredentialsStore } from "./credentials.ts";
 import { buildRouteGroups, type RouteGroups } from "./route-groups.ts";
 import { provision, type ProvisionContext } from "./templates/engine.ts";
+import { namespaceTemplateSource } from "./templates/namespace-source.ts";
 import { TemplateError } from "./templates/types.ts";
 import { selectNamespaceId } from "./auth/middleware.ts";
 import { gitTokenSourceFor } from "./git-tokens.ts";
@@ -51,6 +53,7 @@ export class NamespaceRegistry {
   constructor(
     private readonly store: NamespaceStore,
     private readonly config: GarageConfig,
+    /** The garage-global catalog; every namespace inherits it (see build()). */
     private readonly templates: TemplateSource,
     /** Garage-default credentials, shared as the fallback for every namespace. */
     private readonly garageCredentials: CredentialsStore,
@@ -109,6 +112,14 @@ export class NamespaceRegistry {
   private build(ns: Namespace): NamespaceBundle {
     const workspaces = new WorkspaceStore(ns.dataDir);
     const tasks = new TaskStore(ns.dataDir);
+    // A tenant's own templates (under its data subtree) layered over the garage
+    // catalog — inherit-and-override. The default namespace owns the garage
+    // library directly (tenantDir null), so its behavior is unchanged.
+    const nsTemplates = namespaceTemplateSource(
+      this.store.isDefault(ns.id) ? null : path.join(ns.dataDir, "templates"),
+      this.templates,
+      this.config.templatesDir,
+    );
     // The default namespace shares the garage credentials instance outright so
     // its writes and the tenant fallback reads never see a stale in-memory copy.
     const credentials: CredentialsStore = this.store.isDefault(ns.id)
@@ -127,12 +138,17 @@ export class NamespaceRegistry {
       // the default namespace keeps the operator's attach-any-host-path power.
       confineWorkspaces: !this.store.isDefault(ns.id),
       templates: {
-        has: (name) => this.templates.has(name),
+        has: (name) => nsTemplates.has(name),
         provision: async (name, params, workspace) => {
-          const template = await this.templates.get(name);
+          const resolved = await nsTemplates.resolve(name);
           // has() raced a registry change — surface it as a template error.
-          if (!template) throw new TemplateError(`Unknown template: ${name}`);
-          return provision(template, params, workspace, this.provisionCtx);
+          if (!resolved) throw new TemplateError(`Unknown template: ${name}`);
+          // Resolve the template's bundled `skill.from` sources under the dir it
+          // actually came from (the tenant's, or the garage's for an inherited one).
+          return provision(resolved.template, params, workspace, {
+            ...this.provisionCtx,
+            templatesDir: resolved.templatesDir,
+          });
         },
       },
     });
@@ -142,7 +158,7 @@ export class NamespaceRegistry {
       workspaces,
       tasks,
       credentials,
-      routes: buildRouteGroups(manager, this.config, credentials, ns.id, tasks, this.templates, this.uploadsSync),
+      routes: buildRouteGroups(manager, this.config, credentials, ns.id, tasks, nsTemplates, this.uploadsSync),
     };
   }
 }

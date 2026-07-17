@@ -295,6 +295,15 @@ Requests with no namespace resolve to the built-in `default` namespace (the lega
 single-tenant layout) — existing setups keep working unchanged. Each namespace can
 hold its own model credentials, falling back to the garage's defaults when unset.
 
+**Per-namespace template libraries.** Beyond the garage-global catalog in
+`<dataDir>/templates/`, an operator can drop templates under a namespace's own subtree
+(`<dataDir>/namespaces/<id>/templates/*.json`). Resolution is **inherit-and-override**:
+the namespace sees every garage template plus its own, and a same-named tenant template
+wins. So a tenant's `GET /templates`, `/templates/:name`, and `/tasks/types` all reflect
+*its* effective catalog — it can offer task/setup types no one else has, or shadow a
+shared one, without touching the global library. A namespace with no `templates/` dir
+just inherits the garage catalog unchanged.
+
 ---
 
 ## MCP server (for MCP-capable agents)

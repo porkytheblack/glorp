@@ -11,6 +11,7 @@ import type { CredentialsStore } from "../agent/credentials.ts";
 import type { UploadsSync } from "./storage/types.ts";
 import type { TaskStore } from "./task-store.ts";
 import type { TemplateSource } from "./templates/source.ts";
+import { templateRoutes } from "./routes/templates.ts";
 import { taskRoutes } from "./routes/tasks.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
 import { workspaceRoutes } from "./routes/workspaces.ts";
@@ -36,6 +37,8 @@ export interface RouteGroups {
   inputs: ReturnType<typeof fileRoutes>;
   tasks: ReturnType<typeof taskRoutes>;
   usage: ReturnType<typeof usageRoutes>;
+  /** Template browse — the namespace's catalog (its own + inherited garage). */
+  templates: ReturnType<typeof templateRoutes>;
 }
 
 /** Build the per-namespace route groups for one bundle's manager + credentials. */
@@ -62,5 +65,6 @@ export function buildRouteGroups(
     inputs: fileRoutes(manager, config, nsId, undefined, "inputs"),
     tasks: taskRoutes(manager, config, tasks, templates),
     usage: usageRoutes(manager, nsId),
+    templates: templateRoutes(templates),
   };
 }
